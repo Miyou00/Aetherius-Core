@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.2 - Bug Fixed]"
+title.Text = "⚡ Aetherius Core [v5.3 - Smart Arg Interpreter]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -437,6 +437,34 @@ local function shouldIgnoreRemote(remotePath)
     return false
 end
 
+-- Smart Interpretive Formatter for Argument Values
+local function interpretValue(val)
+    local t = typeof(val)
+    if t == "string" then
+        return string.format('"%s"', val)
+    elseif t == "Instance" then
+        return string.format("[Instance: %s (%s)]", val.Name, val.ClassName)
+    elseif t == "table" then
+        local parts = {}
+        local count = 0
+        for k, v in pairs(val) do
+            count = count + 1
+            if count > 5 then
+                table.insert(parts, "...")
+                break
+            end
+            table.insert(parts, string.format("%s=%s", tostring(k), tostring(v)))
+        end
+        return "{" .. table.concat(parts, ", ") .. "}"
+    elseif t == "Vector3" then
+        return string.format("Vector3(%.1f, %.1f, %.1f)", val.X, val.Y, val.Z)
+    elseif t == "CFrame" then
+        return string.format("CFrame(%.1f, %.1f, %.1f)", val.Position.X, val.Position.Y, val.Position.Z)
+    else
+        return tostring(val)
+    end
+end
+
 local function serializeValue(val, depth)
     depth = depth or 0
     if depth > 3 then return "{... Max Depth}" end
@@ -655,17 +683,16 @@ function redrawAutoTab()
                 activeConfigSig = sig
                 panelHeader.Text = string.format("Configuring:\n[%s] (%s)", action.name, action.method)
                 
-                -- Dynamically bind config panel to THIS script's captured arguments
+                -- Dynamically bind config panel to THIS script's captured arguments using the interpreter
                 local queueData = ActiveSchedulerQueue[sig]
                 local isLooping = queueData and queueData.enabled or false
                 
-                -- FIXED SYNTAX BUG HERE (replaced ':' with 'and / or')
                 configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
                 configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 
                 if action.args and #action.args > 0 then
                     local currentVal = queueData and queueData.overrides and queueData.overrides[1] or action.args[1]
-                    configArg1Btn.Text = "Arg #1: " .. tostring(currentVal)
+                    configArg1Btn.Text = "Arg #1: " .. interpretValue(currentVal)
                     configArg1Btn.Visible = true
                 else
                     configArg1Btn.Text = "Arg #1: [No Arguments Captured]"
@@ -710,7 +737,7 @@ configArg1Btn.MouseButton1Click:Connect(function()
         queueData.overrides[1] = originalVal
     end
     
-    configArg1Btn.Text = "Arg #1: " .. tostring(queueData.overrides[1])
+    configArg1Btn.Text = "Arg #1: " .. interpretValue(queueData.overrides[1])
 end)
 
 configLoopBtn.MouseButton1Click:Connect(function()
