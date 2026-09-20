@@ -10,7 +10,7 @@ _G.IgnoreAutoHooks = false
 -- Profile Configuration
 local PROFILE_FILENAME = "AetheriusCore_Profile_" .. game.PlaceId .. ".json"
 
--- Cleanup existing GUI instances
+-- Cleanup existing GUI instances safely
 pcall(function()
     local old = player.PlayerGui:FindFirstChild("AetheriusCoreEngine")
     if old then old:Destroy() end
@@ -70,6 +70,19 @@ closeBtn.Parent = bar
 local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 3)
 closeCorner.Parent = closeBtn
+
+-- Forward declare hook variable for safe cleanup
+local originalNamecall
+
+-- Guaranteed Close Binding (Registered early to prevent lockups)
+closeBtn.MouseButton1Click:Connect(function()
+    pcall(function()
+        if originalNamecall and hookmetamethod then
+            hookmetamethod(game, "__namecall", originalNamecall)
+        end
+    end)
+    gui:Destroy()
+end)
 
 -- Navigation Tab Buttons
 local function createTab(text, xPos, width)
@@ -296,7 +309,7 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
--- Core Dynamic Client Data Scanner (Scrapes replicated tables/configs)
+-- Core Dynamic Client Data Scanner
 local function scanClientDataTables()
     local scannedOptions = {}
     pcall(function()
@@ -337,7 +350,7 @@ end
 
 local function sanitizeArguments(args, customOverrides)
     if not customOverrides or next(customOverrides) == nil then
-        return args -- Optimization: Avoid allocating new table if no overrides exist
+        return args
     end
     local sanitized = {}
     for i, arg in ipairs(args) do
@@ -422,7 +435,7 @@ local function classifySignature(args)
     return "GenericAction"
 end
 
--- Centralized CPU-Optimized Scheduler Engine with Modular Filters
+-- Centralized CPU-Optimized Scheduler Engine
 local function startCentralizedScheduler()
     if SchedulerRunning then return end
     SchedulerRunning = true
@@ -446,7 +459,6 @@ local function startCentralizedScheduler()
                             local char = player.Character
                             local hrp = char and char:FindFirstChild("HumanoidRootPart")
                             if taskData.cframe and hrp then
-                                -- Fixed potential bug: Ensure we use CFrame handling properly
                                 local targetCF = typeof(taskData.cframe) == "CFrame" and taskData.cframe or CFrame.new()
                                 if (hrp.Position - targetCF.Position).Magnitude > 8 then
                                     hrp.CFrame = targetCF
@@ -513,6 +525,8 @@ local function exportProfileToJSON()
     end
 end
 
+local redrawAutoTab -- Forward declaration
+
 local function importProfileFromJSON()
     if readfile then
         local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
@@ -534,8 +548,7 @@ local function importProfileFromJSON()
                         category = data.category
                     }
                 end
-                redrawAutoTab = redrawAutoTab or function() end
-                redrawAutoTab()
+                if redrawAutoTab then redrawAutoTab() end
                 safeCopy("Loaded", loadDnaBtn, "Loaded DNA!")
                 return
             end
@@ -656,7 +669,6 @@ function redrawAutoTab()
                 isExpanded = not isExpanded
                 drawer.Visible = isExpanded
                 card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
-                -- Fixed bug: Changed JS-style `:` ternary to Lua `and ... or ...`
                 expandBtn.Text = isExpanded and "Configure ▲" or "Configure ▼"
             end)
 
@@ -771,7 +783,6 @@ local function captureLog(self, method, args)
 end
 
 -- Metatable Hooking Engine with Cloaking
-local originalNamecall
 if hookmetamethod and newcclosure then
     pcall(function()
         originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
@@ -827,7 +838,6 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        -- Fixed bug: Changed JavaScript `let delta` to Lua `local delta`
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
@@ -837,12 +847,4 @@ UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
     end
-end)
-
-closeBtn.MouseButton1Click:Connect(function()
-    SchedulerRunning = false
-    if originalNamecall and hookmetamethod then
-        pcall(function() hookmetamethod(game, "__namecall", originalNamecall) end)
-    end
-    gui:Destroy()
 end)
