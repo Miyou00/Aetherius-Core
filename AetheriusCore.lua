@@ -296,7 +296,7 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
--- Core Dynamic Client Data Scanner
+-- Core Dynamic Client Data Scanner (Scrapes replicated tables/configs)
 local function scanClientDataTables()
     local scannedOptions = {}
     pcall(function()
@@ -338,6 +338,7 @@ end
 local function sanitizeArguments(args, customOverrides)
     local sanitized = {}
     for i, arg in ipairs(args) do
+        -- Check if custom panel override exists for this argument slot
         if customOverrides and customOverrides[i] then
             table.insert(sanitized, customOverrides[i])
         elseif type(arg) == "table" then
@@ -419,7 +420,7 @@ local function classifySignature(args)
     return "GenericAction"
 end
 
--- Centralized CPU-Optimized Scheduler Engine
+-- Centralized CPU-Optimized Scheduler Engine with Modular Filters
 local function startCentralizedScheduler()
     if SchedulerRunning then return end
     SchedulerRunning = true
@@ -431,6 +432,7 @@ local function startCentralizedScheduler()
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                     if remoteInst then
+                        -- Check conditional filter rule if set
                         local shouldSkip = false
                         if taskData.filterRule and taskData.filterRule.enabled then
                             local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or taskData.args[taskData.filterRule.argIndex]
@@ -544,6 +546,22 @@ local function importProfileFromJSON()
     safeCopy("None", loadDnaBtn, "No Profile")
 end
 
+local function previewWaypoint(cframe)
+    if not cframe then return end
+    pcall(function()
+        local marker = Instance.new("Part")
+        marker.Size = Vector3.new(2, 4, 2)
+        marker.Position = cframe.Position + Vector3.new(0, 2, 0)
+        marker.Anchored = true
+        marker.CanCollide = false
+        marker.Transparency = 0.4
+        marker.Color = Color3.fromRGB(100, 255, 150)
+        marker.Material = Enum.Material.Neon
+        marker.Parent = workspace
+        task.delay(3, function() if marker then marker:Destroy() end end)
+    end)
+end
+
 -- Modular Expandable Control Panels in DNA/Auto Tab
 function redrawAutoTab()
     local count = 0
@@ -623,6 +641,7 @@ function redrawAutoTab()
             drawerLabel.TextXAlignment = Enum.TextXAlignment.Left
             drawerLabel.Parent = drawer
 
+            -- Dropdown selector box mimicking scanned client configs
             local configDropBtn = Instance.new("TextButton")
             configDropBtn.Size = UDim2.new(1, 0, 0, 18)
             configDropBtn.Position = UDim2.fromOffset(0, 16)
@@ -656,7 +675,8 @@ function redrawAutoTab()
                 isExpanded = not isExpanded
                 drawer.Visible = isExpanded
                 card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
-                expandBtn.Text = isExpanded and "Configure ▲" or "Configure ▼"
+                expandBtn.Text = isExpanded and "Configure ▲" : "Configure ▼"
+                autoLayout:GetPropertyChangedSignal("AbsoluteContentSize") -- refresh layout
             end)
 
             local isLooping = false
@@ -699,11 +719,6 @@ local function processLearnedRemote(self, method, args, callingScript, currentCF
         entry.args = args
         if currentCFrame then entry.cframe = currentCFrame end
     else
-        -- Memory Cap Check: Prevent unbounded bloat
-        local cardCount = 0
-        for _ in pairs(learnedActions) do cardCount = cardCount + 1 end
-        if cardCount >= 40 then return end
-
         learnedActions[signature] = {
             signature = signature,
             name = self.Name,
@@ -831,7 +846,7 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
+        let delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
