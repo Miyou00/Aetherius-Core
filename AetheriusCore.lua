@@ -2,7 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-local player = Players.LocalPlayer
+local player = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
 
 -- Global Hook Bypass Switch
 _G.IgnoreAutoHooks = false
@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.0 - Cognitive Modular Engine]"
+title.Text = "⚡ Aetherius Core [v5.0 - Instant Recovery Mode]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -73,9 +73,11 @@ closeCorner.Parent = closeBtn
 
 -- Forward declare hook variable for safe cleanup
 local originalNamecall
+local SchedulerRunning = false
 
--- Guaranteed Close Binding (Registered early to prevent lockups)
+-- Guaranteed Close Binding (Registered instantly)
 closeBtn.MouseButton1Click:Connect(function()
+    SchedulerRunning = false
     pcall(function()
         if originalNamecall and hookmetamethod then
             hookmetamethod(game, "__namecall", originalNamecall)
@@ -309,10 +311,11 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
--- Core Dynamic Client Data Scanner
-local function scanClientDataTables()
-    local scannedOptions = {}
+-- Non-blocking Background Client Data Scanner
+local availableClientConfigs = {"DefaultItem", "CommonEgg", "RareEgg", "EpicEgg", "LegendaryEgg"}
+task.spawn(function()
     pcall(function()
+        local scannedOptions = {}
         for _, child in ipairs(ReplicatedStorage:GetDescendants()) do
             if child:IsA("ModuleScript") then
                 local ok, data = pcall(require, child)
@@ -325,13 +328,13 @@ local function scanClientDataTables()
                 end
             end
         end
+        if #scannedOptions > 0 then
+            availableClientConfigs = scannedOptions
+        end
     end)
-    return #scannedOptions > 0 and scannedOptions or {"DefaultItem", "CommonEgg", "RareEgg", "EpicEgg", "LegendaryEgg"}
-end
+end)
 
-local availableClientConfigs = scanClientDataTables()
-
--- Hardened Core Functions: Dynamic Resolution & Sanitization
+-- Core Functions
 local function resolveRemote(remoteName, fallbackPath)
     local found = ReplicatedStorage:FindFirstChild(remoteName, true) 
         or workspace:FindFirstChild(remoteName, true)
@@ -375,11 +378,9 @@ local function sanitizeArguments(args, customOverrides)
     return sanitized
 end
 
--- Metamorphic State & Heuristic Database
 local learnedActions = {}
 local actionCards = {}
 local ActiveSchedulerQueue = {}
-local SchedulerRunning = false
 
 local ignoredRemotePatterns = { "Analytics", "ClientKit", "Telemetry", "Fps", "Ping", "Heartbeat" }
 
@@ -435,7 +436,7 @@ local function classifySignature(args)
     return "GenericAction"
 end
 
--- Centralized CPU-Optimized Scheduler Engine
+-- Centralized Scheduler
 local function startCentralizedScheduler()
     if SchedulerRunning then return end
     SchedulerRunning = true
@@ -444,6 +445,7 @@ local function startCentralizedScheduler()
         local actionCycleCount = 0
         while SchedulerRunning do
             for signature, taskData in pairs(ActiveSchedulerQueue) do
+                if not SchedulerRunning then break end
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                     if remoteInst then
@@ -502,7 +504,7 @@ local function startCentralizedScheduler()
 end
 startCentralizedScheduler()
 
--- JSON Profile Serialization Management
+-- JSON Profile Serialization
 local function exportProfileToJSON()
     local exportTable = {}
     for sig, action in pairs(learnedActions) do
@@ -557,7 +559,6 @@ local function importProfileFromJSON()
     safeCopy("None", loadDnaBtn, "No Profile")
 end
 
--- Modular Expandable Control Panels in DNA/Auto Tab
 function redrawAutoTab()
     local count = 0
     for _ in pairs(learnedActions) do count = count + 1 end
@@ -618,7 +619,6 @@ function redrawAutoTab()
             loopCorner.CornerRadius = UDim.new(0, 3)
             loopCorner.Parent = loopBtn
 
-            -- Expandable Drawer Content Container
             local drawer = Instance.new("Frame")
             drawer.Size = UDim2.new(1, -8, 0, 65)
             drawer.Position = UDim2.fromOffset(4, 52)
@@ -782,7 +782,6 @@ local function captureLog(self, method, args)
     redrawLogs()
 end
 
--- Metatable Hooking Engine with Cloaking
 if hookmetamethod and newcclosure then
     pcall(function()
         originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
@@ -826,7 +825,7 @@ exportBtn.MouseButton1Click:Connect(function()
     safeCopy(table.concat(snippets, "\n"), exportBtn, "Copied!")
 end)
 
--- Window Dragging & Cleanup
+-- Window Dragging
 local dragging, dragStart, startPos
 bar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
