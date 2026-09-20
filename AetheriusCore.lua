@@ -1,32 +1,18 @@
--- =====================================================================
--- AETHERIUS CORE v5.1: ROBUST COGNITIVE ENGINE (FAIL-SAFE STARTUP)
--- =====================================================================
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-
--- Safely resolve LocalPlayer with a yield safeguard
 local player = Players.LocalPlayer
-while not player do
-    Players.PlayerAdded:Wait()
-    player = Players.LocalPlayer
-end
-
-local playerGui = player:WaitForChild("PlayerGui", 5)
-if not playerGui then
-    warn("[Aetherius Core] PlayerGui not found!")
-    return
-end
 
 -- Global Hook Bypass Switch
 _G.IgnoreAutoHooks = false
+
+-- Profile Configuration
 local PROFILE_FILENAME = "AetheriusCore_Profile_" .. game.PlaceId .. ".json"
 
--- Cleanup existing GUI instances safely
+-- Cleanup existing GUI instances
 pcall(function()
-    local old = playerGui:FindFirstChild("AetheriusCoreEngine")
+    local old = player.PlayerGui:FindFirstChild("AetheriusCoreEngine")
     if old then old:Destroy() end
 end)
 
@@ -35,7 +21,7 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "AetheriusCoreEngine"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 999999
-gui.Parent = playerGui
+gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
 frame.Size = UDim2.fromOffset(364, 280)
@@ -63,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.1 - Fail-Safe Engine]"
+title.Text = "⚡ Aetherius Core [v5.0 - Cognitive Modular Engine]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -207,7 +193,7 @@ local function createOutput(parent, color)
 end
 
 local output = createOutput(scroll, Color3.fromRGB(100, 255, 120))
-output.Text = "Spy active (Fail-Safe Mode). Tap logs to inspect.\n\n"
+output.Text = "Spy active (Cognitive Engine Mode). Tap logs to inspect.\n\n"
 
 local macroOutput = createOutput(macroScroll, Color3.fromRGB(255, 180, 100))
 macroOutput.Text = "Macro Recorder Standby.\n\n"
@@ -259,15 +245,21 @@ local loadDnaBtn = createButton(autoFooter, "Load DNA", 65, 71, Color3.fromRGB(4
 local clearAutoBtn = createButton(autoFooter, "Reset", 50, 139, Color3.fromRGB(70, 30, 30))
 
 local function safeCopy(str, button, successMsg)
-    pcall(function()
-        if setclipboard then
-            setclipboard(str)
+    if setclipboard then
+        local ok = pcall(setclipboard, str)
+        if ok then
             local origText = button.Text
             button.Text = successMsg or "Copied!"
             task.delay(2, function()
                 if button.Parent then button.Text = origText end
             end)
+            return
         end
+    end
+    local origText = button.Text
+    button.Text = "Error"
+    task.delay(2, function()
+        if button.Parent then button.Text = origText end
     end)
 end
 
@@ -304,7 +296,7 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
--- Scan Client Config Tables Safely
+-- Core Dynamic Client Data Scanner (Scrapes replicated tables/configs)
 local function scanClientDataTables()
     local scannedOptions = {}
     pcall(function()
@@ -326,6 +318,7 @@ end
 
 local availableClientConfigs = scanClientDataTables()
 
+-- Hardened Core Functions: Dynamic Resolution & Sanitization
 local function resolveRemote(remoteName, fallbackPath)
     local found = ReplicatedStorage:FindFirstChild(remoteName, true) 
         or workspace:FindFirstChild(remoteName, true)
@@ -345,6 +338,7 @@ end
 local function sanitizeArguments(args, customOverrides)
     local sanitized = {}
     for i, arg in ipairs(args) do
+        -- Check if custom panel override exists for this argument slot
         if customOverrides and customOverrides[i] then
             table.insert(sanitized, customOverrides[i])
         elseif type(arg) == "table" then
@@ -366,6 +360,7 @@ local function sanitizeArguments(args, customOverrides)
     return sanitized
 end
 
+-- Metamorphic State & Heuristic Database
 local learnedActions = {}
 local actionCards = {}
 local ActiveSchedulerQueue = {}
@@ -425,7 +420,7 @@ local function classifySignature(args)
     return "GenericAction"
 end
 
--- Centralized Scheduler Loop
+-- Centralized CPU-Optimized Scheduler Engine with Modular Filters
 local function startCentralizedScheduler()
     if SchedulerRunning then return end
     SchedulerRunning = true
@@ -437,32 +432,51 @@ local function startCentralizedScheduler()
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                     if remoteInst then
-                        local char = player.Character
-                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                        if taskData.cframe and hrp then
-                            if (hrp.Position - taskData.cframe.Position).Magnitude > 8 then
-                                hrp.CFrame = taskData.cframe
-                                task.wait(0.05)
+                        -- Check conditional filter rule if set
+                        local shouldSkip = false
+                        if taskData.filterRule and taskData.filterRule.enabled then
+                            local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or taskData.args[taskData.filterRule.argIndex]
+                            if val and tostring(val) ~= taskData.filterRule.targetVal then
+                                shouldSkip = true
                             end
                         end
 
-                        _G.IgnoreAutoHooks = true
-                        local liveArgs = sanitizeArguments(taskData.args, taskData.overrides)
-                        pcall(function()
-                            if remoteInst:IsA("RemoteEvent") then
-                                remoteInst:FireServer(unpack(liveArgs))
-                            elseif remoteInst:IsA("RemoteFunction") then
-                                remoteInst:InvokeServer(unpack(liveArgs))
+                        if not shouldSkip then
+                            local char = player.Character
+                            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                            if taskData.cframe and hrp then
+                                if (hrp.Position - taskData.cframe.Position).Magnitude > 8 then
+                                    hrp.CFrame = taskData.cframe
+                                    task.wait(0.05)
+                                end
                             end
-                        end)
-                        _G.IgnoreAutoHooks = false
 
-                        actionCycleCount = actionCycleCount + 1
-                        if actionCycleCount >= 25 then
-                            actionCycleCount = 0
-                            task.wait(math.random(3.5, 7.0))
-                        else
-                            task.wait(0.65 + (math.random() * 0.25))
+                            _G.IgnoreAutoHooks = true
+                            local liveArgs = sanitizeArguments(taskData.args, taskData.overrides)
+                            local ok = pcall(function()
+                                if remoteInst:IsA("RemoteEvent") then
+                                    remoteInst:FireServer(unpack(liveArgs))
+                                elseif remoteInst:IsA("RemoteFunction") then
+                                    remoteInst:InvokeServer(unpack(liveArgs))
+                                end
+                            end)
+                            _G.IgnoreAutoHooks = false
+
+                            if not ok then
+                                taskData.errors = (taskData.errors or 0) + 1
+                                task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
+                            else
+                                taskData.errors = 0
+                                actionCycleCount = actionCycleCount + 1
+                                
+                                if actionCycleCount >= 25 then
+                                    actionCycleCount = 0
+                                    task.wait(math.random(3.5, 7.0))
+                                else
+                                    local jitter = math.random() * 0.25 + (math.random() * 0.1)
+                                    task.wait(0.65 + jitter)
+                                end
+                            end
                         end
                     end
                 end
@@ -473,40 +487,47 @@ local function startCentralizedScheduler()
 end
 startCentralizedScheduler()
 
--- JSON Profile Handling
+-- JSON Profile Serialization Management
 local function exportProfileToJSON()
-    pcall(function()
-        local exportTable = {}
-        for sig, action in pairs(learnedActions) do
-            exportTable[sig] = {
-                signature = action.signature,
-                name = action.name,
-                fullPath = action.fullPath,
-                method = action.method,
-                category = action.category,
-                count = action.count,
-                cframePos = action.cframe and {action.cframe.Position.X, action.cframe.Position.Y, action.cframe.Position.Z} or nil
-            }
-        end
-        if writefile then
-            writefile(PROFILE_FILENAME, HttpService:JSONEncode(exportTable))
-            safeCopy(PROFILE_FILENAME, saveDnaBtn, "Saved DNA!")
-        end
-    end)
+    local exportTable = {}
+    for sig, action in pairs(learnedActions) do
+        exportTable[sig] = {
+            signature = action.signature,
+            name = action.name,
+            fullPath = action.fullPath,
+            method = action.method,
+            category = action.category,
+            count = action.count,
+            cframePos = action.cframe and {action.cframe.Position.X, action.cframe.Position.Y, action.cframe.Position.Z} or nil
+        }
+    end
+    local success, encoded = pcall(function() return HttpService:JSONEncode(exportTable) end)
+    if success and writefile then
+        writefile(PROFILE_FILENAME, encoded)
+        safeCopy(PROFILE_FILENAME, saveDnaBtn, "Saved DNA!")
+    else
+        safeCopy("Error", saveDnaBtn, "Failed")
+    end
 end
 
 local function importProfileFromJSON()
-    pcall(function()
-        if readfile and listfiles then
-            for _, file in ipairs(listfiles("")) do
-                if file:match(PROFILE_FILENAME) then
-                    local raw = readfile(PROFILE_FILENAME)
-                    local decoded = HttpService:JSONDecode(raw)
+    if readfile and listfiles then
+        local found = false
+        for _, file in ipairs(listfiles("")) do
+            if file:match(PROFILE_FILENAME) then found = true break end
+        end
+        if found then
+            local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
+            if ok then
+                local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+                if decodedOk and type(decoded) == "table" then
                     for sig, data in pairs(decoded) do
+                        local targetInstance = resolveRemote(data.name, data.fullPath)
+                        
                         learnedActions[sig] = {
                             signature = data.signature,
                             name = data.name,
-                            instance = resolveRemote(data.name, data.fullPath),
+                            instance = targetInstance,
                             fullPath = data.fullPath,
                             method = data.method,
                             args = {},
@@ -521,178 +542,173 @@ local function importProfileFromJSON()
                 end
             end
         end
-    end)
+    end
+    safeCopy("None", loadDnaBtn, "No Profile")
 end
 
--- UI Redraw function for DNA/Cognitive tab
-function redrawAutoTab()
+local function previewWaypoint(cframe)
+    if not cframe then return end
     pcall(function()
-        local count = 0
-        for _ in pairs(learnedActions) do count = count + 1 end
-        autoEmptyText.Visible = (count == 0)
-
-        for sig, action in pairs(learnedActions) do
-            if not actionCards[sig] then
-                local card = Instance.new("Frame")
-                card.Size = UDim2.new(1, -8, 0, 52)
-                card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-                card.BorderSizePixel = 0
-                card.ClipsDescendants = true
-                card.Parent = autoScroll
-
-                local cardCorner = Instance.new("UICorner")
-                cardCorner.CornerRadius = UDim.new(0, 4)
-                cardCorner.Parent = card
-
-                local label = Instance.new("TextLabel")
-                label.Size = UDim2.new(1, -75, 0, 46)
-                label.Position = UDim2.fromOffset(4, 2)
-                label.BackgroundTransparency = 1
-                label.TextColor3 = Color3.fromRGB(220, 220, 230)
-                label.TextSize = 7
-                label.Font = Enum.Font.Code
-                label.TextXAlignment = Enum.TextXAlignment.Left
-                label.TextYAlignment = Enum.TextYAlignment.Top
-                label.TextWrapped = true
-                label.Parent = card
-
-                local expandBtn = Instance.new("TextButton")
-                expandBtn.Size = UDim2.fromOffset(65, 16)
-                expandBtn.Position = UDim2.new(1, -69, 0, 4)
-                expandBtn.Text = "Configure ▼"
-                expandBtn.TextColor3 = Color3.new(1, 1, 1)
-                expandBtn.TextSize = 6
-                expandBtn.Font = Enum.Font.Code
-                expandBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-                expandBtn.BorderSizePixel = 0
-                expandBtn.Parent = card
-
-                local expandCorner = Instance.new("UICorner")
-                expandCorner.CornerRadius = UDim.new(0, 3)
-                expandCorner.Parent = expandBtn
-
-                local loopBtn = Instance.new("TextButton")
-                loopBtn.Size = UDim2.fromOffset(65, 16)
-                loopBtn.Position = UDim2.new(1, -69, 0, 24)
-                loopBtn.Text = "Loop: OFF"
-                loopBtn.TextColor3 = Color3.new(1, 1, 1)
-                loopBtn.TextSize = 6
-                loopBtn.Font = Enum.Font.Code
-                loopBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-                loopBtn.BorderSizePixel = 0
-                loopBtn.Parent = card
-
-                local loopCorner = Instance.new("UICorner")
-                loopCorner.CornerRadius = UDim.new(0, 3)
-                loopCorner.Parent = loopBtn
-
-                local drawer = Instance.new("Frame")
-                drawer.Size = UDim2.new(1, -8, 0, 65)
-                drawer.Position = UDim2.fromOffset(4, 52)
-                drawer.BackgroundTransparency = 1
-                drawer.Visible = false
-                drawer.Parent = card
-
-                local drawerLabel = Instance.new("TextLabel")
-                drawerLabel.Size = UDim2.new(1, 0, 0, 14)
-                drawerLabel.BackgroundTransparency = 1
-                drawerLabel.Text = "--- Scanned Config / Argument Override ---"
-                drawerLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
-                drawerLabel.TextSize = 6
-                drawerLabel.Font = Enum.Font.Code
-                drawerLabel.TextXAlignment = Enum.TextXAlignment.Left
-                drawerLabel.Parent = drawer
-
-                local configDropBtn = Instance.new("TextButton")
-                configDropBtn.Size = UDim2.new(1, 0, 0, 18)
-                configDropBtn.Position = UDim2.fromOffset(0, 16)
-                configDropBtn.Text = "Arg 1 Target: [Default / Scanned]"
-                configDropBtn.TextColor3 = Color3.new(1, 1, 1)
-                configDropBtn.TextSize = 6
-                configDropBtn.Font = Enum.Font.Code
-                configDropBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-                configDropBtn.BorderSizePixel = 0
-                configDropBtn.Parent = drawer
-
-                local dropCorner = Instance.new("UICorner")
-                dropCorner.CornerRadius = UDim.new(0, 3)
-                dropCorner.Parent = configDropBtn
-
-                local configIndex = 1
-                configDropBtn.MouseButton1Click:Connect(function()
-                    configIndex = (configIndex % #availableClientConfigs) + 1
-                    local selectedVal = availableClientConfigs[configIndex]
-                    configDropBtn.Text = "Arg 1 Target: " .. tostring(selectedVal)
-                    
-                    if not ActiveSchedulerQueue[sig] then
-                        ActiveSchedulerQueue[sig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
-                    end
-                    ActiveSchedulerQueue[sig].overrides = ActiveSchedulerQueue[sig].overrides or {}
-                    ActiveSchedulerQueue[sig].overrides[1] = selectedVal
-                end)
-
-                local isExpanded = false
-                expandBtn.MouseButton1Click:Connect(function()
-                    isExpanded = not isExpanded
-                    drawer.Visible = isExpanded
-                    card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
-                    expandBtn.Text = isExpanded and "Configure ▲" or "Configure ▼"
-                end)
-
-                local isLooping = false
-                loopBtn.MouseButton1Click:Connect(function()
-                    isLooping = not isLooping
-                    loopBtn.Text = isLooping and "Loop: ON" or "Loop: OFF"
-                    loopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
-
-                    if not ActiveSchedulerQueue[sig] then
-                        ActiveSchedulerQueue[sig] = { name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
-                    end
-                    ActiveSchedulerQueue[sig].enabled = isLooping
-                end)
-
-                actionCards[sig] = { card = card, label = label }
-            end
-
-            actionCards[sig].label.Text = string.format("⚡ [%s] (%s)\nType: %s (%dx Calls)\nPath: %s", 
-                action.name, action.method, action.category, action.count, action.fullPath)
-        end
+        local marker = Instance.new("Part")
+        marker.Size = Vector3.new(2, 4, 2)
+        marker.Position = cframe.Position + Vector3.new(0, 2, 0)
+        marker.Anchored = true
+        marker.CanCollide = false
+        marker.Transparency = 0.4
+        marker.Color = Color3.fromRGB(100, 255, 150)
+        marker.Material = Enum.Material.Neon
+        marker.Parent = workspace
+        task.delay(3, function() if marker then marker:Destroy() end end)
     end)
 end
 
--- Hook Logger
-local rawLogs = {}
-local ignoredRemotes = { ["Heartbeat"] = true, ["Ping"] = true, ["AnalyticsEvent"] = true }
-local callCooldowns = {}
-local isHookingCall = false
+-- Modular Expandable Control Panels in DNA/Auto Tab
+function redrawAutoTab()
+    local count = 0
+    for _ in pairs(learnedActions) do count = count + 1 end
+    autoEmptyText.Visible = (count == 0)
 
-local function redrawLogs()
-    local filteredDisplay = {}
-    for _, entry in ipairs(rawLogs) do table.insert(filteredDisplay, entry.text) end
-    output.Text = table.concat(filteredDisplay, "\n\n--------------------\n\n")
+    for sig, action in pairs(learnedActions) do
+        if not actionCards[sig] then
+            local card = Instance.new("Frame")
+            card.Size = UDim2.new(1, -8, 0, 52)
+            card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+            card.BorderSizePixel = 0
+            card.ClipsDescendants = true
+            card.Parent = autoScroll
+
+            local cardCorner = Instance.new("UICorner")
+            cardCorner.CornerRadius = UDim.new(0, 4)
+            cardCorner.Parent = card
+
+            local label = Instance.new("TextLabel")
+            label.Size = UDim2.new(1, -75, 0, 46)
+            label.Position = UDim2.fromOffset(4, 2)
+            label.BackgroundTransparency = 1
+            label.TextColor3 = Color3.fromRGB(220, 220, 230)
+            label.TextSize = 7
+            label.Font = Enum.Font.Code
+            label.TextXAlignment = Enum.TextXAlignment.Left
+            label.TextYAlignment = Enum.TextYAlignment.Top
+            label.TextWrapped = true
+            label.Parent = card
+
+            local expandBtn = Instance.new("TextButton")
+            expandBtn.Size = UDim2.fromOffset(65, 16)
+            expandBtn.Position = UDim2.new(1, -69, 0, 4)
+            expandBtn.Text = "Configure ▼"
+            expandBtn.TextColor3 = Color3.new(1, 1, 1)
+            expandBtn.TextSize = 6
+            expandBtn.Font = Enum.Font.Code
+            expandBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+            expandBtn.BorderSizePixel = 0
+            expandBtn.Parent = card
+
+            local expandCorner = Instance.new("UICorner")
+            expandCorner.CornerRadius = UDim.new(0, 3)
+            expandCorner.Parent = expandBtn
+
+            local loopBtn = Instance.new("TextButton")
+            loopBtn.Size = UDim2.fromOffset(65, 16)
+            loopBtn.Position = UDim2.new(1, -69, 0, 24)
+            loopBtn.Text = "Loop: OFF"
+            loopBtn.TextColor3 = Color3.new(1, 1, 1)
+            loopBtn.TextSize = 6
+            loopBtn.Font = Enum.Font.Code
+            loopBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+            loopBtn.BorderSizePixel = 0
+            loopBtn.Parent = card
+
+            local loopCorner = Instance.new("UICorner")
+            loopCorner.CornerRadius = UDim.new(0, 3)
+            loopCorner.Parent = loopBtn
+
+            -- Expandable Drawer Content Container
+            local drawer = Instance.new("Frame")
+            drawer.Size = UDim2.new(1, -8, 0, 65)
+            drawer.Position = UDim2.fromOffset(4, 52)
+            drawer.BackgroundTransparency = 1
+            drawer.Visible = false
+            drawer.Parent = card
+
+            local drawerLabel = Instance.new("TextLabel")
+            drawerLabel.Size = UDim2.new(1, 0, 0, 14)
+            drawerLabel.BackgroundTransparency = 1
+            drawerLabel.Text = "--- Scanned Config / Argument Override ---"
+            drawerLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+            drawerLabel.TextSize = 6
+            drawerLabel.Font = Enum.Font.Code
+            drawerLabel.TextXAlignment = Enum.TextXAlignment.Left
+            drawerLabel.Parent = drawer
+
+            -- Dropdown selector box mimicking scanned client configs
+            local configDropBtn = Instance.new("TextButton")
+            configDropBtn.Size = UDim2.new(1, 0, 0, 18)
+            configDropBtn.Position = UDim2.fromOffset(0, 16)
+            configDropBtn.Text = "Arg 1 Target: [Default / Scanned]"
+            configDropBtn.TextColor3 = Color3.new(1, 1, 1)
+            configDropBtn.TextSize = 6
+            configDropBtn.Font = Enum.Font.Code
+            configDropBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+            configDropBtn.BorderSizePixel = 0
+            configDropBtn.Parent = drawer
+
+            local dropCorner = Instance.new("UICorner")
+            dropCorner.CornerRadius = UDim.new(0, 3)
+            dropCorner.Parent = configDropBtn
+
+            local configIndex = 1
+            configDropBtn.MouseButton1Click:Connect(function()
+                configIndex = (configIndex % #availableClientConfigs) + 1
+                local selectedVal = availableClientConfigs[configIndex]
+                configDropBtn.Text = "Arg 1 Target: " .. tostring(selectedVal)
+                
+                if not ActiveSchedulerQueue[sig] then
+                    ActiveSchedulerQueue[sig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+                end
+                ActiveSchedulerQueue[sig].overrides = ActiveSchedulerQueue[sig].overrides or {}
+                ActiveSchedulerQueue[sig].overrides[1] = selectedVal
+            end)
+
+            local isExpanded = false
+            expandBtn.MouseButton1Click:Connect(function()
+                isExpanded = not isExpanded
+                drawer.Visible = isExpanded
+                card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
+                expandBtn.Text = isExpanded and "Configure ▲" : "Configure ▼"
+                autoLayout:GetPropertyChangedSignal("AbsoluteContentSize") -- refresh layout
+            end)
+
+            local isLooping = false
+            loopBtn.MouseButton1Click:Connect(function()
+                isLooping = not isLooping
+                loopBtn.Text = isLooping and "Loop: ON" or "Loop: OFF"
+                loopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+
+                if not ActiveSchedulerQueue[sig] then
+                    ActiveSchedulerQueue[sig] = { name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+                end
+                ActiveSchedulerQueue[sig].enabled = isLooping
+            end)
+
+            actionCards[sig] = { card = card, label = label }
+        end
+
+        actionCards[sig].label.Text = string.format("⚡ [%s] (%s)\nType: %s (%dx Calls)\nPath: %s", 
+            action.name, action.method, action.category, action.count, action.fullPath)
+    end
+
+    task.defer(function()
+        autoScroll.CanvasSize = UDim2.new(0, autoLayout.AbsoluteContentSize.X + 10, 0, autoLayout.AbsoluteContentSize.Y + 10)
+    end)
 end
 
-local function captureLog(self, method, args)
-    if _G.IgnoreAutoHooks then return end
+local function processLearnedRemote(self, method, args, callingScript, currentCFrame)
     local fullPath = "game." .. self:GetFullName()
     if shouldIgnoreRemote(fullPath) then return end
 
-    local now = tick()
-    if callCooldowns[self] and (now - callCooldowns[self]) < 0.05 then return end
-    callCooldowns[self] = now
-
-    local callingScript = nil
-    pcall(function() callingScript = getcallingscript() end)
-
-    local currentCFrame = nil
-    pcall(function()
-        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            currentCFrame = CFrame.new(player.Character.HumanoidRootPart.Position)
-        end
-    end)
-
-    -- Record to Action list
     local signature = fullPath .. ":" .. method
+    local now = tick()
     local category = classifySignature(args)
     if currentCFrame then category = "SpatialStateSequence" end
 
@@ -719,6 +735,48 @@ local function captureLog(self, method, args)
         }
     end
     redrawAutoTab()
+end
+
+saveDnaBtn.MouseButton1Click:Connect(exportProfileToJSON)
+loadDnaBtn.MouseButton1Click:Connect(importProfileFromJSON)
+
+clearAutoBtn.MouseButton1Click:Connect(function()
+    ActiveSchedulerQueue = {}
+    learnedActions = {}
+    for _, cardObj in pairs(actionCards) do cardObj.card:Destroy() end
+    actionCards = {}
+    redrawAutoTab()
+end)
+
+-- Hook Engine
+local rawLogs = {}
+local ignoredRemotes = { ["Heartbeat"] = true, ["Ping"] = true, ["AnalyticsEvent"] = true }
+local callCooldowns = {}
+local isHookingCall = false
+
+local function redrawLogs()
+    local filteredDisplay = {}
+    for _, entry in ipairs(rawLogs) do table.insert(filteredDisplay, entry.text) end
+    output.Text = table.concat(filteredDisplay, "\n\n--------------------\n\n")
+end
+
+local function captureLog(self, method, args)
+    if _G.IgnoreAutoHooks then return end
+    local fullPath = "game." .. self:GetFullName()
+    if shouldIgnoreRemote(fullPath) then return end
+
+    local now = tick()
+    if callCooldowns[self] and (now - callCooldowns[self]) < 0.05 then return end
+    callCooldowns[self] = now
+
+    local callingScript = getcallingscript and getcallingscript() or nil
+    local currentCFrame = nil
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local pos = player.Character.HumanoidRootPart.Position
+        currentCFrame = CFrame.new(pos)
+    end
+
+    processLearnedRemote(self, method, args, callingScript, currentCFrame)
 
     local serializedArgs = {}
     for _, arg in ipairs(args) do table.insert(serializedArgs, serializeValue(arg)) end
@@ -731,10 +789,10 @@ local function captureLog(self, method, args)
     redrawLogs()
 end
 
--- Metatable Hooking
-pcall(function()
-    if hookmetamethod and newcclosure then
-        local originalNamecall
+-- Metatable Hooking Engine with Cloaking
+local originalNamecall
+if hookmetamethod and newcclosure then
+    pcall(function()
         originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             if not isHookingCall and typeof(self) == "Instance" and not ignoredRemotes[self.Name] then
                 local method = getnamecallmethod()
@@ -746,18 +804,8 @@ pcall(function()
             end
             return originalNamecall(self, ...)
         end))
-    end
-end)
-
-saveDnaBtn.MouseButton1Click:Connect(exportProfileToJSON)
-loadDnaBtn.MouseButton1Click:Connect(importProfileFromJSON)
-clearAutoBtn.MouseButton1Click:Connect(function()
-    ActiveSchedulerQueue = {}
-    learnedActions = {}
-    for _, cardObj in pairs(actionCards) do cardObj.card:Destroy() end
-    actionCards = {}
-    redrawAutoTab()
-end)
+    end)
+end
 
 output.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -766,6 +814,7 @@ output.InputBegan:Connect(function(input)
             local lines = {
                 string.format("=== INTEL: %s (%s) ===", logEntry.name, logEntry.method),
                 string.format("[i] Path: %s", logEntry.fullPath or "Unknown"),
+                string.format("[i] Script: %s", logEntry.callingScript and logEntry.callingScript:GetFullName() or "Unknown"),
                 "\n[1] Arguments Captured:"
             }
             for i, arg in ipairs(logEntry.args) do
@@ -797,7 +846,7 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
+        let delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
@@ -810,5 +859,8 @@ end)
 
 closeBtn.MouseButton1Click:Connect(function()
     SchedulerRunning = false
+    if originalNamecall and hookmetamethod then
+        pcall(function() hookmetamethod(game, "__namecall", originalNamecall) end)
+    end
     gui:Destroy()
 end)
