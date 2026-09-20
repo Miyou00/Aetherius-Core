@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.0 - Dedicated Panel Mode]"
+title.Text = "⚡ Aetherius Core [v5.1 - Dynamic Script Config]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -75,7 +75,7 @@ closeCorner.Parent = closeBtn
 local originalNamecall
 local SchedulerRunning = false
 
--- Guaranteed Close Binding (Registered instantly)
+-- Guaranteed Close Binding
 closeBtn.MouseButton1Click:Connect(function()
     SchedulerRunning = false
     pcall(function()
@@ -214,20 +214,20 @@ panelHeader.TextWrapped = true
 panelHeader.Text = "Config Panel: Select a script to configure."
 panelHeader.Parent = configSubPanel
 
-local configTargetBtn = Instance.new("TextButton")
-configTargetBtn.Size = UDim2.new(1, -12, 0, 26)
-configTargetBtn.Position = UDim2.fromOffset(6, 50)
-configTargetBtn.Text = "Arg 1 Target: [Default / Scanned]"
-configTargetBtn.TextColor3 = Color3.new(1, 1, 1)
-configTargetBtn.TextSize = 7
-configTargetBtn.Font = Enum.Font.Code
-configTargetBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-configTargetBtn.BorderSizePixel = 0
-configTargetBtn.Parent = configSubPanel
+local configArg1Btn = Instance.new("TextButton")
+configArg1Btn.Size = UDim2.new(1, -12, 0, 26)
+configArg1Btn.Position = UDim2.fromOffset(6, 50)
+configArg1Btn.Text = "Argument #1: [None Captured]"
+configArg1Btn.TextColor3 = Color3.new(1, 1, 1)
+configArg1Btn.TextSize = 7
+configArg1Btn.Font = Enum.Font.Code
+configArg1Btn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+configArg1Btn.BorderSizePixel = 0
+configArg1Btn.Parent = configSubPanel
 
 local tCorner = Instance.new("UICorner")
 tCorner.CornerRadius = UDim.new(0, 4)
-tCorner.Parent = configTargetBtn
+tCorner.Parent = configArg1Btn
 
 local configLoopBtn = Instance.new("TextButton")
 configLoopBtn.Size = UDim2.new(1, -12, 0, 26)
@@ -379,29 +379,6 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
--- Non-blocking Background Client Data Scanner
-local availableClientConfigs = {"DefaultItem", "CommonEgg", "RareEgg", "EpicEgg", "LegendaryEgg"}
-task.spawn(function()
-    pcall(function()
-        local scannedOptions = {}
-        for _, child in ipairs(ReplicatedStorage:GetDescendants()) do
-            if child:IsA("ModuleScript") then
-                local ok, data = pcall(require, child)
-                if ok and type(data) == "table" then
-                    for k, v in pairs(data) do
-                        if type(k) == "string" and (type(v) == "table" or type(v) == "string") then
-                            table.insert(scannedOptions, k)
-                        end
-                    end
-                end
-            end
-        end
-        if #scannedOptions > 0 then
-            availableClientConfigs = scannedOptions
-        end
-    end)
-end)
-
 -- Core Functions
 local function resolveRemote(remoteName, fallbackPath)
     local found = ReplicatedStorage:FindFirstChild(remoteName, true) 
@@ -425,7 +402,7 @@ local function sanitizeArguments(args, customOverrides)
     end
     local sanitized = {}
     for i, arg in ipairs(args) do
-        if customOverrides and customOverrides[i] then
+        if customOverrides and customOverrides[i] ~= nil then
             table.insert(sanitized, customOverrides[i])
         elseif type(arg) == "table" then
             local newTable = {}
@@ -584,6 +561,7 @@ local function exportProfileToJSON()
             method = action.method,
             category = action.category,
             count = action.count,
+            args = action.args,
             cframePos = action.cframe and {action.cframe.Position.X, action.cframe.Position.Y, action.cframe.Position.Z} or nil
         }
     end
@@ -613,7 +591,7 @@ local function importProfileFromJSON()
                         instance = targetInstance,
                         fullPath = data.fullPath,
                         method = data.method,
-                        args = {},
+                        args = data.args or {},
                         cframe = data.cframePos and CFrame.new(table.unpack(data.cframePos)) or nil,
                         count = data.count,
                         category = data.category
@@ -677,11 +655,20 @@ function redrawAutoTab()
                 activeConfigSig = sig
                 panelHeader.Text = string.format("Configuring:\n[%s] (%s)", action.name, action.method)
                 
-                -- Sync values to sub-panel controls
+                -- Dynamically bind config panel to THIS script's captured arguments
                 local queueData = ActiveSchedulerQueue[sig]
                 local isLooping = queueData and queueData.enabled or false
-                configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
+                configLoopBtn.Text = isLooping and "Loop Execution: ON" : "Loop Execution: OFF"
                 configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+
+                if action.args and #action.args > 0 then
+                    local currentVal = queueData and queueData.overrides and queueData.overrides[1] or action.args[1]
+                    configArg1Btn.Text = "Arg #1: " .. tostring(currentVal)
+                    configArg1Btn.Visible = true
+                else
+                    configArg1Btn.Text = "Arg #1: [No Arguments Captured]"
+                    configArg1Btn.Visible = false
+                end
 
                 autoContainer.Visible = false
                 configSubPanel.Visible = true
@@ -699,20 +686,30 @@ function redrawAutoTab()
     end)
 end
 
--- Sub-panel interactive controls logic
-local configIndex = 1
-configTargetBtn.MouseButton1Click:Connect(function()
+-- Sub-panel dynamic interactive controls for the selected script
+configArg1Btn.MouseButton1Click:Connect(function()
     if not activeConfigSig or not learnedActions[activeConfigSig] then return end
-    configIndex = (configIndex % #availableClientConfigs) + 1
-    local selectedVal = availableClientConfigs[configIndex]
-    configTargetBtn.Text = "Arg 1 Target: " .. tostring(selectedVal)
-    
     local action = learnedActions[activeConfigSig]
+    if not action.args or #action.args == 0 then return end
+
     if not ActiveSchedulerQueue[activeConfigSig] then
         ActiveSchedulerQueue[activeConfigSig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
     end
-    ActiveSchedulerQueue[activeConfigSig].overrides = ActiveSchedulerQueue[activeConfigSig].overrides or {}
-    ActiveSchedulerQueue[activeConfigSig].overrides[1] = selectedVal
+    
+    local queueData = ActiveSchedulerQueue[activeConfigSig]
+    queueData.overrides = queueData.overrides or {}
+    
+    -- Toggle between original captured value and a placeholder modification if desired
+    local originalVal = action.args[1]
+    local currentVal = queueData.overrides[1] or originalVal
+    
+    if currentVal == originalVal then
+        queueData.overrides[1] = tostring(originalVal) .. "_Modified"
+    else
+        queueData.overrides[1] = originalVal
+    end
+    
+    configArg1Btn.Text = "Arg #1: " .. tostring(queueData.overrides[1])
 end)
 
 configLoopBtn.MouseButton1Click:Connect(function()
