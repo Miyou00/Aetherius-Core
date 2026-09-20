@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.1 - Dynamic Script Config]"
+title.Text = "⚡ Aetherius Core [v5.2 - Bug Fixed]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -658,7 +658,9 @@ function redrawAutoTab()
                 -- Dynamically bind config panel to THIS script's captured arguments
                 local queueData = ActiveSchedulerQueue[sig]
                 local isLooping = queueData and queueData.enabled or false
-                configLoopBtn.Text = isLooping and "Loop Execution: ON" : "Loop Execution: OFF"
+                
+                -- FIXED SYNTAX BUG HERE (replaced ':' with 'and / or')
+                configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
                 configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 
                 if action.args and #action.args > 0 then
@@ -699,7 +701,6 @@ configArg1Btn.MouseButton1Click:Connect(function()
     local queueData = ActiveSchedulerQueue[activeConfigSig]
     queueData.overrides = queueData.overrides or {}
     
-    -- Toggle between original captured value and a placeholder modification if desired
     local originalVal = action.args[1]
     local currentVal = queueData.overrides[1] or originalVal
     
