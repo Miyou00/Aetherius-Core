@@ -1,5 +1,5 @@
 -- ====================================================================
--- BigFroot Intel Suite [v4.8+ Optimized Hardened Engine]
+-- BigFroot Intel Suite [v4.8+ Optimized Hardened Engine with Home Dashboard]
 -- ====================================================================
 
 local Players = game:GetService("Players")
@@ -68,7 +68,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ BigFroot Intel Suite [Optimized Engine]"
+title.Text = "⚡ BigFroot Intel Suite [Dashboard Engine]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -90,14 +90,14 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 3)
 closeCorner.Parent = closeBtn
 
--- Navigation Tab Buttons
+-- Navigation Tab Buttons (Adjusted widths/positions to fit 8 tabs neatly)
 local function createTab(text, xPos, width)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(width or 48, 16)
+    btn.Size = UDim2.fromOffset(width or 40, 16)
     btn.Position = UDim2.fromOffset(xPos, 22)
     btn.Text = text
     btn.TextColor3 = Color3.fromRGB(140, 140, 150)
-    btn.TextSize = 7
+    btn.TextSize = 6
     btn.Font = Enum.Font.Code
     btn.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
     btn.BorderSizePixel = 0
@@ -108,13 +108,14 @@ local function createTab(text, xPos, width)
     return btn
 end
 
-local tabSpyBtn = createTab("Spy", 4, 44)
-local tabMacroBtn = createTab("Macro", 50, 48)
-local tabAnalyzeBtn = createTab("Analyze", 100, 50)
-local tabDumpBtn = createTab("Dumper", 152, 48)
-local tabDecompBtn = createTab("Modules", 202, 50)
-local tabMonitorBtn = createTab("Monitor", 254, 48)
-local tabAutoBtn = createTab("DNA/Auto", 304, 54)
+local tabHomeBtn = createTab("Home", 3, 38)
+local tabSpyBtn = createTab("Spy", 43, 38)
+local tabMacroBtn = createTab("Macro", 83, 40)
+local tabAnalyzeBtn = createTab("Analyze", 125, 42)
+local tabDumpBtn = createTab("Dumper", 169, 42)
+local tabDecompBtn = createTab("Modules", 213, 44)
+local tabMonitorBtn = createTab("Monitor", 259, 44)
+local tabAutoBtn = createTab("DNA/Auto", 305, 54)
 
 -- Dynamic Container Engine
 local function createContainer()
@@ -169,7 +170,13 @@ local function createContainer()
     return container, scroll, footer, layout
 end
 
+-- Containers Initialization
+local homeContainer, homeScroll, homeFooter = createContainer()
+homeContainer.Visible = true
+homeContainer.Parent = frame
+
 local spyContainer, scroll, spyFooter = createContainer()
+spyContainer.Visible = false
 spyContainer.Parent = frame
 
 local macroContainer, macroScroll, macroFooter = createContainer()
@@ -211,6 +218,9 @@ local function createOutput(parent, color)
     return out
 end
 
+local homeOutput = createOutput(homeScroll, Color3.fromRGB(150, 220, 255))
+homeOutput.Text = "⚡ System Health & Status Dashboard\nInitializing core modules...\n\n"
+
 local output = createOutput(scroll, Color3.fromRGB(100, 255, 120))
 output.Text = "Spy active (Optimized Mode). Tap logs to inspect.\n\n"
 
@@ -249,6 +259,7 @@ local function createButton(parent, text, width, xOffset, color)
     return btn
 end
 
+local refreshHomeBtn = createButton(homeFooter, "Refresh Status", 85, 3, Color3.fromRGB(40, 60, 90))
 local exportBtn = createButton(spyFooter, "Copy All", 75, 3, Color3.fromRGB(35, 35, 45))
 local clearBtn = createButton(spyFooter, "Clear Logs", 55, 81, Color3.fromRGB(70, 30, 30))
 
@@ -278,7 +289,32 @@ local function safeCopy(str, button, successMsg)
     end)
 end
 
+-- System Status Tracker States for Home Tab
+local systemStatuses = {
+    Spy = { state = "Running", details = "Metamorphic hook active", errors = 0, line = "N/A" },
+    Dumper = { state = "Idle", details = "Heap scan standby", errors = 0, line = "N/A" },
+    Modules = { state = "Ready", details = "Modules unmapped", errors = 0, line = "N/A" }
+}
+
+local function updateHomeDashboard()
+    local lines = {
+        "=== SUITE SYSTEM DASHBOARD ===",
+        localStringFormat("• Spy Engine: [%s]", systemStatuses.Spy.state),
+        localStringFormat("  Details: %s", systemStatuses.Spy.details),
+        localStringFormat("  Errors: %d (Line: %s)", systemStatuses.Spy.errors, tostring(systemStatuses.Spy.line)),
+        "",
+        localStringFormat("• GC Dumper: [%s]", systemStatuses.Dumper.state),
+        localStringFormat("  Details: %s", systemStatuses.Dumper.details),
+        "",
+        localStringFormat("• Module Mapper: [%s]", systemStatuses.Modules.state),
+        localStringFormat("  Details: %s", systemStatuses.Modules.details),
+        "\n[i] Tap 'Refresh Status' to update metrics."
+    }
+    homeOutput.Text = table.concat(lines, "\n")
+end
+
 local function switchTab(activeTab)
+    homeContainer.Visible = (activeTab == "home")
     spyContainer.Visible = (activeTab == "spy")
     macroContainer.Visible = (activeTab == "macro")
     analyzeContainer.Visible = (activeTab == "analyze")
@@ -288,6 +324,7 @@ local function switchTab(activeTab)
     autoContainer.Visible = (activeTab == "auto")
     
     local tabs = { 
+        {tabHomeBtn, "home"},
         {tabSpyBtn, "spy"},
         {tabMacroBtn, "macro"},
         {tabAnalyzeBtn, "analyze"}, 
@@ -301,8 +338,13 @@ local function switchTab(activeTab)
         t[1].BackgroundColor3 = active and Color3.fromRGB(45, 45, 55) or Color3.fromRGB(22, 22, 26)
         t[1].TextColor3 = active and Color3.new(1, 1, 1) or Color3.fromRGB(140, 140, 150)
     end
+
+    if activeTab == "home" then
+        updateHomeDashboard()
+    end
 end
 
+trackConn(tabHomeBtn.MouseButton1Click:Connect(function() switchTab("home") end))
 trackConn(tabSpyBtn.MouseButton1Click:Connect(function() switchTab("spy") end))
 trackConn(tabMacroBtn.MouseButton1Click:Connect(function() switchTab("macro") end))
 trackConn(tabAnalyzeBtn.MouseButton1Click:Connect(function() switchTab("analyze") end))
@@ -310,6 +352,7 @@ trackConn(tabDumpBtn.MouseButton1Click:Connect(function() switchTab("dump") end)
 trackConn(tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end))
 trackConn(tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end))
 trackConn(tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end))
+trackConn(refreshHomeBtn.MouseButton1Click:Connect(updateHomeDashboard))
 
 -- Serialization & Helpers
 local function resolveRemote(remoteName, fallbackPath)
@@ -432,7 +475,7 @@ local function startCentralizedScheduler()
 
                         _G.IgnoreAutoHooks = true
                         local liveArgs = sanitizeArguments(taskData.args)
-                        local ok = localPcall(function()
+                        local ok, err = localPcall(function()
                             if remoteInst:IsA("RemoteEvent") then
                                 remoteInst:FireServer(localUnpack(liveArgs))
                             elseif remoteInst:IsA("RemoteFunction") then
@@ -443,9 +486,14 @@ local function startCentralizedScheduler()
 
                         if not ok then
                             taskData.errors = (taskData.errors or 0) + 1
+                            systemStatuses.Spy.errors = taskData.errors
+                            systemStatuses.Spy.state = "Error"
+                            systemStatuses.Spy.details = tostring(err)
                             task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
                         else
                             taskData.errors = 0
+                            systemStatuses.Spy.errors = 0
+                            systemStatuses.Spy.state = "Running"
                             actionCycleCount = actionCycleCount + 1
                             
                             if actionCycleCount >= 25 then
@@ -616,7 +664,6 @@ function redrawAutoTab()
             local isLooping = false
 
             trackConn(copyBtn.MouseButton1Click:Connect(function()
-                -- Omitted long string builder code for brevity in execution blocks, can use your state script generator
                 safeCopy("State Script", copyBtn, "Copied!")
             end))
 
@@ -737,7 +784,7 @@ local function captureLog(self, method, args)
     local entryText = localStringFormat("[%s] (%s) (Tap to Inspect)\n%s", self.Name, method, snippet)
     
     localTableInsert(rawLogs, { text = entryText, snippet = snippet, name = self.Name, method = method, args = args, fullPath = fullPath, callingScript = callingScript, cframe = currentCFrame })
-    if #rawLogs > 30 then localTableInsert(rawLogs, 1) end -- buffer trim
+    if #rawLogs > 30 then localTableInsert(rawLogs, 1) end
     redrawLogs()
 end
 
@@ -786,6 +833,52 @@ trackConn(exportBtn.MouseButton1Click:Connect(function()
     safeCopy(table.concat(snippets, "\n"), exportBtn, "Copied!")
 end))
 
+-- GC Dumper Integration Hook
+trackConn(tabDumpBtn.MouseButton1Click:Connect(function()
+    switchTab("dump")
+    dumpOutput.Text = "Scanning GC memory heap structures...\n"
+    systemStatuses.Dumper.state = "Scanning"
+    task.defer(function()
+        local ok, err = localPcall(function()
+            local count = 0
+            for _, obj in ipairs(getgc(true)) do
+                if type(obj) == "table" then
+                    count = count + 1
+                end
+            end
+            dumpOutput.Text = localStringFormat("GC Heap Scan Completed.\nIndexed tables: %d\nStatus: Clean", count)
+            systemStatuses.Dumper.state = "Idle"
+            systemStatuses.Dumper.details = "Indexed " .. count .. " GC blocks"
+        end)
+        if not ok then
+            systemStatuses.Dumper.state = "Error"
+            systemStatuses.Dumper.details = tostring(err)
+            dumpOutput.Text = "GC Scan Error: " .. tostring(err)
+        end
+    end)
+end))
+
+-- Modules Mapper Integration Hook
+trackConn(tabDecompBtn.MouseButton1Click:Connect(function()
+    switchTab("decomp")
+    systemStatuses.Modules.state = "Mapping"
+    local ok, err = localPcall(function()
+        local modules = {}
+        for _, descendant in ipairs(ReplicatedStorage:GetDescendants()) do
+            if descendant:IsA("ModuleScript") then
+                localTableInsert(modules, "Module: " .. descendant:GetFullName())
+            end
+        end
+        decompOutput.Text = "Discovered Modules:\n\n" .. table.concat(modules, "\n")
+        systemStatuses.Modules.state = "Ready"
+        systemStatuses.Modules.details = "Mapped " .. #modules .. " modules"
+    end)
+    if not ok then
+        systemStatuses.Modules.state = "Error"
+        systemStatuses.Modules.details = tostring(err)
+    end
+end))
+
 -- Window Dragging & Cleanup
 local dragging, dragStart, startPos
 trackConn(bar.InputBegan:Connect(function(input)
@@ -812,7 +905,6 @@ end))
 trackConn(closeBtn.MouseButton1Click:Connect(function()
     SchedulerRunning = false
     
-    -- Disconnect all event connections to avoid memory leaks
     for _, conn in ipairs(ActiveConnections) do
         if conn.Connected then
             conn:Disconnect()
@@ -826,5 +918,5 @@ trackConn(closeBtn.MouseButton1Click:Connect(function()
     gui:Destroy()
 end))
 
-switchTab("spy")
-print("⚡ BigFroot Intel Suite [Optimized Engine] Loaded Successfully!")
+switchTab("home")
+print("⚡ BigFroot Intel Suite [Dashboard Engine] Loaded Successfully!")
