@@ -8,23 +8,23 @@ local player = Players.LocalPlayer
 _G.IgnoreAutoHooks = false
 
 -- Profile Configuration
-local PROFILE_FILENAME = "BigFroot_AutoProfile_" .. game.PlaceId .. ".json"
+local PROFILE_FILENAME = "AetheriusCore_Profile_" .. game.PlaceId .. ".json"
 
 -- Cleanup existing GUI instances
 pcall(function()
-    local old = player.PlayerGui:FindFirstChild("BigFrootIntelSuitev48")
+    local old = player.PlayerGui:FindFirstChild("AetheriusCoreEngine")
     if old then old:Destroy() end
 end)
 
--- Core GUI Window Construction (Compact 364x259)
+-- Core GUI Window Construction (Compact 364x280)
 local gui = Instance.new("ScreenGui")
-gui.Name = "BigFrootIntelSuitev48"
+gui.Name = "AetheriusCoreEngine"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 999999
 gui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(364, 259)
+frame.Size = UDim2.fromOffset(364, 280)
 frame.Position = UDim2.new(0.15, 0, 0.15, 60)
 frame.BackgroundColor3 = Color3.fromRGB(13, 13, 15)
 frame.BorderSizePixel = 0
@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ BigFroot Intel Suite [v4.8+ Hardened Engine]"
+title.Text = "⚡ Aetherius Core [v5.0 - Cognitive Modular Engine]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -95,7 +95,7 @@ local tabAnalyzeBtn = createTab("Analyze", 100, 50)
 local tabDumpBtn = createTab("Dumper", 152, 48)
 local tabDecompBtn = createTab("Modules", 202, 50)
 local tabMonitorBtn = createTab("Monitor", 254, 48)
-local tabAutoBtn = createTab("DNA/Auto", 304, 54)
+local tabAutoBtn = createTab("DNA/Cognitive", 304, 54)
 
 -- Dynamic Container Engine
 local function createContainer()
@@ -193,7 +193,7 @@ local function createOutput(parent, color)
 end
 
 local output = createOutput(scroll, Color3.fromRGB(100, 255, 120))
-output.Text = "Spy active (Hardened Metamorphic Mode). Tap logs to inspect.\n\n"
+output.Text = "Spy active (Cognitive Engine Mode). Tap logs to inspect.\n\n"
 
 local macroOutput = createOutput(macroScroll, Color3.fromRGB(255, 180, 100))
 macroOutput.Text = "Macro Recorder Standby.\n\n"
@@ -211,7 +211,7 @@ local monitorOutput = createOutput(monitorScroll, Color3.fromRGB(255, 140, 100))
 monitorOutput.Text = "World & Attribute Monitor active.\n\n"
 
 local autoEmptyText = createOutput(autoScroll, Color3.fromRGB(120, 220, 255))
-autoEmptyText.Text = "[HARDENED ENGINE ACTIVE]\nTrigger actions to self-build behavior DNA..."
+autoEmptyText.Text = "[COGNITIVE ENGINE ACTIVE]\nTrigger actions to self-build modular control panels..."
 
 local function createButton(parent, text, width, xOffset, color)
     local btn = Instance.new("TextButton")
@@ -296,6 +296,28 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
+-- Core Dynamic Client Data Scanner (Scrapes replicated tables/configs)
+local function scanClientDataTables()
+    local scannedOptions = {}
+    pcall(function()
+        for _, child in ipairs(ReplicatedStorage:GetDescendants()) do
+            if child:IsA("ModuleScript") then
+                local ok, data = pcall(require, child)
+                if ok and type(data) == "table" then
+                    for k, v in pairs(data) do
+                        if type(k) == "string" and (type(v) == "table" or type(v) == "string") then
+                            table.insert(scannedOptions, k)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    return #scannedOptions > 0 and scannedOptions or {"DefaultItem", "CommonEgg", "RareEgg", "EpicEgg", "LegendaryEgg"}
+end
+
+local availableClientConfigs = scanClientDataTables()
+
 -- Hardened Core Functions: Dynamic Resolution & Sanitization
 local function resolveRemote(remoteName, fallbackPath)
     local found = ReplicatedStorage:FindFirstChild(remoteName, true) 
@@ -313,10 +335,13 @@ local function resolveRemote(remoteName, fallbackPath)
     return nil
 end
 
-local function sanitizeArguments(args)
+local function sanitizeArguments(args, customOverrides)
     local sanitized = {}
-    for _, arg in ipairs(args) do
-        if type(arg) == "table" then
+    for i, arg in ipairs(args) do
+        -- Check if custom panel override exists for this argument slot
+        if customOverrides and customOverrides[i] then
+            table.insert(sanitized, customOverrides[i])
+        elseif type(arg) == "table" then
             local newTable = {}
             for k, v in pairs(arg) do
                 if string.match(string.lower(tostring(k)), "token") 
@@ -395,7 +420,7 @@ local function classifySignature(args)
     return "GenericAction"
 end
 
--- Centralized CPU-Optimized Scheduler Engine with Jitter & Micro-Breaks
+-- Centralized CPU-Optimized Scheduler Engine with Modular Filters
 local function startCentralizedScheduler()
     if SchedulerRunning then return end
     SchedulerRunning = true
@@ -407,39 +432,50 @@ local function startCentralizedScheduler()
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                     if remoteInst then
-                        local char = player.Character
-                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                        if taskData.cframe and hrp then
-                            if (hrp.Position - taskData.cframe.Position).Magnitude > 8 then
-                                hrp.CFrame = taskData.cframe
-                                task.wait(0.05)
+                        -- Check conditional filter rule if set
+                        local shouldSkip = false
+                        if taskData.filterRule and taskData.filterRule.enabled then
+                            local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or taskData.args[taskData.filterRule.argIndex]
+                            if val and tostring(val) ~= taskData.filterRule.targetVal then
+                                shouldSkip = true
                             end
                         end
 
-                        _G.IgnoreAutoHooks = true
-                        local liveArgs = sanitizeArguments(taskData.args)
-                        local ok = pcall(function()
-                            if remoteInst:IsA("RemoteEvent") then
-                                remoteInst:FireServer(unpack(liveArgs))
-                            elseif remoteInst:IsA("RemoteFunction") then
-                                remoteInst:InvokeServer(unpack(liveArgs))
+                        if not shouldSkip then
+                            local char = player.Character
+                            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                            if taskData.cframe and hrp then
+                                if (hrp.Position - taskData.cframe.Position).Magnitude > 8 then
+                                    hrp.CFrame = taskData.cframe
+                                    task.wait(0.05)
+                                end
                             end
-                        end)
-                        _G.IgnoreAutoHooks = false
 
-                        if not ok then
-                            taskData.errors = (taskData.errors or 0) + 1
-                            task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
-                        else
-                            taskData.errors = 0
-                            actionCycleCount = actionCycleCount + 1
-                            
-                            if actionCycleCount >= 25 then
-                                actionCycleCount = 0
-                                task.wait(math.random(3.5, 7.0)) -- Simulated AFK / Inventory look
+                            _G.IgnoreAutoHooks = true
+                            local liveArgs = sanitizeArguments(taskData.args, taskData.overrides)
+                            local ok = pcall(function()
+                                if remoteInst:IsA("RemoteEvent") then
+                                    remoteInst:FireServer(unpack(liveArgs))
+                                elseif remoteInst:IsA("RemoteFunction") then
+                                    remoteInst:InvokeServer(unpack(liveArgs))
+                                end
+                            end)
+                            _G.IgnoreAutoHooks = false
+
+                            if not ok then
+                                taskData.errors = (taskData.errors or 0) + 1
+                                task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
                             else
-                                local jitter = math.random() * 0.25 + (math.random() * 0.1)
-                                task.wait(0.65 + jitter)
+                                taskData.errors = 0
+                                actionCycleCount = actionCycleCount + 1
+                                
+                                if actionCycleCount >= 25 then
+                                    actionCycleCount = 0
+                                    task.wait(math.random(3.5, 7.0))
+                                else
+                                    local jitter = math.random() * 0.25 + (math.random() * 0.1)
+                                    task.wait(0.65 + jitter)
+                                end
                             end
                         end
                     end
@@ -510,93 +546,6 @@ local function importProfileFromJSON()
     safeCopy("None", loadDnaBtn, "No Profile")
 end
 
--- Standalone Hardened State Script Generator
-local function generateStateScript(actionData)
-    local serializedArgs = {}
-    for _, arg in ipairs(actionData.args) do table.insert(serializedArgs, serializeValue(arg)) end
-    local argStr = table.concat(serializedArgs, ", ")
-
-    return string.format([[
--- ====================================================
--- HARDENED METAMORPHIC RUNNER SCRIPT
--- ====================================================
--- Category : %s
--- Remote   : %s
--- ====================================================
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
-
-local function resolveRemote(remoteName, fallbackPath)
-    local found = ReplicatedStorage:FindFirstChild(remoteName, true) 
-        or workspace:FindFirstChild(remoteName, true)
-        or game:FindFirstChild(remoteName, true)
-    if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then return found end
-    local ok, inst = pcall(function() return loadstring("return " .. fallbackPath)() end)
-    return ok and inst or nil
-end
-
-local function sanitizeArguments(args)
-    local sanitized = {}
-    for _, arg in ipairs(args) do
-        if type(arg) == "table" then
-            local newTable = {}
-            for k, v in pairs(arg) do
-                if string.match(string.lower(tostring(k)), "token") or string.match(string.lower(tostring(k)), "nonce") or string.match(string.lower(tostring(k)), "time") then
-                    newTable[k] = tick()
-                else
-                    newTable[k] = v
-                end
-            end
-            table.insert(sanitized, newTable)
-        else
-            table.insert(sanitized, arg)
-        end
-    end
-    return sanitized
-end
-
-_G.IgnoreAutoHooks = true
-
-task.spawn(function()
-    local errors = 0
-    while true do
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local remoteInst = resolveRemote(%q, %q)
-        
-        if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and remoteInst then
-            %s
-            local liveArgs = sanitizeArguments({%s})
-            local success = pcall(function()
-                if remoteInst:IsA("RemoteEvent") then
-                    remoteInst:FireServer(unpack(liveArgs))
-                elseif remoteInst:IsA("RemoteFunction") then
-                    remoteInst:InvokeServer(unpack(liveArgs))
-                end
-            end)
-            
-            if not success then
-                errors = errors + 1
-                task.wait(math.min(6.0, 0.65 * (2 ^ errors)))
-            else
-                errors = 0
-                task.wait(0.65 + math.random() * 0.25)
-            end
-        else
-            task.wait(1.0)
-        end
-    end
-end)
-]], actionData.category, actionData.name, actionData.name, actionData.fullPath, 
-    actionData.cframe and string.format([[local targetCF = CFrame.new(%f, %f, %f)
-            if hrp and (hrp.Position - targetCF.Position).Magnitude > 8 then
-                hrp.CFrame = targetCF
-                task.wait(0.05)
-            end]], actionData.cframe.Position.X, actionData.cframe.Position.Y, actionData.cframe.Position.Z) or "", 
-    argStr)
-end
-
 local function previewWaypoint(cframe)
     if not cframe then return end
     pcall(function()
@@ -613,6 +562,7 @@ local function previewWaypoint(cframe)
     end)
 end
 
+-- Modular Expandable Control Panels in DNA/Auto Tab
 function redrawAutoTab()
     local count = 0
     for _ in pairs(learnedActions) do count = count + 1 end
@@ -621,9 +571,10 @@ function redrawAutoTab()
     for sig, action in pairs(learnedActions) do
         if not actionCards[sig] then
             local card = Instance.new("Frame")
-            card.Size = UDim2.new(1, -8, 0, 54)
+            card.Size = UDim2.new(1, -8, 0, 52)
             card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
             card.BorderSizePixel = 0
+            card.ClipsDescendants = true
             card.Parent = autoScroll
 
             local cardCorner = Instance.new("UICorner")
@@ -631,7 +582,7 @@ function redrawAutoTab()
             cardCorner.Parent = card
 
             local label = Instance.new("TextLabel")
-            label.Size = UDim2.new(1, -125, 1, -4)
+            label.Size = UDim2.new(1, -75, 0, 46)
             label.Position = UDim2.fromOffset(4, 2)
             label.BackgroundTransparency = 1
             label.TextColor3 = Color3.fromRGB(220, 220, 230)
@@ -642,24 +593,24 @@ function redrawAutoTab()
             label.TextWrapped = true
             label.Parent = card
 
-            local copyBtn = Instance.new("TextButton")
-            copyBtn.Size = UDim2.fromOffset(55, 16)
-            copyBtn.Position = UDim2.new(1, -59, 0, 4)
-            copyBtn.Text = "State Script"
-            copyBtn.TextColor3 = Color3.new(1, 1, 1)
-            copyBtn.TextSize = 6
-            copyBtn.Font = Enum.Font.Code
-            copyBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 120)
-            copyBtn.BorderSizePixel = 0
-            copyBtn.Parent = card
+            local expandBtn = Instance.new("TextButton")
+            expandBtn.Size = UDim2.fromOffset(65, 16)
+            expandBtn.Position = UDim2.new(1, -69, 0, 4)
+            expandBtn.Text = "Configure ▼"
+            expandBtn.TextColor3 = Color3.new(1, 1, 1)
+            expandBtn.TextSize = 6
+            expandBtn.Font = Enum.Font.Code
+            expandBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+            expandBtn.BorderSizePixel = 0
+            expandBtn.Parent = card
 
-            local copyCorner = Instance.new("UICorner")
-            copyCorner.CornerRadius = UDim.new(0, 3)
-            copyCorner.Parent = copyBtn
+            local expandCorner = Instance.new("UICorner")
+            expandCorner.CornerRadius = UDim.new(0, 3)
+            expandCorner.Parent = expandBtn
 
             local loopBtn = Instance.new("TextButton")
-            loopBtn.Size = UDim2.fromOffset(55, 16)
-            loopBtn.Position = UDim2.new(1, -59, 0, 22)
+            loopBtn.Size = UDim2.fromOffset(65, 16)
+            loopBtn.Position = UDim2.new(1, -69, 0, 24)
             loopBtn.Text = "Loop: OFF"
             loopBtn.TextColor3 = Color3.new(1, 1, 1)
             loopBtn.TextSize = 6
@@ -672,44 +623,72 @@ function redrawAutoTab()
             loopCorner.CornerRadius = UDim.new(0, 3)
             loopCorner.Parent = loopBtn
 
-            local previewBtn = Instance.new("TextButton")
-            previewBtn.Size = UDim2.fromOffset(55, 12)
-            previewBtn.Position = UDim2.new(1, -59, 0, 40)
-            previewBtn.Text = action.cframe and "Preview" or "No Pos"
-            previewBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
-            previewBtn.TextSize = 6
-            previewBtn.Font = Enum.Font.Code
-            previewBtn.BackgroundColor3 = Color3.fromRGB(35, 45, 60)
-            previewBtn.BorderSizePixel = 0
-            previewBtn.Parent = card
+            -- Expandable Drawer Content Container
+            local drawer = Instance.new("Frame")
+            drawer.Size = UDim2.new(1, -8, 0, 65)
+            drawer.Position = UDim2.fromOffset(4, 52)
+            drawer.BackgroundTransparency = 1
+            drawer.Visible = false
+            drawer.Parent = card
 
-            local previewCorner = Instance.new("UICorner")
-            previewCorner.CornerRadius = UDim.new(0, 2)
-            previewCorner.Parent = previewBtn
+            local drawerLabel = Instance.new("TextLabel")
+            drawerLabel.Size = UDim2.new(1, 0, 0, 14)
+            drawerLabel.BackgroundTransparency = 1
+            drawerLabel.Text = "--- Scanned Config / Argument Override ---"
+            drawerLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+            drawerLabel.TextSize = 6
+            drawerLabel.Font = Enum.Font.Code
+            drawerLabel.TextXAlignment = Enum.TextXAlignment.Left
+            drawerLabel.Parent = drawer
+
+            -- Dropdown selector box mimicking scanned client configs
+            local configDropBtn = Instance.new("TextButton")
+            configDropBtn.Size = UDim2.new(1, 0, 0, 18)
+            configDropBtn.Position = UDim2.fromOffset(0, 16)
+            configDropBtn.Text = "Arg 1 Target: [Default / Scanned]"
+            configDropBtn.TextColor3 = Color3.new(1, 1, 1)
+            configDropBtn.TextSize = 6
+            configDropBtn.Font = Enum.Font.Code
+            configDropBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+            configDropBtn.BorderSizePixel = 0
+            configDropBtn.Parent = drawer
+
+            local dropCorner = Instance.new("UICorner")
+            dropCorner.CornerRadius = UDim.new(0, 3)
+            dropCorner.Parent = configDropBtn
+
+            local configIndex = 1
+            configDropBtn.MouseButton1Click:Connect(function()
+                configIndex = (configIndex % #availableClientConfigs) + 1
+                local selectedVal = availableClientConfigs[configIndex]
+                configDropBtn.Text = "Arg 1 Target: " .. tostring(selectedVal)
+                
+                if not ActiveSchedulerQueue[sig] then
+                    ActiveSchedulerQueue[sig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+                end
+                ActiveSchedulerQueue[sig].overrides = ActiveSchedulerQueue[sig].overrides or {}
+                ActiveSchedulerQueue[sig].overrides[1] = selectedVal
+            end)
+
+            local isExpanded = false
+            expandBtn.MouseButton1Click:Connect(function()
+                isExpanded = not isExpanded
+                drawer.Visible = isExpanded
+                card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
+                expandBtn.Text = isExpanded and "Configure ▲" : "Configure ▼"
+                autoLayout:GetPropertyChangedSignal("AbsoluteContentSize") -- refresh layout
+            end)
 
             local isLooping = false
-
-            copyBtn.MouseButton1Click:Connect(function()
-                safeCopy(generateStateScript(action), copyBtn, "Copied!")
-            end)
-
-            previewBtn.MouseButton1Click:Connect(function()
-                if action.cframe then previewWaypoint(action.cframe) end
-            end)
-
             loopBtn.MouseButton1Click:Connect(function()
                 isLooping = not isLooping
                 loopBtn.Text = isLooping and "Loop: ON" or "Loop: OFF"
                 loopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 
-                ActiveSchedulerQueue[sig] = {
-                    enabled = isLooping,
-                    name = action.name,
-                    fullPath = action.fullPath,
-                    args = action.args,
-                    cframe = action.cframe,
-                    errors = 0
-                }
+                if not ActiveSchedulerQueue[sig] then
+                    ActiveSchedulerQueue[sig] = { name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+                end
+                ActiveSchedulerQueue[sig].enabled = isLooping
             end)
 
             actionCards[sig] = { card = card, label = label }
@@ -771,9 +750,6 @@ end)
 
 -- Hook Engine
 local rawLogs = {}
-local macroSequence = {}
-local isRecordingMacro = false
-local lastMacroTime = 0
 local ignoredRemotes = { ["Heartbeat"] = true, ["Ping"] = true, ["AnalyticsEvent"] = true }
 local callCooldowns = {}
 local isHookingCall = false
@@ -870,7 +846,7 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
+        let delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
