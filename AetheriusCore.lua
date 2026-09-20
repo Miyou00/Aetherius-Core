@@ -338,7 +338,6 @@ end
 local function sanitizeArguments(args, customOverrides)
     local sanitized = {}
     for i, arg in ipairs(args) do
-        -- Check if custom panel override exists for this argument slot
         if customOverrides and customOverrides[i] then
             table.insert(sanitized, customOverrides[i])
         elseif type(arg) == "table" then
@@ -432,7 +431,6 @@ local function startCentralizedScheduler()
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                     if remoteInst then
-                        -- Check conditional filter rule if set
                         local shouldSkip = false
                         if taskData.filterRule and taskData.filterRule.enabled then
                             local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or taskData.args[taskData.filterRule.argIndex]
@@ -675,8 +673,7 @@ function redrawAutoTab()
                 isExpanded = not isExpanded
                 drawer.Visible = isExpanded
                 card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
-                expandBtn.Text = isExpanded and "Configure ▲" : "Configure ▼"
-                autoLayout:GetPropertyChangedSignal("AbsoluteContentSize") -- refresh layout
+                expandBtn.Text = isExpanded and "Configure ▲" or "Configure ▼"
             end)
 
             local isLooping = false
@@ -846,7 +843,7 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        let delta = input.Position - dragStart
+        local delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
