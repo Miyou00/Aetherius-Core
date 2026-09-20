@@ -336,9 +336,11 @@ local function resolveRemote(remoteName, fallbackPath)
 end
 
 local function sanitizeArguments(args, customOverrides)
+    if not customOverrides or next(customOverrides) == nil then
+        return args -- Optimization: Avoid allocating new table if no overrides exist
+    end
     local sanitized = {}
     for i, arg in ipairs(args) do
-        -- Check if custom panel override exists for this argument slot
         if customOverrides and customOverrides[i] then
             table.insert(sanitized, customOverrides[i])
         elseif type(arg) == "table" then
@@ -432,7 +434,6 @@ local function startCentralizedScheduler()
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                     if remoteInst then
-                        -- Check conditional filter rule if set
                         local shouldSkip = false
                         if taskData.filterRule and taskData.filterRule.enabled then
                             local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or taskData.args[taskData.filterRule.argIndex]
@@ -445,8 +446,10 @@ local function startCentralizedScheduler()
                             local char = player.Character
                             local hrp = char and char:FindFirstChild("HumanoidRootPart")
                             if taskData.cframe and hrp then
-                                if (hrp.Position - taskData.cframe.Position).Magnitude > 8 then
-                                    hrp.CFrame = taskData.cframe
+                                -- Fixed potential bug: Ensure we use CFrame handling properly
+                                local targetCF = typeof(taskData.cframe) == "CFrame" and taskData.cframe or CFrame.new()
+                                if (hrp.Position - targetCF.Position).Magnitude > 8 then
+                                    hrp.CFrame = targetCF
                                     task.wait(0.05)
                                 end
                             end
@@ -455,9 +458,9 @@ local function startCentralizedScheduler()
                             local liveArgs = sanitizeArguments(taskData.args, taskData.overrides)
                             local ok = pcall(function()
                                 if remoteInst:IsA("RemoteEvent") then
-                                    remoteInst:FireServer(unpack(liveArgs))
+                                    remoteInst:FireServer(table.unpack(liveArgs))
                                 elseif remoteInst:IsA("RemoteFunction") then
-                                    remoteInst:InvokeServer(unpack(liveArgs))
+                                    remoteInst:InvokeServer(table.unpack(liveArgs))
                                 end
                             end)
                             _G.IgnoreAutoHooks = false
@@ -511,55 +514,34 @@ local function exportProfileToJSON()
 end
 
 local function importProfileFromJSON()
-    if readfile and listfiles then
-        local found = false
-        for _, file in ipairs(listfiles("")) do
-            if file:match(PROFILE_FILENAME) then found = true break end
-        end
-        if found then
-            local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
-            if ok then
-                local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
-                if decodedOk and type(decoded) == "table" then
-                    for sig, data in pairs(decoded) do
-                        local targetInstance = resolveRemote(data.name, data.fullPath)
-                        
-                        learnedActions[sig] = {
-                            signature = data.signature,
-                            name = data.name,
-                            instance = targetInstance,
-                            fullPath = data.fullPath,
-                            method = data.method,
-                            args = {},
-                            cframe = data.cframePos and CFrame.new(unpack(data.cframePos)) or nil,
-                            count = data.count,
-                            category = data.category
-                        }
-                    end
-                    redrawAutoTab()
-                    safeCopy("Loaded", loadDnaBtn, "Loaded DNA!")
-                    return
+    if readfile then
+        local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
+        if ok and raw then
+            local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+            if decodedOk and type(decoded) == "table" then
+                for sig, data in pairs(decoded) do
+                    local targetInstance = resolveRemote(data.name, data.fullPath)
+                    
+                    learnedActions[sig] = {
+                        signature = data.signature,
+                        name = data.name,
+                        instance = targetInstance,
+                        fullPath = data.fullPath,
+                        method = data.method,
+                        args = {},
+                        cframe = data.cframePos and CFrame.new(table.unpack(data.cframePos)) or nil,
+                        count = data.count,
+                        category = data.category
+                    }
                 end
+                redrawAutoTab = redrawAutoTab or function() end
+                redrawAutoTab()
+                safeCopy("Loaded", loadDnaBtn, "Loaded DNA!")
+                return
             end
         end
     end
     safeCopy("None", loadDnaBtn, "No Profile")
-end
-
-local function previewWaypoint(cframe)
-    if not cframe then return end
-    pcall(function()
-        local marker = Instance.new("Part")
-        marker.Size = Vector3.new(2, 4, 2)
-        marker.Position = cframe.Position + Vector3.new(0, 2, 0)
-        marker.Anchored = true
-        marker.CanCollide = false
-        marker.Transparency = 0.4
-        marker.Color = Color3.fromRGB(100, 255, 150)
-        marker.Material = Enum.Material.Neon
-        marker.Parent = workspace
-        task.delay(3, function() if marker then marker:Destroy() end end)
-    end)
 end
 
 -- Modular Expandable Control Panels in DNA/Auto Tab
@@ -641,7 +623,6 @@ function redrawAutoTab()
             drawerLabel.TextXAlignment = Enum.TextXAlignment.Left
             drawerLabel.Parent = drawer
 
-            -- Dropdown selector box mimicking scanned client configs
             local configDropBtn = Instance.new("TextButton")
             configDropBtn.Size = UDim2.new(1, 0, 0, 18)
             configDropBtn.Position = UDim2.fromOffset(0, 16)
@@ -675,8 +656,8 @@ function redrawAutoTab()
                 isExpanded = not isExpanded
                 drawer.Visible = isExpanded
                 card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
-                expandBtn.Text = isExpanded and "Configure ▲" : "Configure ▼"
-                autoLayout:GetPropertyChangedSignal("AbsoluteContentSize") -- refresh layout
+                -- Fixed bug: Changed JS-style `:` ternary to Lua `and ... or ...`
+                expandBtn.Text = isExpanded and "Configure ▲" or "Configure ▼"
             end)
 
             local isLooping = false
@@ -846,7 +827,8 @@ end)
 
 UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        let delta = input.Position - dragStart
+        -- Fixed bug: Changed JavaScript `let delta` to Lua `local delta`
+        local delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
