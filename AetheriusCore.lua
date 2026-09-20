@@ -636,6 +636,51 @@ local function serializeValue(val, depth, visited)
     end
 end
 
+-- Human-readable configuration preview. This is display-only and does not alter stored values.
+local function formatConfigValue(value, depth, visited)
+    depth = depth or 0
+    visited = visited or {}
+
+    if depth > 2 then return "{...}" end
+    if value == nil then return "nil" end
+
+    local valueType = typeof(value)
+    if valueType == "string" then
+        local text = value:gsub("\n", "\\n")
+        if #text > 120 then text = text:sub(1, 117) .. "..." end
+        return string.format("string(%q)", text)
+    elseif valueType == "number" or valueType == "boolean" then
+        return string.format("%s(%s)", valueType, tostring(value))
+    elseif valueType == "Instance" then
+        return string.format("Instance<%s>", value:GetFullName())
+    elseif valueType == "Vector3" then
+        return string.format("Vector3(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+    elseif valueType == "CFrame" then
+        local position = value.Position
+        return string.format("CFrame(position: %.2f, %.2f, %.2f)", position.X, position.Y, position.Z)
+    elseif valueType == "table" then
+        if visited[value] then return "{cyclic table}" end
+        visited[value] = true
+
+        local parts = {}
+        local count = 0
+        for key, item in pairs(value) do
+            count = count + 1
+            if count > 12 then
+                table.insert(parts, "...")
+                break
+            end
+            table.insert(parts, string.format("%s = %s", tostring(key), formatConfigValue(item, depth + 1, visited)))
+        end
+
+        visited[value] = nil
+        if #parts == 0 then return "table{}" end
+        return "table{" .. table.concat(parts, ", ") .. "}"
+    end
+
+    return string.format("%s(%s)", valueType, tostring(value))
+end
+
 local function encodeArgument(val, depth, visited)
     depth = depth or 0
     visited = visited or {}
@@ -1066,7 +1111,7 @@ redrawAutoTab = function()
                     else
                         currentVal = currentAction.args[1]
                     end
-                    configArg1Btn.Text = "Arg #1: " .. serializeValue(currentVal)
+                    configArg1Btn.Text = "Arg #1: " .. formatConfigValue(currentVal)
                     configArg1Btn.Visible = true
                 else
                     configArg1Btn.Text = "Arg #1: [No Arguments Captured]"
@@ -1122,7 +1167,7 @@ table.insert(activeConnections, configArg1Btn.MouseButton1Click:Connect(function
     end
     queueData._present[1] = true
 
-    configArg1Btn.Text = "Arg #1: " .. serializeValue(queueData.overrides[1])
+    configArg1Btn.Text = "Arg #1: " .. formatConfigValue(queueData.overrides[1])
 end))
 
 table.insert(activeConnections, configLoopBtn.MouseButton1Click:Connect(function()
