@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.0 - Instant Recovery Mode]"
+title.Text = "⚡ Aetherius Core [v5.0 - Permanent Panel Mode]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -567,10 +567,9 @@ function redrawAutoTab()
     for sig, action in pairs(learnedActions) do
         if not actionCards[sig] then
             local card = Instance.new("Frame")
-            card.Size = UDim2.new(1, -8, 0, 52)
+            card.Size = UDim2.new(1, -8, 0, 72)
             card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
             card.BorderSizePixel = 0
-            card.ClipsDescendants = true
             card.Parent = autoScroll
 
             local cardCorner = Instance.new("UICorner")
@@ -578,8 +577,8 @@ function redrawAutoTab()
             cardCorner.Parent = card
 
             local label = Instance.new("TextLabel")
-            label.Size = UDim2.new(1, -75, 0, 46)
-            label.Position = UDim2.fromOffset(4, 2)
+            label.Size = UDim2.new(1, -12, 0, 32)
+            label.Position = UDim2.fromOffset(6, 4)
             label.BackgroundTransparency = 1
             label.TextColor3 = Color3.fromRGB(220, 220, 230)
             label.TextSize = 7
@@ -589,24 +588,25 @@ function redrawAutoTab()
             label.TextWrapped = true
             label.Parent = card
 
-            local expandBtn = Instance.new("TextButton")
-            expandBtn.Size = UDim2.fromOffset(65, 16)
-            expandBtn.Position = UDim2.new(1, -69, 0, 4)
-            expandBtn.Text = "Configure ▼"
-            expandBtn.TextColor3 = Color3.new(1, 1, 1)
-            expandBtn.TextSize = 6
-            expandBtn.Font = Enum.Font.Code
-            expandBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
-            expandBtn.BorderSizePixel = 0
-            expandBtn.Parent = card
+            -- Permanent Bottom Action Row (No Dropdown)
+            local configDropBtn = Instance.new("TextButton")
+            configDropBtn.Size = UDim2.new(0.65, 0, 0, 22)
+            configDropBtn.Position = UDim2.fromOffset(6, 42)
+            configDropBtn.Text = "Arg 1 Target: [Default / Scanned]"
+            configDropBtn.TextColor3 = Color3.new(1, 1, 1)
+            configDropBtn.TextSize = 6
+            configDropBtn.Font = Enum.Font.Code
+            configDropBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+            configDropBtn.BorderSizePixel = 0
+            configDropBtn.Parent = card
 
-            local expandCorner = Instance.new("UICorner")
-            expandCorner.CornerRadius = UDim.new(0, 3)
-            expandCorner.Parent = expandBtn
+            local dropCorner = Instance.new("UICorner")
+            dropCorner.CornerRadius = UDim.new(0, 3)
+            dropCorner.Parent = configDropBtn
 
             local loopBtn = Instance.new("TextButton")
-            loopBtn.Size = UDim2.fromOffset(65, 16)
-            loopBtn.Position = UDim2.new(1, -69, 0, 24)
+            loopBtn.Size = UDim2.new(0.3, -4, 0, 22)
+            loopBtn.Position = UDim2.new(0.65, 8, 0, 42)
             loopBtn.Text = "Loop: OFF"
             loopBtn.TextColor3 = Color3.new(1, 1, 1)
             loopBtn.TextSize = 6
@@ -619,38 +619,6 @@ function redrawAutoTab()
             loopCorner.CornerRadius = UDim.new(0, 3)
             loopCorner.Parent = loopBtn
 
-            local drawer = Instance.new("Frame")
-            drawer.Size = UDim2.new(1, -8, 0, 65)
-            drawer.Position = UDim2.fromOffset(4, 52)
-            drawer.BackgroundTransparency = 1
-            drawer.Visible = false
-            drawer.Parent = card
-
-            local drawerLabel = Instance.new("TextLabel")
-            drawerLabel.Size = UDim2.new(1, 0, 0, 14)
-            drawerLabel.BackgroundTransparency = 1
-            drawerLabel.Text = "--- Scanned Config / Argument Override ---"
-            drawerLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
-            drawerLabel.TextSize = 6
-            drawerLabel.Font = Enum.Font.Code
-            drawerLabel.TextXAlignment = Enum.TextXAlignment.Left
-            drawerLabel.Parent = drawer
-
-            local configDropBtn = Instance.new("TextButton")
-            configDropBtn.Size = UDim2.new(1, 0, 0, 18)
-            configDropBtn.Position = UDim2.fromOffset(0, 16)
-            configDropBtn.Text = "Arg 1 Target: [Default / Scanned]"
-            configDropBtn.TextColor3 = Color3.new(1, 1, 1)
-            configDropBtn.TextSize = 6
-            configDropBtn.Font = Enum.Font.Code
-            configDropBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-            configDropBtn.BorderSizePixel = 0
-            configDropBtn.Parent = drawer
-
-            local dropCorner = Instance.new("UICorner")
-            dropCorner.CornerRadius = UDim.new(0, 3)
-            dropCorner.Parent = configDropBtn
-
             local configIndex = 1
             configDropBtn.MouseButton1Click:Connect(function()
                 configIndex = (configIndex % #availableClientConfigs) + 1
@@ -662,14 +630,6 @@ function redrawAutoTab()
                 end
                 ActiveSchedulerQueue[sig].overrides = ActiveSchedulerQueue[sig].overrides or {}
                 ActiveSchedulerQueue[sig].overrides[1] = selectedVal
-            end)
-
-            local isExpanded = false
-            expandBtn.MouseButton1Click:Connect(function()
-                isExpanded = not isExpanded
-                drawer.Visible = isExpanded
-                card.Size = isExpanded and UDim2.new(1, -8, 0, 122) or UDim2.new(1, -8, 0, 52)
-                expandBtn.Text = isExpanded and "Configure ▲" or "Configure ▼"
             end)
 
             local isLooping = false
@@ -687,7 +647,7 @@ function redrawAutoTab()
             actionCards[sig] = { card = card, label = label }
         end
 
-        actionCards[sig].label.Text = string.format("⚡ [%s] (%s)\nType: %s (%dx Calls)\nPath: %s", 
+        actionCards[sig].label.Text = string.format("⚡ [%s] (%s) | Type: %s (%dx Calls)\nPath: %s", 
             action.name, action.method, action.category, action.count, action.fullPath)
     end
 
