@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.0 - Permanent Panel Mode]"
+title.Text = "⚡ Aetherius Core [v5.0 - Flat Permanent Panel Mode]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -588,7 +588,7 @@ function redrawAutoTab()
             label.TextWrapped = true
             label.Parent = card
 
-            -- Permanent Bottom Action Row (No Dropdown)
+            -- Fully Permanent Flat Panel Controls (No Dropdowns)
             local configDropBtn = Instance.new("TextButton")
             configDropBtn.Size = UDim2.new(0.65, 0, 0, 22)
             configDropBtn.Position = UDim2.fromOffset(6, 42)
