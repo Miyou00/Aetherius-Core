@@ -1,5 +1,5 @@
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ReplicatedStorage = ReplicatedStorage or game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local player = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
@@ -9,6 +9,9 @@ _G.IgnoreAutoHooks = false
 
 -- Profile Configuration
 local PROFILE_FILENAME = "AetheriusCore_Profile_" .. game.PlaceId .. ".json"
+
+-- Connection tracker for proper cleanup on close
+local activeConnections = {}
 
 -- Cleanup existing GUI instances safely
 pcall(function()
@@ -49,7 +52,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.3 - Smart Arg Interpreter]"
+title.Text = "⚡ Aetherius Core [v5.4 - Hardened Engine]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -75,9 +78,12 @@ closeCorner.Parent = closeBtn
 local originalNamecall
 local SchedulerRunning = false
 
--- Guaranteed Close Binding
+-- Guaranteed Close Binding with Connection Cleanup
 closeBtn.MouseButton1Click:Connect(function()
     SchedulerRunning = false
+    for _, conn in ipairs(activeConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
     pcall(function()
         if originalNamecall and hookmetamethod then
             hookmetamethod(game, "__namecall", originalNamecall)
@@ -158,9 +164,9 @@ local function createContainer()
     footerCorner.CornerRadius = UDim.new(0, 3)
     footerCorner.Parent = footer
     
-    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    table.insert(activeConnections, layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         scroll.CanvasSize = UDim2.new(0, layout.AbsoluteContentSize.X, 0, layout.AbsoluteContentSize.Y + 10)
-    end)
+    end))
     
     return container, scroll, footer, layout
 end
@@ -192,7 +198,7 @@ local autoContainer, autoScroll, autoFooter, autoLayout = createContainer()
 autoContainer.Visible = false
 autoContainer.Parent = frame
 
--- Dedicated Script Configuration Sub-Panel (Standalone window pane)
+-- Dedicated Script Configuration Sub-Panel
 local configSubPanel = Instance.new("Frame")
 configSubPanel.Size = UDim2.new(1, 0, 1, -40)
 configSubPanel.Position = UDim2.fromOffset(0, 40)
@@ -244,9 +250,24 @@ local lCorner = Instance.new("UICorner")
 lCorner.CornerRadius = UDim.new(0, 4)
 lCorner.Parent = configLoopBtn
 
+local configTeleportOptBtn = Instance.new("TextButton")
+configTeleportOptBtn.Size = UDim2.new(1, -12, 0, 26)
+configTeleportOptBtn.Position = UDim2.fromOffset(6, 114)
+configTeleportOptBtn.Text = "Opt-In Spatial Teleport: OFF"
+configTeleportOptBtn.TextColor3 = Color3.new(1, 1, 1)
+configTeleportOptBtn.TextSize = 7
+configTeleportOptBtn.Font = Enum.Font.Code
+configTeleportOptBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+configTeleportOptBtn.BorderSizePixel = 0
+configTeleportOptBtn.Parent = configSubPanel
+
+local toCorner = Instance.new("UICorner")
+toCorner.CornerRadius = UDim.new(0, 4)
+toCorner.Parent = configTeleportOptBtn
+
 local backToListBtn = Instance.new("TextButton")
 backToListBtn.Size = UDim2.new(1, -12, 0, 26)
-backToListBtn.Position = UDim2.fromOffset(6, 118)
+backToListBtn.Position = UDim2.fromOffset(6, 146)
 backToListBtn.Text = "⬅ Return to Script List"
 backToListBtn.TextColor3 = Color3.new(1, 1, 1)
 backToListBtn.TextSize = 7
@@ -275,7 +296,7 @@ local function createOutput(parent, color)
 end
 
 local output = createOutput(scroll, Color3.fromRGB(100, 255, 120))
-output.Text = "Spy active (Cognitive Engine Mode). Tap logs to inspect.\n\n"
+output.Text = "Spy active (Hardened Engine Mode). Tap logs to inspect.\n\n"
 
 local macroOutput = createOutput(macroScroll, Color3.fromRGB(255, 180, 100))
 macroOutput.Text = "Macro Recorder Standby.\n\n"
@@ -284,10 +305,10 @@ local analyzeOutput = createOutput(analyzeScroll, Color3.fromRGB(200, 150, 255))
 analyzeOutput.Text = "Select a log from Spy to inspect.\n\n"
 
 local dumpOutput = createOutput(dumpScroll, Color3.fromRGB(255, 200, 80))
-dumpOutput.Text = "Scanning GC memory...\n"
+dumpOutput.Text = "Garbage Collection Dumper ready.\n"
 
 local decompOutput = createOutput(decompScroll, Color3.fromRGB(100, 200, 255))
-decompOutput.Text = "Mapping modules...\n"
+decompOutput.Text = "Module Scanner ready.\n"
 
 local monitorOutput = createOutput(monitorScroll, Color3.fromRGB(255, 140, 100))
 monitorOutput.Text = "World & Attribute Monitor active.\n\n"
@@ -371,6 +392,9 @@ local function switchTab(activeTab)
     end
 end
 
+-- Fix: Initialize Spy tab styling explicitly on start
+switchTab("spy")
+
 tabSpyBtn.MouseButton1Click:Connect(function() switchTab("spy") end)
 tabMacroBtn.MouseButton1Click:Connect(function() switchTab("macro") end)
 tabAnalyzeBtn.MouseButton1Click:Connect(function() switchTab("analyze") end)
@@ -379,20 +403,25 @@ tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end)
 tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end)
 tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end)
 
--- Core Functions
-local function resolveRemote(remoteName, fallbackPath)
-    local found = ReplicatedStorage:FindFirstChild(remoteName, true) 
-        or workspace:FindFirstChild(remoteName, true)
-        or game:FindFirstChild(remoteName, true)
-        
+-- Safe Path Resolution (No loadstring)
+local function resolveRemote(remoteName, fullPath)
+    local found = ReplicatedStorage:FindFirstChild(remoteName, true) or workspace:FindFirstChild(remoteName, true)
     if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then
         return found
     end
-    
-    local success, instance = pcall(function()
-        return loadstring("return " .. fallbackPath)()
-    end)
-    if success and instance then return instance end
+    if fullPath then
+        local current = game
+        local success = true
+        for part in string.gmatch(fullPath, "[^%.]+") do
+            if part ~= "game" then
+                current = current:FindFirstChild(part)
+                if not current then success = false; break end
+            end
+        end
+        if success and current and (current:IsA("RemoteEvent") or current:IsA("RemoteFunction")) then
+            return current
+        end
+    end
     return nil
 end
 
@@ -410,7 +439,7 @@ local function sanitizeArguments(args, customOverrides)
                 if string.match(string.lower(tostring(k)), "token") 
                     or string.match(string.lower(tostring(k)), "nonce") 
                     or string.match(string.lower(tostring(k)), "time") then
-                    newTable[k] = tick()
+                    newTable[k] = os.clock()
                 else
                     newTable[k] = v
                 end
@@ -437,7 +466,6 @@ local function shouldIgnoreRemote(remotePath)
     return false
 end
 
--- Smart Interpretive Formatter for Argument Values
 local function interpretValue(val)
     local t = typeof(val)
     if t == "string" then
@@ -478,7 +506,7 @@ local function serializeValue(val, depth)
     elseif t == "CFrame" then
         return string.format("CFrame.new(%.2f, %.2f, %.2f)", val.Position.X, val.Position.Y, val.Position.Z)
     elseif t == "number" then
-        if val > 1600000000 and val < 2000000000 then return "tick()" end
+        if val > 1600000000 and val < 2000000000 then return "os.clock()" end
         return tostring(val)
     elseif t == "table" then
         local parts = {}
@@ -494,7 +522,8 @@ local function serializeValue(val, depth)
     end
 end
 
-local function classifySignature(args)
+local function classifySignature(args, hasCFrame)
+    if hasCFrame then return "SpatialStateSequence" end
     if #args == 0 then return "SignalTrigger" end
     local primaryArg = args[1]
     local argType = typeof(primaryArg)
@@ -503,14 +532,14 @@ local function classifySignature(args)
     elseif argType == "number" then
         return "ResourceTransaction"
     elseif argType == "table" then
-        if type(primaryArg) == "table" then return "StructuredPayload" end
+        return "StructuredPayload"
     elseif argType == "Instance" then
         return "TargetInteraction"
     end
     return "GenericAction"
 end
 
--- Centralized Scheduler
+-- Centralized Scheduler (reads live from learnedActions to avoid stale args)
 local function startCentralizedScheduler()
     if SchedulerRunning then return end
     SchedulerRunning = true
@@ -522,10 +551,12 @@ local function startCentralizedScheduler()
                 if not SchedulerRunning then break end
                 if taskData.enabled then
                     local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
-                    if remoteInst then
+                    local liveAction = learnedActions[signature]
+                    if remoteInst and liveAction then
+                        local currentArgs = liveAction.args or {}
                         local shouldSkip = false
                         if taskData.filterRule and taskData.filterRule.enabled then
-                            local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or taskData.args[taskData.filterRule.argIndex]
+                            local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or currentArgs[taskData.filterRule.argIndex]
                             if val and tostring(val) ~= taskData.filterRule.targetVal then
                                 shouldSkip = true
                             end
@@ -534,7 +565,7 @@ local function startCentralizedScheduler()
                         if not shouldSkip then
                             local char = player.Character
                             local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                            if taskData.cframe and hrp then
+                            if taskData.optInTeleport and taskData.cframe and hrp then
                                 local targetCF = typeof(taskData.cframe) == "CFrame" and taskData.cframe or CFrame.new()
                                 if (hrp.Position - targetCF.Position).Magnitude > 8 then
                                     hrp.CFrame = targetCF
@@ -543,7 +574,7 @@ local function startCentralizedScheduler()
                             end
 
                             _G.IgnoreAutoHooks = true
-                            local liveArgs = sanitizeArguments(taskData.args, taskData.overrides)
+                            local liveArgs = sanitizeArguments(currentArgs, taskData.overrides)
                             local ok = pcall(function()
                                 if remoteInst:IsA("RemoteEvent") then
                                     remoteInst:FireServer(table.unpack(liveArgs))
@@ -562,7 +593,7 @@ local function startCentralizedScheduler()
                                 
                                 if actionCycleCount >= 25 then
                                     actionCycleCount = 0
-                                    task.wait(math.random(3.5, 7.0))
+                                    task.wait(3.5 + math.random() * 3.5)
                                 else
                                     local jitter = math.random() * 0.25 + (math.random() * 0.1)
                                     task.wait(0.65 + jitter)
@@ -578,7 +609,7 @@ local function startCentralizedScheduler()
 end
 startCentralizedScheduler()
 
--- JSON Profile Serialization
+-- Safe JSON Profile Serialization (Handling non-basic types)
 local function exportProfileToJSON()
     local exportTable = {}
     for sig, action in pairs(learnedActions) do
@@ -589,8 +620,7 @@ local function exportProfileToJSON()
             method = action.method,
             category = action.category,
             count = action.count,
-            args = action.args,
-            cframePos = action.cframe and {action.cframe.Position.X, action.cframe.Position.Y, action.cframe.Position.Z} or nil
+            cframePos = action.cframe and {action.cframe:GetComponents()} or nil
         }
     end
     local success, encoded = pcall(function() return HttpService:JSONEncode(exportTable) end)
@@ -602,7 +632,7 @@ local function exportProfileToJSON()
     end
 end
 
-local redrawAutoTab -- Forward declaration
+local redrawAutoTab
 
 local function importProfileFromJSON()
     if readfile then
@@ -612,14 +642,13 @@ local function importProfileFromJSON()
             if decodedOk and type(decoded) == "table" then
                 for sig, data in pairs(decoded) do
                     local targetInstance = resolveRemote(data.name, data.fullPath)
-                    
                     learnedActions[sig] = {
                         signature = data.signature,
                         name = data.name,
                         instance = targetInstance,
                         fullPath = data.fullPath,
                         method = data.method,
-                        args = data.args or {},
+                        args = {},
                         cframe = data.cframePos and CFrame.new(table.unpack(data.cframePos)) or nil,
                         count = data.count,
                         category = data.category
@@ -663,7 +692,6 @@ function redrawAutoTab()
             label.TextWrapped = true
             label.Parent = card
 
-            -- Button that opens the separate Configuration Panel for this script
             local openConfigPanelBtn = Instance.new("TextButton")
             openConfigPanelBtn.Size = UDim2.new(1, -12, 0, 18)
             openConfigPanelBtn.Position = UDim2.fromOffset(6, 28)
@@ -683,12 +711,15 @@ function redrawAutoTab()
                 activeConfigSig = sig
                 panelHeader.Text = string.format("Configuring:\n[%s] (%s)", action.name, action.method)
                 
-                -- Dynamically bind config panel to THIS script's captured arguments using the interpreter
                 local queueData = ActiveSchedulerQueue[sig]
                 local isLooping = queueData and queueData.enabled or false
+                local isOptInTeleport = queueData and queueData.optInTeleport or false
                 
                 configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
                 configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+
+                configTeleportOptBtn.Text = isOptInTeleport and "Opt-In Spatial Teleport: ON" or "Opt-In Spatial Teleport: OFF"
+                configTeleportOptBtn.BackgroundColor3 = isOptInTeleport and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 
                 if action.args and #action.args > 0 then
                     local currentVal = queueData and queueData.overrides and queueData.overrides[1] or action.args[1]
@@ -715,14 +746,13 @@ function redrawAutoTab()
     end)
 end
 
--- Sub-panel dynamic interactive controls for the selected script
 configArg1Btn.MouseButton1Click:Connect(function()
     if not activeConfigSig or not learnedActions[activeConfigSig] then return end
     local action = learnedActions[activeConfigSig]
     if not action.args or #action.args == 0 then return end
 
     if not ActiveSchedulerQueue[activeConfigSig] then
-        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
     end
     
     local queueData = ActiveSchedulerQueue[activeConfigSig]
@@ -731,10 +761,17 @@ configArg1Btn.MouseButton1Click:Connect(function()
     local originalVal = action.args[1]
     local currentVal = queueData.overrides[1] or originalVal
     
-    if currentVal == originalVal then
-        queueData.overrides[1] = tostring(originalVal) .. "_Modified"
+    -- Safe toggle / type handling instead of blind string concatenation
+    if typeof(originalVal) == "number" then
+        queueData.overrides[1] = currentVal + 1
+    elseif typeof(originalVal) == "boolean" then
+        queueData.overrides[1] = not currentVal
     else
-        queueData.overrides[1] = originalVal
+        if currentVal == originalVal then
+            queueData.overrides[1] = tostring(originalVal) .. "_Modified"
+        else
+            queueData.overrides[1] = originalVal
+        end
     end
     
     configArg1Btn.Text = "Arg #1: " .. interpretValue(queueData.overrides[1])
@@ -745,7 +782,7 @@ configLoopBtn.MouseButton1Click:Connect(function()
     local action = learnedActions[activeConfigSig]
     
     if not ActiveSchedulerQueue[activeConfigSig] then
-        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
     end
     
     local queueData = ActiveSchedulerQueue[activeConfigSig]
@@ -755,26 +792,34 @@ configLoopBtn.MouseButton1Click:Connect(function()
     configLoopBtn.BackgroundColor3 = queueData.enabled and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 end)
 
+configTeleportOptBtn.MouseButton1Click:Connect(function()
+    if not activeConfigSig then return end
+    if not ActiveSchedulerQueue[activeConfigSig] then return end
+    local queueData = ActiveSchedulerQueue[activeConfigSig]
+    queueData.optInTeleport = not queueData.optInTeleport
+    configTeleportOptBtn.Text = queueData.optInTeleport and "Opt-In Spatial Teleport: ON" or "Opt-In Spatial Teleport: OFF"
+    configTeleportOptBtn.BackgroundColor3 = queueData.optInTeleport and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+end)
+
 backToListBtn.MouseButton1Click:Connect(function()
     configSubPanel.Visible = false
     autoContainer.Visible = true
 end)
 
-local function processLearnedRemote(self, method, args, callingScript, currentCFrame)
+local function processLearnedRemote(self, method, args, callingScript, currentCFrame, isMovementRelated)
     local fullPath = "game." .. self:GetFullName()
     if shouldIgnoreRemote(fullPath) then return end
 
     local signature = fullPath .. ":" .. method
-    local now = tick()
-    local category = classifySignature(args)
-    if currentCFrame then category = "SpatialStateSequence" end
+    local now = os.clock()
+    local category = classifySignature(args, isMovementRelated)
 
     if learnedActions[signature] then
         local entry = learnedActions[signature]
         entry.count = entry.count + 1
         entry.lastSeen = now
         entry.args = args
-        if currentCFrame then entry.cframe = currentCFrame end
+        if isMovementRelated and currentCFrame then entry.cframe = currentCFrame end
     else
         learnedActions[signature] = {
             signature = signature,
@@ -784,7 +829,7 @@ local function processLearnedRemote(self, method, args, callingScript, currentCF
             method = method,
             args = args,
             callingScript = callingScript,
-            cframe = currentCFrame,
+            cframe = isMovementRelated and currentCFrame or nil,
             count = 1,
             firstSeen = now,
             lastSeen = now,
@@ -807,7 +852,7 @@ clearAutoBtn.MouseButton1Click:Connect(function()
     redrawAutoTab()
 end)
 
--- Hook Engine
+-- Hook Engine with Protected Flag Resets
 local rawLogs = {}
 local ignoredRemotes = { ["Heartbeat"] = true, ["Ping"] = true, ["AnalyticsEvent"] = true }
 local callCooldowns = {}
@@ -820,32 +865,48 @@ local function redrawLogs()
 end
 
 local function captureLog(self, method, args)
-    if _G.IgnoreAutoHooks then return end
+    if _G.IgnoreAutoHooks or isHookingCall then return end
     local fullPath = "game." .. self:GetFullName()
     if shouldIgnoreRemote(fullPath) then return end
 
-    local now = tick()
+    local now = os.clock()
     if callCooldowns[self] and (now - callCooldowns[self]) < 0.05 then return end
     callCooldowns[self] = now
 
-    local callingScript = getcallingscript and getcallingscript() or nil
-    local currentCFrame = nil
-    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local pos = player.Character.HumanoidRootPart.Position
-        currentCFrame = CFrame.new(pos)
-    end
+    isHookingCall = true
+    local success, err = xpcall(function()
+        local callingScript = getcallingscript and getcallingscript() or nil
+        local currentCFrame = nil
+        local isMovementRelated = false
+        
+        -- Only flag as spatial if arguments contain Vector3/CFrame or path indicates movement
+        for _, arg in ipairs(args) do
+            if typeof(arg) == "Vector3" or typeof(arg) == "CFrame" then
+                isMovementRelated = true
+                currentCFrame = typeof(arg) == "CFrame" and arg or CFrame.new(arg)
+            end
+        end
 
-    processLearnedRemote(self, method, args, callingScript, currentCFrame)
+        if not isMovementRelated and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and (string.find(string.lower(self.Name), "move") or string.find(string.lower(self.Name), "pos")) then
+            isMovementRelated = true
+            currentCFrame = player.Character.HumanoidRootPart.CFrame
+        end
 
-    local serializedArgs = {}
-    for _, arg in ipairs(args) do table.insert(serializedArgs, serializeValue(arg)) end
-    
-    local snippet = string.format("%s:%s(%s)", fullPath, method, table.concat(serializedArgs, ", "))
-    local entryText = string.format("[%s] (%s) (Tap to Inspect)\n%s", self.Name, method, snippet)
-    
-    table.insert(rawLogs, { text = entryText, snippet = snippet, name = self.Name, method = method, args = args, fullPath = fullPath, callingScript = callingScript, cframe = currentCFrame })
-    if #rawLogs > 15 then table.remove(rawLogs, 1) end
-    redrawLogs()
+        processLearnedRemote(self, method, args, callingScript, currentCFrame, isMovementRelated)
+
+        local serializedArgs = {}
+        for _, arg in ipairs(args) do table.insert(serializedArgs, serializeValue(arg)) end
+        
+        local snippet = string.format("%s:%s(%s)", fullPath, method, table.concat(serializedArgs, ", "))
+        local entryText = string.format("[%s] (%s) (Tap to Inspect)\n%s", self.Name, method, snippet)
+        
+        table.insert(rawLogs, { text = entryText, snippet = snippet, name = self.Name, method = method, args = args, fullPath = fullPath, callingScript = callingScript, cframe = currentCFrame })
+        if #rawLogs > 15 then table.remove(rawLogs, 1) end
+        redrawLogs()
+    end, function(e)
+        warn("Aetherius Core Log Capture Error:", e)
+    end)
+    isHookingCall = false
 end
 
 if hookmetamethod and newcclosure then
@@ -854,9 +915,7 @@ if hookmetamethod and newcclosure then
             if not isHookingCall and typeof(self) == "Instance" and not ignoredRemotes[self.Name] then
                 local method = getnamecallmethod()
                 if (method == "FireServer" or method == "InvokeServer") and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
-                    isHookingCall = true
                     captureLog(self, method, {...})
-                    isHookingCall = false
                 end
             end
             return originalNamecall(self, ...)
@@ -864,7 +923,7 @@ if hookmetamethod and newcclosure then
     end)
 end
 
-output.InputBegan:Connect(function(input)
+table.insert(activeConnections, output.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         if #rawLogs > 0 then
             local logEntry = rawLogs[#rawLogs]
@@ -881,7 +940,7 @@ output.InputBegan:Connect(function(input)
             switchTab("analyze")
         end
     end
-end)
+end))
 
 clearBtn.MouseButton1Click:Connect(function() rawLogs = {} redrawLogs() end)
 exportBtn.MouseButton1Click:Connect(function()
@@ -891,25 +950,42 @@ exportBtn.MouseButton1Click:Connect(function()
     safeCopy(table.concat(snippets, "\n"), exportBtn, "Copied!")
 end)
 
+-- Stub handlers for previously dead UI buttons
+recordMacroBtn.MouseButton1Click:Connect(function()
+    safeCopy("Macro Recording Active", recordMacroBtn, "Recording...")
+end)
+copyMacroBtn.MouseButton1Click:Connect(function()
+    safeCopy("-- Macro Sequence Buffer\nprint('Macro Executed')", copyMacroBtn, "Copied Macro!")
+end)
+clearMacroBtn.MouseButton1Click:Connect(function()
+    macroOutput.Text = "Macro Recorder Standby.\n\n"
+end)
+genFuncBtn.MouseButton1Click:Connect(function()
+    safeCopy("local function invokedRemote()\nend", genFuncBtn, "Copied Function!")
+end)
+clearMonitorBtn.MouseButton1Click:Connect(function()
+    monitorOutput.Text = "World & Attribute Monitor cleared.\n\n"
+end)
+
 -- Window Dragging
 local dragging, dragStart, startPos
-bar.InputBegan:Connect(function(input)
+table.insert(activeConnections, bar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         dragStart = input.Position
         startPos = frame.Position
     end
-end)
+end))
 
-UserInputService.InputChanged:Connect(function(input)
+table.insert(activeConnections, UserInputService.InputChanged:Connect(function(input)
     if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dragStart
         frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
-end)
+end))
 
-UserInputService.InputEnded:Connect(function(input)
+table.insert(activeConnections, UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = false
     end
-end)
+end))
