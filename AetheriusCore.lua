@@ -1,10 +1,11 @@
 --[[
     ⚡ AETHERIUS CORE v10.0 [AUTONOMOUS INTELLIGENCE ENGINE]
     -------------------------------------------------------
-    Phase 1: Dynamic UI Engine & Panel Generator
+    Phase 1: Dynamic UI Engine & Panel Generator (Centered Layout)
     Phase 2: Target Memory Pool, Attribute Scraper & Visualizer
     Phase 3: Outgoing Remote Interceptor & Hash Synthesizer
     Phase 4: Crowdsourced Player Learning, Confidence Scoring & Safety
+    + Boot-Time Immediate Environment Auto-Discovery
 --]]
 
 local Players = game:GetService("Players")
@@ -40,9 +41,11 @@ gui.ResetOnSpawn = false
 gui.DisplayOrder = 999999
 gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Centered & Draggable Main Frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.fromOffset(450, 310)
-mainFrame.Position = UDim2.new(0.15, 0, 0.15, 0)
+mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(13, 13, 15)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = gui
@@ -83,7 +86,7 @@ local closeCorner = Instance.new("UICorner")
 closeCorner.CornerRadius = UDim.new(0, 3)
 closeCorner.Parent = closeBtn
 
--- Window Dragging Functionality
+-- Window Dragging Functionality (AnchorPoint-aware)
 local dragging, dragStart, startPos
 bar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -181,8 +184,7 @@ end
 
 tabSpyBtn.MouseButton1Click:Connect(function() switchTab("spy") end)
 tabModulesBtn.MouseButton1Click:Connect(function() switchTab("modules") end)
-tabConfigBtn = tabPanelBtn
-tabConfigBtn.MouseButton1Click:Connect(function() switchTab("panel") end)
+tabPanelBtn.MouseButton1Click:Connect(function() switchTab("panel") end)
 
 --------------------------------------------------------------------------------
 -- PHASE 2: TARGET SCANNER, MEMORY POOL & VISUALIZER
@@ -527,13 +529,43 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
+-- Boot-Time Immediate Environment Auto-Discovery Subsystem
+local function AutoScanEnvironmentOnBoot()
+    local commonKeywords = {"mine", "collect", "gather", "interact", "open", "farm", "harvest", "egg", "ore", "chest"}
+    
+    for _, folder in ipairs(workspace:GetChildren()) do
+        if #folder:GetChildren() > 0 and not Players:GetPlayerFromCharacter(folder) then
+            local folderNameLower = folder.Name:lower()
+            
+            for _, remote in ipairs(ReplicatedStorage:GetDescendants()) do
+                if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then
+                    local remoteNameLower = remote.Name:lower()
+                    
+                    for _, keyword in ipairs(commonKeywords) do
+                        if string.find(remoteNameLower, keyword) or string.find(folderNameLower, keyword) then
+                            if #folder:GetChildren() > 0 then
+                                local sampleTarget = folder:GetChildren()[1]
+                                RegisterOrUpdateModule(remote, sampleTarget, "Auto-Discovered Environment")
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Run immediate scan on execution
+task.spawn(AutoScanEnvironmentOnBoot)
+
 -- Phase 4: Crowdsourced Other-Player Interaction Watchdog
 task.spawn(function()
     while task.wait(1.5) do
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                 local hrp = player.Character.HumanoidRootPart
-                -- Scan surrounding objects within 10 studs of other active players
+                -- Scan surrounding objects within 8 studs of other active players
                 for _, descendant in ipairs(workspace:GetDescendants()) do
                     if descendant:IsA("BasePart") and not descendant:IsDescendantOf(player.Character) then
                         if (descendant.Position - hrp.Position).Magnitude < 8 then
