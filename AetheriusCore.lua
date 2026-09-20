@@ -49,7 +49,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -35, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v5.0 - Flat Permanent Panel Mode]"
+title.Text = "⚡ Aetherius Core [v5.0 - Dedicated Panel Mode]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
@@ -192,6 +192,73 @@ local autoContainer, autoScroll, autoFooter, autoLayout = createContainer()
 autoContainer.Visible = false
 autoContainer.Parent = frame
 
+-- Dedicated Script Configuration Sub-Panel (Standalone window pane)
+local configSubPanel = Instance.new("Frame")
+configSubPanel.Size = UDim2.new(1, 0, 1, -40)
+configSubPanel.Position = UDim2.fromOffset(0, 40)
+configSubPanel.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
+configSubPanel.BorderSizePixel = 0
+configSubPanel.Visible = false
+configSubPanel.Parent = frame
+
+local panelHeader = Instance.new("TextLabel")
+panelHeader.Size = UDim2.new(1, -12, 0, 36)
+panelHeader.Position = UDim2.fromOffset(6, 6)
+panelHeader.BackgroundTransparency = 1
+panelHeader.TextColor3 = Color3.fromRGB(240, 240, 250)
+panelHeader.TextSize = 8
+panelHeader.Font = Enum.Font.Code
+panelHeader.TextXAlignment = Enum.TextXAlignment.Left
+panelHeader.TextYAlignment = Enum.TextYAlignment.Top
+panelHeader.TextWrapped = true
+panelHeader.Text = "Config Panel: Select a script to configure."
+panelHeader.Parent = configSubPanel
+
+local configTargetBtn = Instance.new("TextButton")
+configTargetBtn.Size = UDim2.new(1, -12, 0, 26)
+configTargetBtn.Position = UDim2.fromOffset(6, 50)
+configTargetBtn.Text = "Arg 1 Target: [Default / Scanned]"
+configTargetBtn.TextColor3 = Color3.new(1, 1, 1)
+configTargetBtn.TextSize = 7
+configTargetBtn.Font = Enum.Font.Code
+configTargetBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
+configTargetBtn.BorderSizePixel = 0
+configTargetBtn.Parent = configSubPanel
+
+local tCorner = Instance.new("UICorner")
+tCorner.CornerRadius = UDim.new(0, 4)
+tCorner.Parent = configTargetBtn
+
+local configLoopBtn = Instance.new("TextButton")
+configLoopBtn.Size = UDim2.new(1, -12, 0, 26)
+configLoopBtn.Position = UDim2.fromOffset(6, 82)
+configLoopBtn.Text = "Loop Execution: OFF"
+configLoopBtn.TextColor3 = Color3.new(1, 1, 1)
+configLoopBtn.TextSize = 7
+configLoopBtn.Font = Enum.Font.Code
+configLoopBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+configLoopBtn.BorderSizePixel = 0
+configLoopBtn.Parent = configSubPanel
+
+local lCorner = Instance.new("UICorner")
+lCorner.CornerRadius = UDim.new(0, 4)
+lCorner.Parent = configLoopBtn
+
+local backToListBtn = Instance.new("TextButton")
+backToListBtn.Size = UDim2.new(1, -12, 0, 26)
+backToListBtn.Position = UDim2.fromOffset(6, 118)
+backToListBtn.Text = "⬅ Return to Script List"
+backToListBtn.TextColor3 = Color3.new(1, 1, 1)
+backToListBtn.TextSize = 7
+backToListBtn.Font = Enum.Font.Code
+backToListBtn.BackgroundColor3 = Color3.fromRGB(50, 40, 70)
+backToListBtn.BorderSizePixel = 0
+backToListBtn.Parent = configSubPanel
+
+local bCorner = Instance.new("UICorner")
+bCorner.CornerRadius = UDim.new(0, 4)
+bCorner.Parent = backToListBtn
+
 local function createOutput(parent, color)
     local out = Instance.new("TextLabel")
     out.Size = UDim2.new(1, 0, 0, 0)
@@ -226,7 +293,7 @@ local monitorOutput = createOutput(monitorScroll, Color3.fromRGB(255, 140, 100))
 monitorOutput.Text = "World & Attribute Monitor active.\n\n"
 
 local autoEmptyText = createOutput(autoScroll, Color3.fromRGB(120, 220, 255))
-autoEmptyText.Text = "[COGNITIVE ENGINE ACTIVE]\nTrigger actions to self-build modular control panels..."
+autoEmptyText.Text = "[COGNITIVE ENGINE ACTIVE]\nTrigger actions to self-build panels..."
 
 local function createButton(parent, text, width, xOffset, color)
     local btn = Instance.new("TextButton")
@@ -279,6 +346,7 @@ local function safeCopy(str, button, successMsg)
 end
 
 local function switchTab(activeTab)
+    configSubPanel.Visible = false
     spyContainer.Visible = (activeTab == "spy")
     macroContainer.Visible = (activeTab == "macro")
     analyzeContainer.Visible = (activeTab == "analyze")
@@ -381,6 +449,7 @@ end
 local learnedActions = {}
 local actionCards = {}
 local ActiveSchedulerQueue = {}
+local activeConfigSig = nil
 
 local ignoredRemotePatterns = { "Analytics", "ClientKit", "Telemetry", "Fps", "Ping", "Heartbeat" }
 
@@ -567,7 +636,7 @@ function redrawAutoTab()
     for sig, action in pairs(learnedActions) do
         if not actionCards[sig] then
             local card = Instance.new("Frame")
-            card.Size = UDim2.new(1, -8, 0, 72)
+            card.Size = UDim2.new(1, -8, 0, 52)
             card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
             card.BorderSizePixel = 0
             card.Parent = autoScroll
@@ -577,7 +646,7 @@ function redrawAutoTab()
             cardCorner.Parent = card
 
             local label = Instance.new("TextLabel")
-            label.Size = UDim2.new(1, -12, 0, 32)
+            label.Size = UDim2.new(1, -12, 0, 24)
             label.Position = UDim2.fromOffset(6, 4)
             label.BackgroundTransparency = 1
             label.TextColor3 = Color3.fromRGB(220, 220, 230)
@@ -588,66 +657,40 @@ function redrawAutoTab()
             label.TextWrapped = true
             label.Parent = card
 
-            -- Fully Permanent Flat Panel Controls (No Dropdowns)
-            local configDropBtn = Instance.new("TextButton")
-            configDropBtn.Size = UDim2.new(0.65, 0, 0, 22)
-            configDropBtn.Position = UDim2.fromOffset(6, 42)
-            configDropBtn.Text = "Arg 1 Target: [Default / Scanned]"
-            configDropBtn.TextColor3 = Color3.new(1, 1, 1)
-            configDropBtn.TextSize = 6
-            configDropBtn.Font = Enum.Font.Code
-            configDropBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-            configDropBtn.BorderSizePixel = 0
-            configDropBtn.Parent = card
+            -- Button that opens the separate Configuration Panel for this script
+            local openConfigPanelBtn = Instance.new("TextButton")
+            openConfigPanelBtn.Size = UDim2.new(1, -12, 0, 18)
+            openConfigPanelBtn.Position = UDim2.fromOffset(6, 28)
+            openConfigPanelBtn.Text = "⚙ Open Configuration Panel"
+            openConfigPanelBtn.TextColor3 = Color3.new(1, 1, 1)
+            openConfigPanelBtn.TextSize = 7
+            openConfigPanelBtn.Font = Enum.Font.Code
+            openConfigPanelBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 48)
+            openConfigPanelBtn.BorderSizePixel = 0
+            openConfigPanelBtn.Parent = card
 
-            local dropCorner = Instance.new("UICorner")
-            dropCorner.CornerRadius = UDim.new(0, 3)
-            dropCorner.Parent = configDropBtn
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0, 3)
+            btnCorner.Parent = openConfigPanelBtn
 
-            local loopBtn = Instance.new("TextButton")
-            loopBtn.Size = UDim2.new(0.3, -4, 0, 22)
-            loopBtn.Position = UDim2.new(0.65, 8, 0, 42)
-            loopBtn.Text = "Loop: OFF"
-            loopBtn.TextColor3 = Color3.new(1, 1, 1)
-            loopBtn.TextSize = 6
-            loopBtn.Font = Enum.Font.Code
-            loopBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-            loopBtn.BorderSizePixel = 0
-            loopBtn.Parent = card
-
-            local loopCorner = Instance.new("UICorner")
-            loopCorner.CornerRadius = UDim.new(0, 3)
-            loopCorner.Parent = loopBtn
-
-            local configIndex = 1
-            configDropBtn.MouseButton1Click:Connect(function()
-                configIndex = (configIndex % #availableClientConfigs) + 1
-                local selectedVal = availableClientConfigs[configIndex]
-                configDropBtn.Text = "Arg 1 Target: " .. tostring(selectedVal)
+            openConfigPanelBtn.MouseButton1Click:Connect(function()
+                activeConfigSig = sig
+                panelHeader.Text = string.format("Configuring:\n[%s] (%s)", action.name, action.method)
                 
-                if not ActiveSchedulerQueue[sig] then
-                    ActiveSchedulerQueue[sig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
-                end
-                ActiveSchedulerQueue[sig].overrides = ActiveSchedulerQueue[sig].overrides or {}
-                ActiveSchedulerQueue[sig].overrides[1] = selectedVal
-            end)
+                -- Sync values to sub-panel controls
+                local queueData = ActiveSchedulerQueue[sig]
+                local isLooping = queueData and queueData.enabled or false
+                configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
+                configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 
-            local isLooping = false
-            loopBtn.MouseButton1Click:Connect(function()
-                isLooping = not isLooping
-                loopBtn.Text = isLooping and "Loop: ON" or "Loop: OFF"
-                loopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
-
-                if not ActiveSchedulerQueue[sig] then
-                    ActiveSchedulerQueue[sig] = { name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
-                end
-                ActiveSchedulerQueue[sig].enabled = isLooping
+                autoContainer.Visible = false
+                configSubPanel.Visible = true
             end)
 
             actionCards[sig] = { card = card, label = label }
         end
 
-        actionCards[sig].label.Text = string.format("⚡ [%s] (%s) | Type: %s (%dx Calls)\nPath: %s", 
+        actionCards[sig].label.Text = string.format("⚡ [%s] (%s) | Type: %s (%dx)\nPath: %s", 
             action.name, action.method, action.category, action.count, action.fullPath)
     end
 
@@ -655,6 +698,42 @@ function redrawAutoTab()
         autoScroll.CanvasSize = UDim2.new(0, autoLayout.AbsoluteContentSize.X + 10, 0, autoLayout.AbsoluteContentSize.Y + 10)
     end)
 end
+
+-- Sub-panel interactive controls logic
+local configIndex = 1
+configTargetBtn.MouseButton1Click:Connect(function()
+    if not activeConfigSig or not learnedActions[activeConfigSig] then return end
+    configIndex = (configIndex % #availableClientConfigs) + 1
+    local selectedVal = availableClientConfigs[configIndex]
+    configTargetBtn.Text = "Arg 1 Target: " .. tostring(selectedVal)
+    
+    local action = learnedActions[activeConfigSig]
+    if not ActiveSchedulerQueue[activeConfigSig] then
+        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+    end
+    ActiveSchedulerQueue[activeConfigSig].overrides = ActiveSchedulerQueue[activeConfigSig].overrides or {}
+    ActiveSchedulerQueue[activeConfigSig].overrides[1] = selectedVal
+end)
+
+configLoopBtn.MouseButton1Click:Connect(function()
+    if not activeConfigSig or not learnedActions[activeConfigSig] then return end
+    local action = learnedActions[activeConfigSig]
+    
+    if not ActiveSchedulerQueue[activeConfigSig] then
+        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+    end
+    
+    local queueData = ActiveSchedulerQueue[activeConfigSig]
+    queueData.enabled = not queueData.enabled
+    
+    configLoopBtn.Text = queueData.enabled and "Loop Execution: ON" or "Loop Execution: OFF"
+    configLoopBtn.BackgroundColor3 = queueData.enabled and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+end)
+
+backToListBtn.MouseButton1Click:Connect(function()
+    configSubPanel.Visible = false
+    autoContainer.Visible = true
+end)
 
 local function processLearnedRemote(self, method, args, callingScript, currentCFrame)
     local fullPath = "game." .. self:GetFullName()
@@ -698,6 +777,8 @@ clearAutoBtn.MouseButton1Click:Connect(function()
     learnedActions = {}
     for _, cardObj in pairs(actionCards) do cardObj.card:Destroy() end
     actionCards = {}
+    configSubPanel.Visible = false
+    autoContainer.Visible = true
     redrawAutoTab()
 end)
 
