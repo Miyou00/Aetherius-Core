@@ -2,14 +2,21 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-local player = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
 
--- Clean up any previous global instances to prevent duplicate hooks/loops
+-- Hardened LocalPlayer Resolution
+local player = Players.LocalPlayer
+while not player do
+    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
+    player = Players.LocalPlayer
+end
+if not player then return end
+
+-- Prevent duplicate hooks and clean up previous instances safely
 if _G.AetheriusCoreCleanup then
     pcall(_G.AetheriusCoreCleanup)
 end
 
--- Global Hook Controls & Shutdown State
+-- Global Hook Controls & Engine State
 _G.IgnoreAutoHooks = false
 local isEngineClosed = false
 local hookStatusMessage = "Spy active (Hardened Engine Mode)."
@@ -17,50 +24,70 @@ local hookStatusMessage = "Spy active (Hardened Engine Mode)."
 -- Profile Configuration
 local PROFILE_FILENAME = "AetheriusCore_Profile_" .. game.PlaceId .. ".json"
 
--- Connection tracker for proper cleanup on close
+-- Trackers for Cleanup
 local activeConnections = {}
 local logConnections = {}
+local scheduledTaskDelays = {}
 
--- State variables declared early for proper scope access
+-- State Storage
 local learnedActions = {}
 local actionCards = {}
 local ActiveSchedulerQueue = {}
 local activeConfigSig = nil
+local rawLogs = {}
+local logRows = {}
 
--- Forward declare hook variable and scheduler controls
-local originalNamecall
+-- Scheduler State & Thread Control
 local SchedulerRunning = true
 local activeTaskThreads = {}
+local activeRemoteCalls = {}
+local originalNamecall
 
--- Global Cleanup Registration with Explicit Thread Cancellation & Safe Hook Restoration
+-- Global Cleanup Callback
 _G.AetheriusCoreCleanup = function()
     isEngineClosed = true
     SchedulerRunning = false
+    _G.IgnoreAutoHooks = false
+    table.clear(activeRemoteCalls)
 
-    for _, thread in pairs(activeTaskThreads) do
-        pcall(function()
-            task.cancel(thread)
-        end)
+    -- Cancel all scheduler threads
+    for sig, thread in pairs(activeTaskThreads) do
+        pcall(function() task.cancel(thread) end)
     end
-    activeTaskThreads = {}
+    table.clear(activeTaskThreads)
 
-    for _, conn in ipairs(activeConnections) do
-        pcall(function() conn:Disconnect() end)
+    -- Cancel all delayed UI callbacks
+    for _, delayThread in ipairs(scheduledTaskDelays) do
+        pcall(function() task.cancel(delayThread) end)
     end
-    for _, conn in ipairs(logConnections) do
-        pcall(function() conn:Disconnect() end)
-    end
+    table.clear(scheduledTaskDelays)
+
+    -- Disconnect events
+    for _, conn in ipairs(activeConnections) do pcall(function() conn:Disconnect() end) end
+    for _, conn in ipairs(logConnections) do pcall(function() conn:Disconnect() end) end
+
+    -- Restore Hook Metamethod safely
     pcall(function()
-        if _G._AetheriusOriginalNamecall and hookmetamethod then
-            hookmetamethod(game, "__namecall", _G._AetheriusOriginalNamecall)
-            _G._AetheriusOriginalNamecall = nil
+        if _G._AetheriusOriginalNamecall_v6 and hookmetamethod then
+            hookmetamethod(game, "__namecall", _G._AetheriusOriginalNamecall_v6)
+            _G._AetheriusOriginalNamecall_v6 = nil
         end
     end)
-    local old = player.PlayerGui:FindFirstChild("AetheriusCoreEngine")
-    if old then old:Destroy() end
+
+    -- Clear state dictionaries completely
+    table.clear(learnedActions)
+    table.clear(actionCards)
+    table.clear(ActiveSchedulerQueue)
+    table.clear(rawLogs)
+    table.clear(logRows)
+
+    -- Destroy UI
+    local playerGui = player and player:FindFirstChild("PlayerGui")
+    local oldGui = playerGui and playerGui:FindFirstChild("AetheriusCoreEngine")
+    if oldGui then oldGui:Destroy() end
 end
 
--- Core GUI Window Construction (Compact 364x280)
+-- UI Initialization
 local gui = Instance.new("ScreenGui")
 gui.Name = "AetheriusCoreEngine"
 gui.ResetOnSpawn = false
@@ -93,14 +120,13 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, -65, 1, 0)
 title.Position = UDim2.fromOffset(6, 0)
 title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v6.3 - Fully Hardened]"
+title.Text = "⚡ Aetherius Core [v6.5 - Fully Hardened Execution]"
 title.TextColor3 = Color3.fromRGB(240, 240, 245)
 title.TextSize = 8
 title.Font = Enum.Font.Code
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = bar
 
--- Emergency Stop Button on Header
 local emergencyStopBtn = Instance.new("TextButton")
 emergencyStopBtn.Size = UDim2.fromOffset(32, 14)
 emergencyStopBtn.Position = UDim2.new(1, -62, 0, 3)
@@ -133,14 +159,6 @@ closeCorner.Parent = closeBtn
 
 local function triggerEmergencyStop()
     SchedulerRunning = not SchedulerRunning
-    for _, taskData in pairs(ActiveSchedulerQueue) do
-        if SchedulerRunning then
-            taskData.enabled = taskData.pausedEnabled == true
-        else
-            taskData.pausedEnabled = taskData.enabled
-            taskData.enabled = false
-        end
-    end
     if SchedulerRunning then
         emergencyStopBtn.Text = "🛑 STOP"
         emergencyStopBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 30)
@@ -155,7 +173,7 @@ table.insert(activeConnections, closeBtn.MouseButton1Click:Connect(function()
     if _G.AetheriusCoreCleanup then _G.AetheriusCoreCleanup() end
 end))
 
--- Navigation Tab Buttons
+-- Navigation System
 local function createTab(text, xPos, width)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.fromOffset(width or 48, 16)
@@ -181,13 +199,12 @@ local tabDecompBtn = createTab("Modules", 202, 50)
 local tabMonitorBtn = createTab("Monitor", 254, 48)
 local tabAutoBtn = createTab("DNA/Cognitive", 304, 54)
 
--- Dynamic Container Engine
 local function createContainer()
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1, 0, 1, -40)
     container.Position = UDim2.fromOffset(0, 40)
     container.BackgroundTransparency = 1
-    
+
     local scroll = Instance.new("ScrollingFrame")
     scroll.Position = UDim2.fromOffset(6, 2)
     scroll.Size = UDim2.new(1, -12, 1, -26)
@@ -199,38 +216,38 @@ local function createContainer()
     scroll.AutomaticCanvasSize = Enum.AutomaticSize.XY
     scroll.ScrollingDirection = Enum.ScrollingDirection.XY
     scroll.Parent = container
-    
+
     local layout = Instance.new("UIListLayout")
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Padding = UDim.new(0, 4)
     layout.Parent = scroll
-    
+
     local padding = Instance.new("UIPadding")
     padding.PaddingTop = UDim.new(0, 4)
     padding.PaddingLeft = UDim.new(0, 4)
     padding.PaddingRight = UDim.new(0, 4)
     padding.PaddingBottom = UDim.new(0, 4)
     padding.Parent = scroll
-    
+
     local scrollCorner = Instance.new("UICorner")
     scrollCorner.CornerRadius = UDim.new(0, 3)
     scrollCorner.Parent = scroll
-    
+
     local footer = Instance.new("Frame")
     footer.Size = UDim2.new(1, -12, 0, 20)
     footer.Position = UDim2.new(0, 6, 1, -22)
     footer.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     footer.BorderSizePixel = 0
     footer.Parent = container
-    
+
     local footerCorner = Instance.new("UICorner")
     footerCorner.CornerRadius = UDim.new(0, 3)
     footerCorner.Parent = footer
-    
+
     table.insert(activeConnections, layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         scroll.CanvasSize = UDim2.new(0, layout.AbsoluteContentSize.X, 0, layout.AbsoluteContentSize.Y + 10)
     end))
-    
+
     return container, scroll, footer, layout
 end
 
@@ -261,7 +278,7 @@ local autoContainer, autoScroll, autoFooter, autoLayout = createContainer()
 autoContainer.Visible = false
 autoContainer.Parent = frame
 
--- Script Configuration Sub-Panel
+-- Configuration Panel Sub-UI
 local configSubPanel = Instance.new("Frame")
 configSubPanel.Size = UDim2.new(1, 0, 1, -40)
 configSubPanel.Position = UDim2.fromOffset(0, 40)
@@ -357,20 +374,21 @@ local function createOutput(parent, color)
     return out
 end
 
+-- Clear UI Indicators for Non-Functional Features
 local macroOutput = createOutput(macroScroll, Color3.fromRGB(255, 180, 100))
-macroOutput.Text = "Macro Recorder Standby.\n\n"
+macroOutput.Text = "[STATUS]: Macro Recorder Engine - INACTIVE (Placeholder UI)\n"
 
 local analyzeOutput = createOutput(analyzeScroll, Color3.fromRGB(200, 150, 255))
 analyzeOutput.Text = "Select a log from Spy to inspect.\n\n"
 
 local dumpOutput = createOutput(dumpScroll, Color3.fromRGB(255, 200, 80))
-dumpOutput.Text = "Garbage Collection Dumper ready.\n"
+dumpOutput.Text = "[STATUS]: Garbage Collection Dumper - INACTIVE (Placeholder UI)\n"
 
 local decompOutput = createOutput(decompScroll, Color3.fromRGB(100, 200, 255))
-decompOutput.Text = "Module Scanner ready.\n"
+decompOutput.Text = "[STATUS]: Module Scanner Engine - INACTIVE (Placeholder UI)\n"
 
 local monitorOutput = createOutput(monitorScroll, Color3.fromRGB(255, 140, 100))
-monitorOutput.Text = "World & Attribute Monitor active.\n\n"
+monitorOutput.Text = "[STATUS]: Attribute Monitor - INACTIVE (Placeholder UI)\n\n"
 
 local autoEmptyText = createOutput(autoScroll, Color3.fromRGB(120, 220, 255))
 autoEmptyText.Text = "[COGNITIVE ENGINE ACTIVE]\nTrigger actions to self-build panels..."
@@ -406,23 +424,37 @@ local saveDnaBtn = createButton(autoFooter, "Save DNA", 65, 3, Color3.fromRGB(40
 local loadDnaBtn = createButton(autoFooter, "Load DNA", 65, 71, Color3.fromRGB(40, 60, 100))
 local clearAutoBtn = createButton(autoFooter, "Reset", 50, 139, Color3.fromRGB(70, 30, 30))
 
+-- Robust Clipboard Handler
 local function safeCopy(str, button, successMsg)
-    if setclipboard then
-        local ok = pcall(setclipboard, str)
-        if ok then
-            local origText = button.Text
-            button.Text = successMsg or "Copied!"
-            task.delay(2, function()
-                if button.Parent then button.Text = origText end
-            end)
-            return
-        end
+    if isEngineClosed then return false end
+    
+    if not setclipboard then
+        local origText = button.Text
+        button.Text = "No Clipboard API"
+        local handle
+        handle = task.delay(2, function()
+            if not isEngineClosed and button and button.Parent then button.Text = origText end
+            for idx, th in ipairs(scheduledTaskDelays) do
+                if th == handle then table.remove(scheduledTaskDelays, idx) break end
+            end
+        end)
+        table.insert(scheduledTaskDelays, handle)
+        return false
     end
+
+        local success = pcall(setclipboard, str)
     local origText = button.Text
-    button.Text = "Error"
-    task.delay(2, function()
-        if button.Parent then button.Text = origText end
+    button.Text = success and (successMsg or "Copied!") or "Failed"
+    
+    local handle
+    handle = task.delay(2, function()
+        if not isEngineClosed and button and button.Parent then button.Text = origText end
+        for idx, th in ipairs(scheduledTaskDelays) do
+            if th == handle then table.remove(scheduledTaskDelays, idx) break end
+        end
     end)
+    table.insert(scheduledTaskDelays, handle)
+    return success
 end
 
 local function switchTab(activeTab)
@@ -434,7 +466,7 @@ local function switchTab(activeTab)
     decompContainer.Visible = (activeTab == "decomp")
     monitorContainer.Visible = (activeTab == "monitor")
     autoContainer.Visible = (activeTab == "auto")
-    
+
     local tabs = { 
         {tabSpyBtn, "spy"},
         {tabMacroBtn, "macro"},
@@ -461,21 +493,52 @@ table.insert(activeConnections, tabDecompBtn.MouseButton1Click:Connect(function(
 table.insert(activeConnections, tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end))
 table.insert(activeConnections, tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end))
 
--- Remote Resolution & Argument Sanitization (Cycle-Safe)
-local function resolveRemote(remoteName, fullPath)
-    if fullPath and type(fullPath) == "string" then
+-- Strict Segment-Based Instance Resolution Engine
+local function resolveInstance(fullPath)
+    if not fullPath or type(fullPath) ~= "string" then return nil end
+    
+    local pathSegments = {}
+    if string.sub(fullPath, 1, 5) == "game." then
+        fullPath = string.sub(fullPath, 6)
+    end
+    
+    for segment in string.gmatch(fullPath, "[^%.]+") do
+        table.insert(pathSegments, segment)
+    end
+    
+    if #pathSegments == 0 then return nil end
+    
         local current = game
-        local success = true
-        for part in string.gmatch(fullPath, "[^%.]+") do
-            if part ~= "game" then
-                current = current and current:FindFirstChild(part)
-                if not current then success = false; break end
+    local index = 1
+    while index <= #pathSegments do
+        local matchedChild = nil
+        local matchedLength = 0
+        local children = current:GetChildren()
+
+        for _, child in ipairs(children) do
+            local childSegments = {}
+            for segmentIndex = index, #pathSegments do
+                childSegments[#childSegments + 1] = pathSegments[segmentIndex]
+                if table.concat(childSegments, ".") == child.Name then
+                    matchedChild = child
+                    matchedLength = segmentIndex - index + 1
+                end
             end
         end
-        if success and current and (current:IsA("RemoteEvent") or current:IsA("RemoteFunction")) then
-            return current
-        end
+
+        if not matchedChild then return nil end
+        current = matchedChild
+        index = index + matchedLength
     end
+    return current
+end
+
+local function resolveRemote(remoteName, fullPath)
+    local inst = resolveInstance(fullPath)
+    if inst and (inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction")) then
+        return inst
+    end
+
     if remoteName and type(remoteName) == "string" then
         local found = ReplicatedStorage:FindFirstChild(remoteName, true) or workspace:FindFirstChild(remoteName, true)
         if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then
@@ -485,7 +548,11 @@ local function resolveRemote(remoteName, fullPath)
     return nil
 end
 
-local function sanitizeArguments(args, customOverrides)
+-- Sparse Array Sanitation Engine
+local function sanitizeArguments(argsPacked, customOverrides)
+    local count = argsPacked.n or #argsPacked
+    local sanitized = { n = count }
+
     local function sanitizeValue(val, visited)
         visited = visited or {}
         local t = type(val)
@@ -503,26 +570,31 @@ local function sanitizeArguments(args, customOverrides)
             end
             visited[val] = nil
             return newTable
-        elseif t == "string" and (string.match(string.lower(val), "token") or string.match(string.lower(val), "time")) then
-            return val
         else
             return val
         end
     end
 
-    local sanitized = {}
-    for i, arg in ipairs(args) do
-        local val = (customOverrides and customOverrides[i] ~= nil) and customOverrides[i] or arg
-        table.insert(sanitized, sanitizeValue(val))
+    for i = 1, count do
+                -- Use a presence map so false and explicit nil overrides are preserved.
+        local val
+        if customOverrides and customOverrides._present and customOverrides._present[i] then
+            val = customOverrides[i]
+        else
+            val = argsPacked[i]
+        end
+        sanitized[i] = sanitizeValue(val)
     end
     return sanitized
 end
 
 local ignoredRemotePatterns = { "Analytics", "ClientKit", "Telemetry", "Fps", "Ping", "Heartbeat" }
 
+-- FIX 7: Case-insensitive ignored pattern matching
 local function shouldIgnoreRemote(remotePath)
+    local lowerPath = string.lower(remotePath)
     for _, pattern in ipairs(ignoredRemotePatterns) do
-        if string.find(remotePath, pattern) then return true end
+        if string.find(lowerPath, string.lower(pattern), 1, true) then return true end
     end
     return false
 end
@@ -531,6 +603,8 @@ local function serializeValue(val, depth, visited)
     depth = depth or 0
     visited = visited or {}
     if depth > 3 then return "{... Max Depth}" end
+    if val == nil then return "nil" end
+
     local t = typeof(val)
     if t == "string" then 
         return string.format("%q", val)
@@ -566,6 +640,8 @@ local function encodeArgument(val, depth, visited)
     depth = depth or 0
     visited = visited or {}
     if depth > 4 then return {type = "string", val = "{Max Depth}"} end
+    if val == nil then return {type = "nil", val = "nil"} end
+
     local t = typeof(val)
     if t == "string" or t == "number" or t == "boolean" then
         return {type = t, val = val}
@@ -589,173 +665,166 @@ local function encodeArgument(val, depth, visited)
     end
 end
 
--- Strictly Validated Argument Decoding with Key/Value Safety Checks
 local function decodeArgument(data)
     if not data or type(data) ~= "table" then return nil, false end
     local t = data.type
     local v = data.val
-    if t == "string" then
-        if type(v) == "string" then return v, true end
-    elseif t == "number" then
-        if type(v) == "number" then return v, true end
-    elseif t == "boolean" then
-        if type(v) == "boolean" then return v, true end
-    elseif t == "Vector3" then
-        if type(v) == "table" and #v >= 3 and type(v[1]) == "number" and type(v[2]) == "number" and type(v[3]) == "number" then
+    if t == "nil" then return nil, true end
+    if t == "string" and type(v) == "string" then return v, true end
+    if t == "number" and type(v) == "number" then return v, true end
+    if t == "boolean" and type(v) == "boolean" then return v, true end
+    
+    if t == "Vector3" and type(v) == "table" and #v >= 3 then
+        if type(v[1]) == "number" and type(v[2]) == "number" and type(v[3]) == "number" then
             return Vector3.new(v[1], v[2], v[3]), true
         end
-    elseif t == "CFrame" then
-        if type(v) == "table" and #v >= 12 then
-            local allNumeric = true
-            for i = 1, 12 do
-                if type(v[i]) ~= "number" then allNumeric = false break end
-            end
-            if allNumeric then
-                return CFrame.new(table.unpack(v, 1, 12)), true
-            end
+    end
+    
+    if t == "CFrame" and type(v) == "table" and #v >= 12 then
+        local valid = true
+        for i = 1, 12 do
+            if type(v[i]) ~= "number" then valid = false break end
         end
-    elseif t == "Instance" then
-        if type(v) == "string" then
-            local current = game
-            for part in string.gmatch(v, "[^%.]+") do
-                if part ~= "game" then
-                    current = current and current:FindFirstChild(part)
+        if valid then
+            return CFrame.new(table.unpack(v, 1, 12)), true
+        end
+    end
+    
+    -- FIX 3: Return inst ~= nil so unresolvable Instances are treated as invalid
+    if t == "Instance" and type(v) == "string" then
+        local inst = resolveInstance(v)
+        return inst, inst ~= nil
+    end
+    
+    if t == "table" and type(v) == "table" then
+        local tbl = {}
+        for _, pair in ipairs(v) do
+            if type(pair) == "table" and pair.key and pair.value then
+                local decKey, kValid = decodeArgument(pair.key)
+                local decVal, vValid = decodeArgument(pair.value)
+                if kValid and vValid and decKey ~= nil then
+                    tbl[decKey] = decVal
                 end
             end
-            if current then return current, true end
         end
-    elseif t == "table" then
-        if type(v) == "table" then
-            local tbl = {}
-            local allValid = true
-            for _, pair in ipairs(v) do
-                if type(pair) == "table" and pair.key ~= nil and pair.value ~= nil then
-                    local decKey, kValid = decodeArgument(pair.key)
-                    local decVal, vValid = decodeArgument(pair.value)
-                    if decKey ~= nil and kValid and vValid then
-                        tbl[decKey] = decVal
-                    else
-                        allValid = false
-                    end
-                else
-                    allValid = false
-                end
-            end
-            return tbl, allValid
-        end
+        return tbl, true
     end
     return nil, false
 end
 
-local function hasValidInstances(val, visited)
-    visited = visited or {}
-    local t = typeof(val)
-    if t == "Instance" then
-        return val.Parent ~= nil
-    elseif t == "table" then
-        if visited[val] then return true end
-        visited[val] = true
-        for k, v in pairs(val) do
-            if not hasValidInstances(k, visited) or not hasValidInstances(v, visited) then
-                return false
-            end
-        end
-    end
-    return true
-end
-
 local function updateTaskScheduler(signature, taskData)
-    if activeTaskThreads[signature] then
-        task.cancel(activeTaskThreads[signature])
+    local existingThread = activeTaskThreads[signature]
+    if existingThread then
+        local status = coroutine.status(existingThread)
+        if status ~= "dead" then return end
         activeTaskThreads[signature] = nil
     end
 
     activeTaskThreads[signature] = task.spawn(function()
         local actionCycleCount = 0
-        while SchedulerRunning do
-            if not taskData.enabled or (taskData.errors or 0) >= 5 then
+        while not isEngineClosed do
+            if not SchedulerRunning or not taskData.enabled or (taskData.errors or 0) >= 5 then
                 task.wait(0.2)
             else
                 local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
                 local liveAction = learnedActions[signature]
+                
                 if remoteInst and liveAction and not liveAction.isUnavailable then
-                    local currentArgs = liveAction.args or {}
+                    local currentArgs = liveAction.args or { n = 0 }
                     local liveArgs = sanitizeArguments(currentArgs, taskData.overrides)
                     
-                    local isValidArgs = true
-                    for _, arg in ipairs(liveArgs) do
-                        if not hasValidInstances(arg) then
-                            isValidArgs = false
-                            break
+                    local char = player.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    if taskData.optInTeleport and taskData.cframe and hrp then
+                        local targetCF = typeof(taskData.cframe) == "CFrame" and taskData.cframe or CFrame.new()
+                        if (hrp.Position - targetCF.Position).Magnitude > 8 then
+                            hrp.CFrame = targetCF
+                            task.wait(0.05)
                         end
                     end
 
-                    if isValidArgs then
-                        local shouldSkip = false
-                        if taskData.filterRule and taskData.filterRule.enabled then
-                            local val = taskData.overrides and taskData.overrides[taskData.filterRule.argIndex] or currentArgs[taskData.filterRule.argIndex]
-                            if val and tostring(val) ~= taskData.filterRule.targetVal then shouldSkip = true end
-                        end
-
-                        if not shouldSkip then
-                            local char = player.Character
-                            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                            if taskData.optInTeleport and taskData.cframe and hrp then
-                                local targetCF = typeof(taskData.cframe) == "CFrame" and taskData.cframe or CFrame.new()
-                                if (hrp.Position - targetCF.Position).Magnitude > 8 then
-                                    hrp.CFrame = targetCF
-                                    task.wait(0.05)
-                                end
-                            end
-
-                            _G.IgnoreAutoHooks = true
-                            local ok = pcall(function()
-                                if remoteInst:IsA("RemoteEvent") then
-                                    remoteInst:FireServer(table.unpack(liveArgs))
-                                elseif remoteInst:IsA("RemoteFunction") then
-                                    remoteInst:InvokeServer(table.unpack(liveArgs))
-                                end
+                                        local ok = false
+                    _G.IgnoreAutoHooks = true
+                    local protectedCallOk, protectedCallResult = xpcall(function()
+                        if remoteInst:IsA("RemoteEvent") then
+                            return pcall(function()
+                                remoteInst:FireServer(table.unpack(liveArgs, 1, liveArgs.n or #liveArgs))
                             end)
-                            _G.IgnoreAutoHooks = false
+                        elseif remoteInst:IsA("RemoteFunction") then
+                            if activeRemoteCalls[signature] then return false end
+                            activeRemoteCalls[signature] = true
 
-                            if not ok then
-                                taskData.errors = (taskData.errors or 0) + 1
-                                if taskData.errors >= 5 then
-                                    taskData.enabled = false
-                                    taskData.pausedEnabled = false
-                                    warn("Aetherius Scheduler: Max error limit reached. Disabled task:", taskData.name)
-                                end
-                                task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
-                            else
-                                taskData.errors = 0
-                                actionCycleCount = actionCycleCount + 1
-                                if actionCycleCount >= 25 then
-                                    actionCycleCount = 0
-                                    task.wait(3.5 + math.random() * 3.5)
-                                else
-                                    task.wait(0.65 + (math.random() * 0.25))
-                                end
+                            local callSuccess = false
+                            local invThread = task.spawn(function()
+                                callSuccess = pcall(function()
+                                    remoteInst:InvokeServer(table.unpack(liveArgs, 1, liveArgs.n or #liveArgs))
+                                end)
+                                activeRemoteCalls[signature] = nil
+                            end)
+
+                            local elapsed = 0
+                            while elapsed < 3.0 and coroutine.status(invThread) ~= "dead" do
+                                task.wait(0.1)
+                                elapsed = elapsed + 0.1
                             end
-                        else
-                            task.wait(0.5)
+
+                            if coroutine.status(invThread) ~= "dead" then
+                                pcall(function() task.cancel(invThread) end)
+                                activeRemoteCalls[signature] = nil
+                                return false
+                            end
+                            return callSuccess
                         end
+                        return false
+                    end, function()
+                        return false
+                    end)
+                    _G.IgnoreAutoHooks = false
+                    if protectedCallOk then ok = protectedCallResult end
+
+                    if not ok then
+                        taskData.errors = (taskData.errors or 0) + 1
+                        if taskData.errors >= 5 then
+                            taskData.enabled = false
+                            taskData.pausedEnabled = false
+                            
+                            if activeConfigSig == signature then
+                                configLoopBtn.Text = "Loop Execution: OFF (MAX ERRORS)"
+                                configLoopBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+                            end
+                        end
+                        task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
                     else
-                        task.wait(1.0)
+                        taskData.errors = 0
+                        actionCycleCount = actionCycleCount + 1
+                        if actionCycleCount >= 25 then
+                            actionCycleCount = 0
+                            task.wait(3.5 + math.random() * 3.5)
+                        else
+                            task.wait(0.65 + (math.random() * 0.25))
+                        end
                     end
-                else
+                                else
                     task.wait(1.0)
                 end
             end
         end
+
+        if activeTaskThreads[signature] == coroutine.running() then
+            activeTaskThreads[signature] = nil
+        end
     end)
 end
 
--- Profile Persistence with Atomic Staging, Strict Validation, Thread Cancellation & UI Card Rebuilding
+-- Profile Export/Import Pipeline
 local function exportProfileToJSON()
     local exportTable = {}
     for sig, action in pairs(learnedActions) do
         local encodedArgs = {}
-        for _, arg in ipairs(action.args or {}) do table.insert(encodedArgs, encodeArgument(arg)) end
+        local argsCount = action.args and action.args.n or 0
+        for i = 1, argsCount do
+            table.insert(encodedArgs, encodeArgument(action.args[i]))
+        end
         exportTable[sig] = {
             signature = action.signature,
             name = action.name,
@@ -764,9 +833,11 @@ local function exportProfileToJSON()
             category = action.category,
             count = action.count,
             args = encodedArgs,
+            argsCount = argsCount,
             cframePos = action.cframe and {action.cframe:GetComponents()} or nil
         }
     end
+    
     local success, encoded = pcall(function() return HttpService:JSONEncode(exportTable) end)
     if success and writefile then
         local writeSuccess = pcall(function() writefile(PROFILE_FILENAME, encoded) end)
@@ -781,100 +852,133 @@ end
 local redrawAutoTab
 
 local function importProfileFromJSON()
-    if readfile then
-        local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
-        if ok and raw then
-            local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
-            if decodedOk and type(decoded) == "table" then
-                local parseOk = pcall(function()
-                    local tempLearnedActions = {}
-                    local tempSchedulerQueue = {}
-                    local importSuccess = true
+    if not readfile then safeCopy("None", loadDnaBtn, "Import Failed"); return end
+    
+    local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
+    if not ok or not raw then safeCopy("None", loadDnaBtn, "Import Failed"); return end
 
-                    for sig, data in pairs(decoded) do
-                        if type(data) == "table" and type(data.name) == "string" and type(data.fullPath) == "string" and type(data.method) == "string" and type(data.args) == "table" then
-                            local targetInstance = resolveRemote(data.name, data.fullPath)
-                            local restoredArgs = {}
-                            local profileValid = true
-                            for _, encArg in ipairs(data.args) do
-                                local decArg, argValid = decodeArgument(encArg)
-                                if not argValid then profileValid = false importSuccess = false end
-                                table.insert(restoredArgs, decArg)
-                            end
-                            
-                            local resolvedCFrame = nil
-                            if type(data.cframePos) == "table" and #data.cframePos >= 12 then
-                                local cValid = true
-                                for i = 1, 12 do if type(data.cframePos[i]) ~= "number" then cValid = false break end end
-                                if cValid then resolvedCFrame = CFrame.new(table.unpack(data.cframePos, 1, 12)) end
-                            end
-                            
-                            tempLearnedActions[sig] = {
-                                signature = data.signature or sig,
-                                name = data.name,
-                                instance = targetInstance,
-                                fullPath = data.fullPath,
-                                method = data.method,
-                                args = restoredArgs,
-                                cframe = resolvedCFrame,
-                                count = data.count or 1,
-                                category = data.category or "GenericAction",
-                                isUnavailable = not profileValid or (targetInstance == nil)
-                            }
-                            tempSchedulerQueue[sig] = {
-                                enabled = false,
-                                pausedEnabled = false,
-                                optInTeleport = false,
-                                name = data.name,
-                                fullPath = data.fullPath,
-                                args = restoredArgs,
-                                cframe = resolvedCFrame,
-                                overrides = {}
-                            }
-                        else
-                            importSuccess = false
-                        end
-                    end
-                    
-                    if importSuccess then
-                        -- Explicitly cancel existing scheduler threads before state replacement
-                        for _, thread in pairs(activeTaskThreads) do
-                            pcall(function() task.cancel(thread) end)
-                        end
-                        activeTaskThreads = {}
+    local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not decodedOk or type(decoded) ~= "table" then safeCopy("None", loadDnaBtn, "Import Failed"); return end
 
-                        for _, cardObj in pairs(actionCards) do
-                            if cardObj.conn then pcall(function() cardObj.conn:Disconnect() end) end
-                            if cardObj.card then cardObj.card:Destroy() end
-                        end
-                        actionCards = {}
-
-                        learnedActions = tempLearnedActions
-                        ActiveSchedulerQueue = tempSchedulerQueue
-                        for sig, taskData in pairs(ActiveSchedulerQueue) do
-                            updateTaskScheduler(sig, taskData)
-                        end
-                        if redrawAutoTab then redrawAutoTab() end
-                        safeCopy("Loaded", loadDnaBtn, "Loaded DNA!")
-                        return
-                    else
-                        error("Profile entries validation failed")
-                    end
-                end)
-
-                if parseOk then return end
-            end
+        -- Validate that the profile contains at least one structurally valid entry
+    local hasValidEntry = false
+    for _, data in pairs(decoded) do
+        if type(data) == "table" and type(data.name) == "string" and type(data.fullPath) == "string" and type(data.method) == "string" then
+            hasValidEntry = true
+            break
         end
     end
-    safeCopy("None", loadDnaBtn, "Import Failed")
-end
-
-local function classifySignature(args, isMovementRelated)
-    if isMovementRelated then
-        return "MovementAction"
+    if not hasValidEntry then
+        safeCopy("None", loadDnaBtn, "Import Failed")
+        return
     end
 
-    for _, arg in ipairs(args or {}) do
+    -- Replace current state only after the profile has passed basic validation
+    for sig, thread in pairs(activeTaskThreads) do pcall(function() task.cancel(thread) end) end
+    table.clear(activeTaskThreads)
+    table.clear(ActiveSchedulerQueue)
+    table.clear(learnedActions)
+
+    for _, cardObj in pairs(actionCards) do
+        if cardObj.conn then pcall(function() cardObj.conn:Disconnect() end) end
+        if cardObj.card then cardObj.card:Destroy() end
+    end
+    table.clear(actionCards)
+
+    local loadedEntriesCount = 0
+
+    for sig, data in pairs(decoded) do
+        if type(data) == "table" and type(data.name) == "string" and type(data.fullPath) == "string" and type(data.method) == "string" then
+            local targetInstance = resolveRemote(data.name, data.fullPath)
+            
+            -- FIX 4: Clamp fallback argument counts to prevent unbounded arrays
+            local rawArgsCount = tonumber(data.argsCount)
+            local parsedArgsCount
+            if rawArgsCount and rawArgsCount >= 0 then
+                parsedArgsCount = math.clamp(math.floor(rawArgsCount), 0, 256)
+            else
+                local fallbackLength = (type(data.args) == "table" and #data.args or 0)
+                parsedArgsCount = math.clamp(fallbackLength, 0, 256)
+            end
+
+            local restoredArgs = { n = parsedArgsCount }
+            
+            if type(data.args) == "table" then
+                for i = 1, parsedArgsCount do
+                    local encArg = data.args[i]
+                    if encArg then
+                        local decArg, argValid = decodeArgument(encArg)
+                        -- FIX 5: Distinguish valid nil from malformed arguments
+                        if argValid then
+                            restoredArgs[i] = decArg
+                        elseif encArg.type == "nil" then
+                            restoredArgs[i] = nil
+                        end
+                    end
+                end
+            end
+
+            -- Validated CFrame components
+            local resolvedCFrame = nil
+            if type(data.cframePos) == "table" and #data.cframePos >= 12 then
+                local validCF = true
+                for i = 1, 12 do
+                    if type(data.cframePos[i]) ~= "number" then validCF = false break end
+                end
+                if validCF then
+                    resolvedCFrame = CFrame.new(table.unpack(data.cframePos, 1, 12))
+                end
+            end
+
+            local validCount = (type(data.count) == "number" and data.count > 0) and math.clamp(math.floor(data.count), 1, 1000000) or 1
+            local validCategories = { MovementAction = true, InstanceAction = true, StructuredAction = true, StringAction = true, GenericAction = true }
+            local validCategory = (type(data.category) == "string" and validCategories[data.category]) and data.category or "GenericAction"
+
+            learnedActions[sig] = {
+                signature = data.signature or sig,
+                name = data.name,
+                instance = targetInstance,
+                fullPath = data.fullPath,
+                method = data.method,
+                args = restoredArgs,
+                cframe = resolvedCFrame,
+                count = validCount,
+                category = validCategory,
+                isUnavailable = (targetInstance == nil)
+            }
+
+            ActiveSchedulerQueue[sig] = {
+                enabled = false,
+                pausedEnabled = false,
+                optInTeleport = false,
+                name = data.name,
+                fullPath = data.fullPath,
+                args = restoredArgs,
+                cframe = resolvedCFrame,
+                                overrides = {},
+                _present = {}
+            }
+            
+            updateTaskScheduler(sig, ActiveSchedulerQueue[sig])
+            loadedEntriesCount = loadedEntriesCount + 1
+        end
+    end
+
+    if loadedEntriesCount > 0 then
+        if redrawAutoTab then redrawAutoTab() end
+        safeCopy("Loaded", loadDnaBtn, "Loaded (" .. loadedEntriesCount .. ")!")
+    else
+        safeCopy("None", loadDnaBtn, "Import Failed")
+    end
+end
+
+-- Precise Movement Classification Engine
+local function classifySignature(argsPacked, isMovementRelated)
+    if isMovementRelated then return "MovementAction" end
+
+    local count = argsPacked.n or #argsPacked
+    for i = 1, count do
+        local arg = argsPacked[i]
         local valueType = typeof(arg)
         if valueType == "Instance" then
             return "InstanceAction"
@@ -937,19 +1041,31 @@ redrawAutoTab = function()
                 local currentAction = learnedActions[sig]
                 if not currentAction then return end
                 panelHeader.Text = string.format("Configuring:\n[%s] (%s)", currentAction.name, currentAction.method)
-                
+
                 local queueData = ActiveSchedulerQueue[sig]
                 local isLooping = queueData and queueData.enabled or false
                 local isOptInTeleport = queueData and queueData.optInTeleport or false
-                
-                configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
-                configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+
+                if queueData and (queueData.errors or 0) >= 5 then
+                    configLoopBtn.Text = "Loop Execution: OFF (MAX ERRORS)"
+                    configLoopBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+                else
+                    configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
+                    configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
+                end
 
                 configTeleportOptBtn.Text = isOptInTeleport and "Opt-In Spatial Teleport: ON" or "Opt-In Spatial Teleport: OFF"
                 configTeleportOptBtn.BackgroundColor3 = isOptInTeleport and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 
-                if currentAction.args and #currentAction.args > 0 then
-                    local currentVal = queueData and queueData.overrides and queueData.overrides[1] or currentAction.args[1]
+                local argsCount = currentAction.args and currentAction.args.n or 0
+                if argsCount > 0 then
+                    -- FIX 1: Explicit nil check so false/nil overrides render correctly
+                    local currentVal
+                                        if queueData and queueData._present and queueData._present[1] then
+                        currentVal = queueData.overrides[1]
+                    else
+                        currentVal = currentAction.args[1]
+                    end
                     configArg1Btn.Text = "Arg #1: " .. serializeValue(currentVal)
                     configArg1Btn.Visible = true
                 else
@@ -977,20 +1093,26 @@ end
 table.insert(activeConnections, configArg1Btn.MouseButton1Click:Connect(function()
     if not activeConfigSig or not learnedActions[activeConfigSig] then return end
     local action = learnedActions[activeConfigSig]
-    if not action.args or #action.args == 0 then return end
+    if not action.args or (action.args.n or 0) == 0 then return end
 
-    if not ActiveSchedulerQueue[activeConfigSig] then
-        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, pausedEnabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+        if not ActiveSchedulerQueue[activeConfigSig] then
+        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, pausedEnabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {}, _present = {} }
         updateTaskScheduler(activeConfigSig, ActiveSchedulerQueue[activeConfigSig])
     end
-    
+
     local queueData = ActiveSchedulerQueue[activeConfigSig]
     queueData.overrides = queueData.overrides or {}
-    
-    local originalVal = action.args[1]
-    local currentVal = queueData.overrides[1] or originalVal
-    
-    if typeof(originalVal) == "number" then
+    queueData._present = queueData._present or {}
+
+        local originalVal = action.args[1]
+    local currentVal
+    if queueData._present[1] then
+        currentVal = queueData.overrides[1]
+    else
+        currentVal = originalVal
+    end
+
+        if typeof(originalVal) == "number" then
         queueData.overrides[1] = currentVal + 1
     elseif typeof(originalVal) == "boolean" then
         queueData.overrides[1] = not currentVal
@@ -998,7 +1120,8 @@ table.insert(activeConnections, configArg1Btn.MouseButton1Click:Connect(function
         if currentVal == originalVal then queueData.overrides[1] = tostring(originalVal) .. "_Modified"
         else queueData.overrides[1] = originalVal end
     end
-    
+    queueData._present[1] = true
+
     configArg1Btn.Text = "Arg #1: " .. serializeValue(queueData.overrides[1])
 end))
 
@@ -1006,17 +1129,17 @@ table.insert(activeConnections, configLoopBtn.MouseButton1Click:Connect(function
     if not activeConfigSig or not learnedActions[activeConfigSig] then return end
     local action = learnedActions[activeConfigSig]
     if action.isUnavailable then return end
-    
+
     if not ActiveSchedulerQueue[activeConfigSig] then
-        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, pausedEnabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {} }
+                    ActiveSchedulerQueue[activeConfigSig] = { enabled = false, pausedEnabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {}, _present = {} }
         updateTaskScheduler(activeConfigSig, ActiveSchedulerQueue[activeConfigSig])
     end
-    
+
     local queueData = ActiveSchedulerQueue[activeConfigSig]
     queueData.enabled = not queueData.enabled
     queueData.pausedEnabled = queueData.enabled
     queueData.errors = 0
-    
+
     configLoopBtn.Text = queueData.enabled and "Loop Execution: ON" or "Loop Execution: OFF"
     configLoopBtn.BackgroundColor3 = queueData.enabled and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
 end))
@@ -1035,20 +1158,40 @@ table.insert(activeConnections, backToListBtn.MouseButton1Click:Connect(function
     autoContainer.Visible = true
 end))
 
-local function processLearnedRemote(self, method, args, callingScript, currentCFrame, isMovementRelated)
+-- Learned Remote Pipeline
+local function argumentsHaveSameShape(previousArgs, currentArgs)
+    if not previousArgs or not currentArgs then return false end
+    local previousCount = previousArgs.n or #previousArgs
+    local currentCount = currentArgs.n or #currentArgs
+    if previousCount ~= currentCount then return false end
+
+    for i = 1, currentCount do
+        local previousType = typeof(previousArgs[i])
+        local currentType = typeof(currentArgs[i])
+        if previousType ~= currentType then return false end
+    end
+    return true
+end
+
+local function processLearnedRemote(self, method, argsPacked, callingScript, currentCFrame, isMovementRelated)
     local fullPath = "game." .. self:GetFullName()
     if shouldIgnoreRemote(fullPath) then return end
 
     local signature = fullPath .. ":" .. method
     local now = os.clock()
-    local category = classifySignature(args, isMovementRelated)
+    local category = classifySignature(argsPacked, isMovementRelated)
 
     if learnedActions[signature] then
-        local entry = learnedActions[signature]
+                local entry = learnedActions[signature]
+        local shapeChanged = not argumentsHaveSameShape(entry.args, argsPacked)
         entry.count = entry.count + 1
         entry.lastSeen = now
-        entry.args = args
+        entry.args = argsPacked
         entry.isUnavailable = false
+        if shapeChanged and ActiveSchedulerQueue[signature] then
+            ActiveSchedulerQueue[signature].overrides = {}
+            ActiveSchedulerQueue[signature]._present = {}
+        end
         if isMovementRelated and currentCFrame then
             entry.cframe = currentCFrame
             if ActiveSchedulerQueue[signature] then ActiveSchedulerQueue[signature].cframe = currentCFrame end
@@ -1060,7 +1203,7 @@ local function processLearnedRemote(self, method, args, callingScript, currentCF
             instance = self,
             fullPath = fullPath,
             method = method,
-            args = args,
+            args = argsPacked,
             callingScript = callingScript,
             cframe = isMovementRelated and currentCFrame or nil,
             count = 1,
@@ -1072,56 +1215,54 @@ local function processLearnedRemote(self, method, args, callingScript, currentCF
     end
 
     if not ActiveSchedulerQueue[signature] then
-        ActiveSchedulerQueue[signature] = {
+                ActiveSchedulerQueue[signature] = {
             enabled = false,
             pausedEnabled = false,
             optInTeleport = false,
             name = self.Name,
             fullPath = fullPath,
-            args = args,
+            args = argsPacked,
             cframe = learnedActions[signature].cframe,
-            overrides = {}
+            overrides = {},
+            _present = {}
         }
         updateTaskScheduler(signature, ActiveSchedulerQueue[signature])
     else
-        ActiveSchedulerQueue[signature].args = args
+        ActiveSchedulerQueue[signature].args = argsPacked
     end
 
     redrawAutoTab()
 end
 
 table.insert(activeConnections, clearAutoBtn.MouseButton1Click:Connect(function()
-    for _, thread in pairs(activeTaskThreads) do
-        pcall(function() task.cancel(thread) end)
-    end
-    activeTaskThreads = {}
-    ActiveSchedulerQueue = {}
-    learnedActions = {}
+    for sig, thread in pairs(activeTaskThreads) do pcall(function() task.cancel(thread) end) end
+    table.clear(activeTaskThreads)
+    table.clear(ActiveSchedulerQueue)
+    table.clear(learnedActions)
+
     for _, cardObj in pairs(actionCards) do
         if cardObj.conn then pcall(function() cardObj.conn:Disconnect() end) end
-        cardObj.card:Destroy()
+        if cardObj.card then cardObj.card:Destroy() end
     end
-    actionCards = {}
+    table.clear(actionCards)
+
+    activeConfigSig = nil
     configSubPanel.Visible = false
     autoContainer.Visible = true
     redrawAutoTab()
 end))
 
--- Hook Engine with Leak-Free Log Redraws & Single-Storage Hook Safeguard
-local rawLogs = {}
-local logRows = {}
+-- Hook Engine with Redraw Leak Protection
 local ignoredRemotes = { ["Heartbeat"] = true, ["Ping"] = true, ["AnalyticsEvent"] = true }
 local callCooldowns = {}
 local isHookingCall = false
 
 local function redrawLogs()
-    for _, conn in ipairs(logConnections) do
-        pcall(function() conn:Disconnect() end)
-    end
-    logConnections = {}
+    for _, conn in ipairs(logConnections) do pcall(function() conn:Disconnect() end) end
+    table.clear(logConnections)
 
     for _, row in ipairs(logRows) do row:Destroy() end
-    logRows = {}
+    table.clear(logRows)
 
     for _, logEntry in ipairs(rawLogs) do
         local rowBtn = Instance.new("TextButton")
@@ -1155,7 +1296,9 @@ local function redrawLogs()
                 string.format("[i] Script: %s", logEntry.callingScript and logEntry.callingScript:GetFullName() or "Unknown"),
                 "\n[1] Arguments Captured:"
             }
-            for i, arg in ipairs(logEntry.args) do
+            local count = logEntry.args.n or #logEntry.args
+            for i = 1, count do
+                local arg = logEntry.args[i]
                 table.insert(lines, string.format("  Arg #%d [%s] =\n%s", i, typeof(arg), serializeValue(arg)))
             end
             analyzeOutput.Text = table.concat(lines, "\n")
@@ -1166,7 +1309,7 @@ local function redrawLogs()
     end
 end
 
-local function captureLog(self, method, args)
+local function captureLog(self, method, ...)
     if isEngineClosed or _G.IgnoreAutoHooks or isHookingCall then return end
     local fullPath = "game." .. self:GetFullName()
     if shouldIgnoreRemote(fullPath) then return end
@@ -1176,54 +1319,64 @@ local function captureLog(self, method, args)
     callCooldowns[self] = now
 
     isHookingCall = true
-    xpcall(function()
+    xpcall(function(...)
+        local argsPacked = table.pack(...)
         local callingScript = getcallingscript and getcallingscript() or nil
         local currentCFrame = nil
         local isMovementRelated = false
-        
-        for _, arg in ipairs(args) do
-            if typeof(arg) == "Vector3" or typeof(arg) == "CFrame" then
+
+        -- Precise Movement Heuristics: Explicit patterns prevent false positives
+        local lowName = string.lower(self.Name)
+        if string.match(lowName, "^move_") or string.match(lowName, "_pos$") or string.match(lowName, "^teleport") or string.match(lowName, "updateposition") or string.match(lowName, "walkto") then
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                 isMovementRelated = true
-                currentCFrame = typeof(arg) == "CFrame" and arg or CFrame.new(arg)
+                currentCFrame = player.Character.HumanoidRootPart.CFrame
             end
         end
 
-        if not isMovementRelated and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and (string.find(string.lower(self.Name), "move") or string.find(string.lower(self.Name), "pos")) then
-            isMovementRelated = true
-            currentCFrame = player.Character.HumanoidRootPart.CFrame
-        end
-
-        processLearnedRemote(self, method, args, callingScript, currentCFrame, isMovementRelated)
+        processLearnedRemote(self, method, argsPacked, callingScript, currentCFrame, isMovementRelated)
 
         local serializedArgs = {}
-        for _, arg in ipairs(args) do table.insert(serializedArgs, serializeValue(arg)) end
-        
+        for i = 1, argsPacked.n do
+            table.insert(serializedArgs, serializeValue(argsPacked[i]))
+        end
+
         local snippet = string.format("%s:%s(%s)", fullPath, method, table.concat(serializedArgs, ", "))
         local entryText = string.format("[%s] (%s)\n%s", self.Name, method, snippet)
-        
-        local logObj = { text = entryText, snippet = snippet, name = self.Name, method = method, args = args, fullPath = fullPath, callingScript = callingScript, cframe = currentCFrame }
+
+        local logObj = { 
+            text = entryText, 
+            snippet = snippet, 
+            name = self.Name, 
+            method = method, 
+            args = argsPacked, 
+            fullPath = fullPath, 
+            callingScript = callingScript, 
+            cframe = currentCFrame 
+        }
         table.insert(rawLogs, logObj)
         if #rawLogs > 15 then table.remove(rawLogs, 1) end
         redrawLogs()
     end, function(e)
         warn("Aetherius Core Log Capture Error:", e)
-    end)
+    end, ...)
     isHookingCall = false
 end
 
+-- Isolated Metamethod Hook Installation
 if hookmetamethod and newcclosure then
     local success, err = pcall(function()
         originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             if not isEngineClosed and not isHookingCall and typeof(self) == "Instance" and not ignoredRemotes[self.Name] then
                 local method = getnamecallmethod()
                 if (method == "FireServer" or method == "InvokeServer") and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
-                    captureLog(self, method, {...})
+                    captureLog(self, method, ...)
                 end
             end
             return originalNamecall(self, ...)
         end))
-        if not _G._AetheriusOriginalNamecall then
-            _G._AetheriusOriginalNamecall = originalNamecall
+        if not _G._AetheriusOriginalNamecall_v6 then
+            _G._AetheriusOriginalNamecall_v6 = originalNamecall
         end
     end)
     if not success then
@@ -1235,8 +1388,8 @@ else
     warn(hookStatusMessage)
 end
 
--- Event Handlers & Window Dragging
-table.insert(activeConnections, clearBtn.MouseButton1Click:Connect(function() rawLogs = {} redrawLogs() end))
+-- Event Listeners & Drag Engine
+table.insert(activeConnections, clearBtn.MouseButton1Click:Connect(function() table.clear(rawLogs) redrawLogs() end))
 table.insert(activeConnections, exportBtn.MouseButton1Click:Connect(function()
     if #rawLogs == 0 then return end
     local snippets = {}
@@ -1244,11 +1397,11 @@ table.insert(activeConnections, exportBtn.MouseButton1Click:Connect(function()
     safeCopy(table.concat(snippets, "\n"), exportBtn, "Copied!")
 end))
 
-table.insert(activeConnections, recordMacroBtn.MouseButton1Click:Connect(function() safeCopy("Macro Recording Active", recordMacroBtn, "Recording...") end))
-table.insert(activeConnections, copyMacroBtn.MouseButton1Click:Connect(function() safeCopy("-- Macro Sequence Buffer\nprint('Macro Executed')", copyMacroBtn, "Copied Macro!") end))
-table.insert(activeConnections, clearMacroBtn.MouseButton1Click:Connect(function() macroOutput.Text = "Macro Recorder Standby.\n\n" end))
-table.insert(activeConnections, genFuncBtn.MouseButton1Click:Connect(function() safeCopy("local function invokedRemote()\nend", genFuncBtn, "Copied Function!") end))
-table.insert(activeConnections, clearMonitorBtn.MouseButton1Click:Connect(function() monitorOutput.Text = "World & Attribute Monitor cleared.\n\n" end))
+table.insert(activeConnections, recordMacroBtn.MouseButton1Click:Connect(function() safeCopy("Inactive", recordMacroBtn, "Inactive") end))
+table.insert(activeConnections, copyMacroBtn.MouseButton1Click:Connect(function() safeCopy("-- Placeholder Macro Buffer", copyMacroBtn, "Copied") end))
+table.insert(activeConnections, clearMacroBtn.MouseButton1Click:Connect(function() macroOutput.Text = "[STATUS]: Macro Recorder Engine - INACTIVE (Placeholder UI)\n" end))
+table.insert(activeConnections, genFuncBtn.MouseButton1Click:Connect(function() safeCopy("-- Placeholder Analysis Output", genFuncBtn, "Copied") end))
+table.insert(activeConnections, clearMonitorBtn.MouseButton1Click:Connect(function() monitorOutput.Text = "[STATUS]: Attribute Monitor - INACTIVE (Placeholder UI)\n\n" end))
 table.insert(activeConnections, saveDnaBtn.MouseButton1Click:Connect(exportProfileToJSON))
 table.insert(activeConnections, loadDnaBtn.MouseButton1Click:Connect(importProfileFromJSON))
 
