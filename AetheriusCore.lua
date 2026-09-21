@@ -1,1473 +1,1331 @@
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
+-- =====================================================================
+-- ADVANCED TELEMETRY & REVERSE-ENGINEERING ENGINE (v4.9 UI-SYNCHRONIZED)
+-- =====================================================================
 
--- Hardened LocalPlayer Resolution
-local player = Players.LocalPlayer
-while not player do
-    Players:GetPropertyChangedSignal("LocalPlayer"):Wait()
-    player = Players.LocalPlayer
-end
-if not player then return end
-
--- Prevent duplicate hooks and clean up previous instances safely
-if _G.AetheriusCoreCleanup then
-    pcall(_G.AetheriusCoreCleanup)
-end
-
--- Global Hook Controls & Engine State
-_G.IgnoreAutoHooks = false
-local isEngineClosed = false
-local hookStatusMessage = "Spy active (Hardened Engine Mode)."
-
--- Profile Configuration
-local PROFILE_FILENAME = "AetheriusCore_Profile_" .. game.PlaceId .. ".json"
-
--- Trackers for Cleanup
-local activeConnections = {}
-local logConnections = {}
-local scheduledTaskDelays = {}
-
--- State Storage
-local learnedActions = {}
-local actionCards = {}
-local ActiveSchedulerQueue = {}
-local activeConfigSig = nil
-local rawLogs = {}
-local logRows = {}
-
--- Scheduler State & Thread Control
-local SchedulerRunning = true
-local activeTaskThreads = {}
-local activeRemoteCalls = {}
-local originalNamecall
-
--- Global Cleanup Callback
-_G.AetheriusCoreCleanup = function()
-    isEngineClosed = true
-    SchedulerRunning = false
-    _G.IgnoreAutoHooks = false
-    table.clear(activeRemoteCalls)
-
-    -- Cancel all scheduler threads
-    for sig, thread in pairs(activeTaskThreads) do
-        pcall(function() task.cancel(thread) end)
-    end
-    table.clear(activeTaskThreads)
-
-    -- Cancel all delayed UI callbacks
-    for _, delayThread in ipairs(scheduledTaskDelays) do
-        pcall(function() task.cancel(delayThread) end)
-    end
-    table.clear(scheduledTaskDelays)
-
-    -- Disconnect events
-    for _, conn in ipairs(activeConnections) do pcall(function() conn:Disconnect() end) end
-    for _, conn in ipairs(logConnections) do pcall(function() conn:Disconnect() end) end
-
-    -- Restore Hook Metamethod safely
-    pcall(function()
-        if _G._AetheriusOriginalNamecall_v6 and hookmetamethod then
-            hookmetamethod(game, "__namecall", _G._AetheriusOriginalNamecall_v6)
-            _G._AetheriusOriginalNamecall_v6 = nil
+local rawGame = game
+local rawGetService = rawGame.GetService
+local function getServiceCloned(serviceName)
+    local success, service = pcall(function()
+        local s = rawGetService(rawGame, serviceName)
+        if cloneref then
+            return cloneref(s)
         end
+        return s
     end)
-
-    -- Clear state dictionaries completely
-    table.clear(learnedActions)
-    table.clear(actionCards)
-    table.clear(ActiveSchedulerQueue)
-    table.clear(rawLogs)
-    table.clear(logRows)
-
-    -- Destroy UI
-    local playerGui = player and player:FindFirstChild("PlayerGui")
-    local oldGui = playerGui and playerGui:FindFirstChild("AetheriusCoreEngine")
-    if oldGui then oldGui:Destroy() end
+    return success and service or nil
 end
 
--- UI Initialization
-local gui = Instance.new("ScreenGui")
-gui.Name = "AetheriusCoreEngine"
-gui.ResetOnSpawn = false
-gui.DisplayOrder = 999999
-gui.Parent = player:WaitForChild("PlayerGui")
+local _math = math
+local _floor = _math.floor
+local _random = _math.random
+local _tinsert = table.insert
+local _tpack = table.pack
+local _pcall = pcall
+local _tick = tick
+local _osclock = os.clock
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(364, 280)
-frame.Position = UDim2.new(0.15, 0, 0.15, 60)
-frame.BackgroundColor3 = Color3.fromRGB(13, 13, 15)
-frame.BorderSizePixel = 0
-frame.Parent = gui
+local HttpService = getServiceCloned("HttpService") or game:GetService("HttpService")
+local Players = getServiceCloned("Players") or game:GetService("Players")
+local CoreGui = getServiceCloned("CoreGui") or game:GetService("CoreGui")
+local Workspace = getServiceCloned("Workspace") or game:GetService("Workspace")
+local ReplicatedStorage = getServiceCloned("ReplicatedStorage") or game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
 
-local frameCorner = Instance.new("UICorner")
-frameCorner.CornerRadius = UDim.new(0, 5)
-frameCorner.Parent = frame
+-- Global Environment Cleanup
+local runtimeEnv = (getgenv and getgenv()) or _G
+local panelName = "TelemetryEnterpriseProduction"
 
--- Header Bar
-local bar = Instance.new("Frame")
-bar.Size = UDim2.new(1, 0, 0, 20)
-bar.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
-bar.BorderSizePixel = 0
-bar.Parent = frame
+local function findExistingPanel()
+    local found
+    _pcall(function()
+        local target = (gethui and gethui()) or CoreGui
+        found = target:FindFirstChild(panelName)
+    end)
+    return found
+end
 
-local barCorner = Instance.new("UICorner")
-barCorner.CornerRadius = UDim.new(0, 5)
-barCorner.Parent = bar
+local existingPanel = runtimeEnv.TelemetryProductionScreenGui or findExistingPanel()
+if existingPanel and existingPanel.Parent then
+    warn("[Telemetry Engine] An instance is already running.")
+    return
+end
 
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -65, 1, 0)
-title.Position = UDim2.fromOffset(6, 0)
-title.BackgroundTransparency = 1
-title.Text = "⚡ Aetherius Core [v6.5 - Fully Hardened Execution]"
-title.TextColor3 = Color3.fromRGB(240, 240, 245)
-title.TextSize = 8
-title.Font = Enum.Font.Code
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = bar
+runtimeEnv.TelemetryProductionRunning = true
+runtimeEnv.TelemetryProductionScreenGui = nil
 
-local emergencyStopBtn = Instance.new("TextButton")
-emergencyStopBtn.Size = UDim2.fromOffset(32, 14)
-emergencyStopBtn.Position = UDim2.new(1, -62, 0, 3)
-emergencyStopBtn.Text = "🛑 STOP"
-emergencyStopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-emergencyStopBtn.TextSize = 6
-emergencyStopBtn.Font = Enum.Font.Code
-emergencyStopBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 30)
-emergencyStopBtn.BorderSizePixel = 0
-emergencyStopBtn.Parent = bar
+-- Limits & Configuration
+local SESSION_FOLDER = "GameTelemetryLogs"
+local SESSION_FILE = SESSION_FOLDER .. "/game_analysis_" .. _floor(_tick()) .. "_" .. _random(1000, 9999) .. ".json"
+local eventBuffer = {}
+local BUFFER_FLUSH_COUNT = 20
+local MAX_EVENT_STRING_LENGTH = 1024
+local MAX_TABLE_ENTRIES = 50
+local MAX_BUFFER_EVENTS = 500
+local MAX_EVENTS_PER_SECOND = 40
+local STATE_SNAPSHOT_INTERVAL = 2.5
+local DEDUPE_WINDOW = 0.35
 
-local stopCorner = Instance.new("UICorner")
-stopCorner.CornerRadius = UDim.new(0, 3)
-stopCorner.Parent = emergencyStopBtn
+-- Capacity Caps for Long Sessions
+local MAX_SCHEMAS = 200
+local MAX_UI_CAUSALITY_ENTRIES = 200
+local MAX_WORLD_STATE_ENTRIES = 150
+local MAX_STATE_MUTATION_KEYS = 300
+local MAX_UPVALUE_SCRIPTS = 50
+local MAX_UPVALUES_PER_SCRIPT = 15
+local MAX_MODULE_KEYS = 20
+
+local SESSION_VERSION = "4.9-ProductionHardened"
+
+-- Engine Storage
+local ExtractedSchemas = {}
+local schemaCount = 0
+local UICausalityMap = {}
+local causalityCount = 0
+local WorldStateModel = {}
+local worldStateCount = 0
+local StateMutationTracker = {}
+local mutationCount = 0
+local LocalScriptUpvalueStore = {}
+local upvalueScriptCount = 0
+
+local HookedInboundRemotes = {}
+local HookingInboundRemotes = {}
+local DisabledOriginalConnections = {}
+local HookedPlayerGuis = {}
+
+local CAPTURE_STATE_DELTAS = true
+local ENABLE_NETWORK_HOOK = true
+local AUTO_INTERACT_CONFIRMATION = true
+local isLoggingActive = true
+
+local totalEventsCaptured = 0
+local totalEventsSuppressed = 0
+local totalEncodeFailures = 0
+local totalFlushFailures = 0
+local isMinimized = false
+local jsonHasRecords = false
+local jsonFinalized = false
+local isShuttingDown = false
+local previousStateSnapshot = nil
+
+local statusStates = {
+    NamecallHook = "Active",
+    UIClickTracker = "Active",
+    StateSniffer = "Active",
+    DiskWriter = "Active",
+    InboundSniffer = "Pending",
+    UpvalueScanner = "Active"
+}
+
+local uiConnections = {}
+local shutdownConnections = {}
+local connectedButtons = setmetatable({}, {__mode = "k"})
+local recentEventTimes = {}
+local lastEventSignature = nil
+local lastEventTime = 0
+local lastEventObj = nil
+local lastClickedUI = "None"
+local lastClickTime = 0
+
+local originalNamecall = nil
+local rawMetatable = nil
+
+local noiseBlacklist = {
+    ["mouse"] = true, ["updatepos"] = true, ["heartbeat"] = true,
+    ["camera"] = true, ["ping"] = true
+}
+
+-- Storage Setup (Modifies statusStates before UI is instantiated)
+local storageReady = false
+local storageSuccess = _pcall(function()
+    if not writefile or not makefolder or not appendfile or not isfolder then
+        error("File APIs unavailable")
+    end
+    if not isfolder(SESSION_FOLDER) then
+        makefolder(SESSION_FOLDER)
+    end
+    local metadata = {
+        SessionStarted = true,
+        Version = SESSION_VERSION,
+        StartedAt = _tick(),
+        PlaceId = tostring(rawGame.PlaceId),
+        JobId = "[Redacted]"
+    }
+    local success, encodedMetadata = _pcall(function()
+        return HttpService:JSONEncode(metadata)
+    end)
+    if not success then
+        totalEncodeFailures = totalEncodeFailures + 1
+        error("Metadata Encode Failed")
+    end
+    writefile(SESSION_FILE, "[\n  " .. encodedMetadata .. "\n")
+    jsonHasRecords = true
+    storageReady = true
+end)
+
+if not storageSuccess or not storageReady then
+    statusStates.DiskWriter = "Failed"
+end
+
+local flushBuffer
+local captureLocalEvent
+local takeStateSnapshot
+local computeStateDeltas
+local statusLabels = {}
+
+local function setStatus(name, state, color)
+    statusStates[name] = state
+    local label = statusLabels[name]
+    if label and label.Parent then
+        label.Text = "• " .. name .. ": " .. state
+        label.TextColor3 = color or (state == "Active" and Color3.fromRGB(0, 255, 128) or Color3.fromRGB(255, 165, 0))
+    end
+end
+
+local function setDiskError(text, color)
+    setStatus("DiskWriter", text, color or Color3.fromRGB(255, 69, 0))
+end
+
+-- =====================================================================
+-- UI CREATION
+-- =====================================================================
+local parentTarget = (gethui and gethui()) or CoreGui
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = panelName
+screenGui.ResetOnSpawn = false
+screenGui.Parent = parentTarget
+runtimeEnv.TelemetryProductionScreenGui = screenGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 250, 0, 260)
+mainFrame.Position = UDim2.new(0, 20, 0, 50)
+mainFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
+
+local topBar = Instance.new("Frame")
+topBar.Size = UDim2.new(1, 0, 0, 28)
+topBar.BackgroundTransparency = 1
+topBar.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -60, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Delta Telemetry Engine"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextSize, titleLabel.Font = 13, Enum.Font.SourceSansBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = topBar
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.fromOffset(26, 14)
-closeBtn.Position = UDim2.new(1, -28, 0, 3)
+closeBtn.Size = UDim2.new(0, 20, 0, 20)
+closeBtn.Position = UDim2.new(1, -24, 0, 4)
+closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
 closeBtn.Text = "X"
 closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeBtn.TextSize = 8
-closeBtn.Font = Enum.Font.Code
-closeBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-closeBtn.BorderSizePixel = 0
-closeBtn.Parent = bar
+closeBtn.TextSize, closeBtn.Font = 11, Enum.Font.SourceSansBold
+closeBtn.Parent = topBar
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
-local closeCorner = Instance.new("UICorner")
-closeCorner.CornerRadius = UDim.new(0, 3)
-closeCorner.Parent = closeBtn
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 20, 0, 20)
+minBtn.Position = UDim2.new(1, -48, 0, 4)
+minBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+minBtn.Text = "-"
+minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minBtn.TextSize, minBtn.Font = 13, Enum.Font.SourceSansBold
+minBtn.Parent = topBar
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 5)
 
-local function triggerEmergencyStop()
-    SchedulerRunning = not SchedulerRunning
-    if SchedulerRunning then
-        emergencyStopBtn.Text = "🛑 STOP"
-        emergencyStopBtn.BackgroundColor3 = Color3.fromRGB(200, 100, 30)
-    else
-        emergencyStopBtn.Text = "▶ RESUME"
-        emergencyStopBtn.BackgroundColor3 = Color3.fromRGB(40, 140, 60)
+local container = Instance.new("Frame")
+container.Size = UDim2.new(1, 0, 1, -28)
+container.Position = UDim2.new(0, 0, 0, 28)
+container.BackgroundTransparency = 1
+container.Parent = mainFrame
+
+local counterLabel = Instance.new("TextLabel")
+counterLabel.Size = UDim2.new(0.5, -10, 0, 20)
+counterLabel.Position = UDim2.new(0, 8, 0, 2)
+counterLabel.BackgroundTransparency = 1
+counterLabel.Text = "Captured: 0"
+counterLabel.TextColor3 = Color3.fromRGB(0, 255, 128)
+counterLabel.TextSize, counterLabel.Font = 12, Enum.Font.SourceSansBold
+counterLabel.TextXAlignment = Enum.TextXAlignment.Left
+counterLabel.Parent = container
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0.5, -10, 0, 20)
+toggleBtn.Position = UDim2.new(0.5, 2, 0, 2)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+toggleBtn.Text = "Status: ACTIVE"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize, toggleBtn.Font = 11, Enum.Font.SourceSansBold
+toggleBtn.Parent = container
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 5)
+
+local subCard = Instance.new("Frame")
+subCard.Size = UDim2.new(1, -16, 0, 78)
+subCard.Position = UDim2.new(0, 8, 0, 26)
+subCard.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+subCard.BorderSizePixel = 0
+subCard.Parent = container
+Instance.new("UICorner", subCard).CornerRadius = UDim.new(0, 6)
+
+local subTitle = Instance.new("TextLabel")
+subTitle.Size = UDim2.new(1, -10, 0, 14)
+subTitle.Position = UDim2.new(0, 6, 0, 2)
+subTitle.BackgroundTransparency = 1
+subTitle.Text = "Subsystem Health"
+subTitle.TextColor3 = Color3.fromRGB(160, 160, 175)
+subTitle.TextSize, subTitle.Font = 10, Enum.Font.SourceSansBold
+subTitle.TextXAlignment = Enum.TextXAlignment.Left
+subTitle.Parent = subCard
+
+-- Dynamically reflects actual initial state from statusStates
+local function createStatusLabel(name, posY)
+    local initialState = statusStates[name] or "Active"
+    local initialColor = (initialState == "Active" and Color3.fromRGB(0, 255, 128))
+        or (initialState == "Failed" and Color3.fromRGB(255, 69, 0))
+        or Color3.fromRGB(255, 165, 0)
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -12, 0, 11)
+    lbl.Position = UDim2.new(0, 6, 0, posY)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "• " .. name .. ": " .. initialState
+    lbl.TextColor3 = initialColor
+    lbl.TextSize, lbl.Font = 9, Enum.Font.SourceSans
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = subCard
+    return lbl
+end
+
+statusLabels.NamecallHook = createStatusLabel("NamecallHook", 15)
+statusLabels.UIClickTracker = createStatusLabel("UIClickTracker", 26)
+statusLabels.StateSniffer = createStatusLabel("StateSniffer", 37)
+statusLabels.InboundSniffer = createStatusLabel("InboundSniffer", 48)
+statusLabels.UpvalueScanner = createStatusLabel("UpvalueScanner", 59)
+statusLabels.DiskWriter = createStatusLabel("DiskWriter", 70)
+
+local feedCard = Instance.new("Frame")
+feedCard.Size = UDim2.new(1, -16, 0, 58)
+feedCard.Position = UDim2.new(0, 8, 0, 108)
+feedCard.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+feedCard.BorderSizePixel = 0
+feedCard.Parent = container
+Instance.new("UICorner", feedCard).CornerRadius = UDim.new(0, 6)
+
+local inspectorTitle = Instance.new("TextLabel")
+inspectorTitle.Size = UDim2.new(1, -10, 0, 14)
+inspectorTitle.Position = UDim2.new(0, 6, 0, 2)
+inspectorTitle.BackgroundTransparency = 1
+inspectorTitle.Text = "Live Feed Inspector"
+inspectorTitle.TextColor3 = Color3.fromRGB(160, 160, 175)
+inspectorTitle.TextSize, inspectorTitle.Font = 10, Enum.Font.SourceSansBold
+inspectorTitle.TextXAlignment = Enum.TextXAlignment.Left
+inspectorTitle.Parent = feedCard
+
+local inspectorLines = {}
+for i = 1, 3 do
+    local line = Instance.new("TextLabel")
+    line.Size = UDim2.new(1, -12, 0, 12)
+    line.Position = UDim2.new(0, 6, 0, 16 + ((i - 1) * 13))
+    line.BackgroundTransparency = 1
+    line.Text = "• [Idle]"
+    line.TextColor3 = Color3.fromRGB(130, 130, 145)
+    line.TextSize, line.Font = 9, Enum.Font.Code
+    line.TextXAlignment = Enum.TextXAlignment.Left
+    line.Parent = feedCard
+    _tinsert(inspectorLines, line)
+end
+
+local function pushLiveFeed(text)
+    if isShuttingDown then return end
+    for i = 3, 2, -1 do
+        inspectorLines[i].Text = inspectorLines[i - 1].Text
+        inspectorLines[i].TextColor3 = inspectorLines[i - 1].TextColor3
     end
+    inspectorLines[1].Text = "• " .. text
+    inspectorLines[1].TextColor3 = Color3.fromRGB(100, 220, 255)
 end
 
-table.insert(activeConnections, emergencyStopBtn.MouseButton1Click:Connect(triggerEmergencyStop))
-table.insert(activeConnections, closeBtn.MouseButton1Click:Connect(function()
-    if _G.AetheriusCoreCleanup then _G.AetheriusCoreCleanup() end
-end))
-
--- Navigation System
-local function createTab(text, xPos, width)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(width or 48, 16)
-    btn.Position = UDim2.fromOffset(xPos, 22)
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(140, 140, 150)
-    btn.TextSize = 7
-    btn.Font = Enum.Font.Code
-    btn.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
-    btn.BorderSizePixel = 0
-    btn.Parent = frame
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 3)
-    corner.Parent = btn
-    return btn
+local function refreshCounterUI()
+    if isShuttingDown or not counterLabel.Parent or not titleLabel.Parent then return end
+    counterLabel.Text = "Captured: " .. totalEventsCaptured
+    titleLabel.Text = isMinimized and ("Delta Engine (" .. totalEventsCaptured .. ")") or "Delta Telemetry Engine"
 end
 
-local tabSpyBtn = createTab("Spy", 4, 44)
-local tabMacroBtn = createTab("Macro", 50, 48)
-local tabAnalyzeBtn = createTab("Analyze", 100, 50)
-local tabDumpBtn = createTab("Dumper", 152, 48)
-local tabDecompBtn = createTab("Modules", 202, 50)
-local tabMonitorBtn = createTab("Monitor", 254, 48)
-local tabAutoBtn = createTab("DNA/Cognitive", 304, 54)
-
-local function createContainer()
-    local container = Instance.new("Frame")
-    container.Size = UDim2.new(1, 0, 1, -40)
-    container.Position = UDim2.fromOffset(0, 40)
-    container.BackgroundTransparency = 1
-
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Position = UDim2.fromOffset(6, 2)
-    scroll.Size = UDim2.new(1, -12, 1, -26)
-    scroll.BackgroundColor3 = Color3.fromRGB(8, 8, 10)
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 4
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.XY
-    scroll.ScrollingDirection = Enum.ScrollingDirection.XY
-    scroll.Parent = container
-
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 4)
-    layout.Parent = scroll
-
-    local padding = Instance.new("UIPadding")
-    padding.PaddingTop = UDim.new(0, 4)
-    padding.PaddingLeft = UDim.new(0, 4)
-    padding.PaddingRight = UDim.new(0, 4)
-    padding.PaddingBottom = UDim.new(0, 4)
-    padding.Parent = scroll
-
-    local scrollCorner = Instance.new("UICorner")
-    scrollCorner.CornerRadius = UDim.new(0, 3)
-    scrollCorner.Parent = scroll
-
-    local footer = Instance.new("Frame")
-    footer.Size = UDim2.new(1, -12, 0, 20)
-    footer.Position = UDim2.new(0, 6, 1, -22)
-    footer.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
-    footer.BorderSizePixel = 0
-    footer.Parent = container
-
-    local footerCorner = Instance.new("UICorner")
-    footerCorner.CornerRadius = UDim.new(0, 3)
-    footerCorner.Parent = footer
-
-    table.insert(activeConnections, layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        scroll.CanvasSize = UDim2.new(0, layout.AbsoluteContentSize.X, 0, layout.AbsoluteContentSize.Y + 10)
-    end))
-
-    return container, scroll, footer, layout
+local function eventSignature(event)
+    return tostring(event.EventType or "") .. "|" .. tostring(event.Path or (event.Details and event.Details.Path) or "") .. "|" .. tostring(event.RemotePath or "")
 end
 
-local spyContainer, spyScroll, spyFooter = createContainer()
-spyContainer.Parent = frame
-
-local macroContainer, macroScroll, macroFooter = createContainer()
-macroContainer.Visible = false
-macroContainer.Parent = frame
-
-local analyzeContainer, analyzeScroll, analyzeFooter = createContainer()
-analyzeContainer.Visible = false
-analyzeContainer.Parent = frame
-
-local dumpContainer, dumpScroll, dumpFooter = createContainer()
-dumpContainer.Visible = false
-dumpContainer.Parent = frame
-
-local decompContainer, decompScroll, decompFooter = createContainer()
-decompContainer.Visible = false
-decompContainer.Parent = frame
-
-local monitorContainer, monitorScroll, monitorFooter = createContainer()
-monitorContainer.Visible = false
-monitorContainer.Parent = frame
-
-local autoContainer, autoScroll, autoFooter, autoLayout = createContainer()
-autoContainer.Visible = false
-autoContainer.Parent = frame
-
--- Configuration Panel Sub-UI
-local configSubPanel = Instance.new("Frame")
-configSubPanel.Size = UDim2.new(1, 0, 1, -40)
-configSubPanel.Position = UDim2.fromOffset(0, 40)
-configSubPanel.BackgroundColor3 = Color3.fromRGB(12, 12, 15)
-configSubPanel.BorderSizePixel = 0
-configSubPanel.Visible = false
-configSubPanel.Parent = frame
-
-local panelHeader = Instance.new("TextLabel")
-panelHeader.Size = UDim2.new(1, -12, 0, 36)
-panelHeader.Position = UDim2.fromOffset(6, 6)
-panelHeader.BackgroundTransparency = 1
-panelHeader.TextColor3 = Color3.fromRGB(240, 240, 250)
-panelHeader.TextSize = 8
-panelHeader.Font = Enum.Font.Code
-panelHeader.TextXAlignment = Enum.TextXAlignment.Left
-panelHeader.TextYAlignment = Enum.TextYAlignment.Top
-panelHeader.TextWrapped = true
-panelHeader.Text = "Config Panel: Select a script to configure. Status: " .. hookStatusMessage
-panelHeader.Parent = configSubPanel
-
-local configArg1Btn = Instance.new("TextButton")
-configArg1Btn.Size = UDim2.new(1, -12, 0, 26)
-configArg1Btn.Position = UDim2.fromOffset(6, 50)
-configArg1Btn.Text = "Argument #1: [None Captured]"
-configArg1Btn.TextColor3 = Color3.new(1, 1, 1)
-configArg1Btn.TextSize = 7
-configArg1Btn.Font = Enum.Font.Code
-configArg1Btn.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
-configArg1Btn.BorderSizePixel = 0
-configArg1Btn.Parent = configSubPanel
-
-local tCorner = Instance.new("UICorner")
-tCorner.CornerRadius = UDim.new(0, 4)
-tCorner.Parent = configArg1Btn
-
-local configLoopBtn = Instance.new("TextButton")
-configLoopBtn.Size = UDim2.new(1, -12, 0, 26)
-configLoopBtn.Position = UDim2.fromOffset(6, 82)
-configLoopBtn.Text = "Loop Execution: OFF"
-configLoopBtn.TextColor3 = Color3.new(1, 1, 1)
-configLoopBtn.TextSize = 7
-configLoopBtn.Font = Enum.Font.Code
-configLoopBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-configLoopBtn.BorderSizePixel = 0
-configLoopBtn.Parent = configSubPanel
-
-local lCorner = Instance.new("UICorner")
-lCorner.CornerRadius = UDim.new(0, 4)
-lCorner.Parent = configLoopBtn
-
-local configTeleportOptBtn = Instance.new("TextButton")
-configTeleportOptBtn.Size = UDim2.new(1, -12, 0, 26)
-configTeleportOptBtn.Position = UDim2.fromOffset(6, 114)
-configTeleportOptBtn.Text = "Opt-In Spatial Teleport: OFF"
-configTeleportOptBtn.TextColor3 = Color3.new(1, 1, 1)
-configTeleportOptBtn.TextSize = 7
-configTeleportOptBtn.Font = Enum.Font.Code
-configTeleportOptBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-configTeleportOptBtn.BorderSizePixel = 0
-configTeleportOptBtn.Parent = configSubPanel
-
-local toCorner = Instance.new("UICorner")
-toCorner.CornerRadius = UDim.new(0, 4)
-toCorner.Parent = configTeleportOptBtn
-
-local backToListBtn = Instance.new("TextButton")
-backToListBtn.Size = UDim2.new(1, -12, 0, 26)
-backToListBtn.Position = UDim2.fromOffset(6, 146)
-backToListBtn.Text = "⬅ Return to Script List"
-backToListBtn.TextColor3 = Color3.new(1, 1, 1)
-backToListBtn.TextSize = 7
-backToListBtn.Font = Enum.Font.Code
-backToListBtn.BackgroundColor3 = Color3.fromRGB(50, 40, 70)
-backToListBtn.BorderSizePixel = 0
-backToListBtn.Parent = configSubPanel
-
-local bCorner = Instance.new("UICorner")
-bCorner.CornerRadius = UDim.new(0, 4)
-bCorner.Parent = backToListBtn
-
-local function createOutput(parent, color)
-    local out = Instance.new("TextLabel")
-    out.Size = UDim2.new(1, 0, 0, 0)
-    out.AutomaticSize = Enum.AutomaticSize.XY
-    out.BackgroundTransparency = 1
-    out.TextColor3 = color
-    out.TextSize = 8
-    out.Font = Enum.Font.Code
-    out.TextXAlignment = Enum.TextXAlignment.Left
-    out.TextYAlignment = Enum.TextYAlignment.Top
-    out.Parent = parent
-    return out
+local function underRateLimit()
+    local now = _osclock()
+    for i = #recentEventTimes, 1, -1 do
+        if now - recentEventTimes[i] > 1 then
+            table.remove(recentEventTimes, i)
+        end
+    end
+    if #recentEventTimes >= MAX_EVENTS_PER_SECOND then return false end
+    _tinsert(recentEventTimes, now)
+    return true
 end
 
--- Clear UI Indicators for Non-Functional Features
-local macroOutput = createOutput(macroScroll, Color3.fromRGB(255, 180, 100))
-macroOutput.Text = "[STATUS]: Macro Recorder Engine - INACTIVE (Placeholder UI)\n"
-
-local analyzeOutput = createOutput(analyzeScroll, Color3.fromRGB(200, 150, 255))
-analyzeOutput.Text = "Select a log from Spy to inspect.\n\n"
-
-local dumpOutput = createOutput(dumpScroll, Color3.fromRGB(255, 200, 80))
-dumpOutput.Text = "[STATUS]: Garbage Collection Dumper - INACTIVE (Placeholder UI)\n"
-
-local decompOutput = createOutput(decompScroll, Color3.fromRGB(100, 200, 255))
-decompOutput.Text = "[STATUS]: Module Scanner Engine - INACTIVE (Placeholder UI)\n"
-
-local monitorOutput = createOutput(monitorScroll, Color3.fromRGB(255, 140, 100))
-monitorOutput.Text = "[STATUS]: Attribute Monitor - INACTIVE (Placeholder UI)\n\n"
-
-local autoEmptyText = createOutput(autoScroll, Color3.fromRGB(120, 220, 255))
-autoEmptyText.Text = "[COGNITIVE ENGINE ACTIVE]\nTrigger actions to self-build panels..."
-
-local function createButton(parent, text, width, xOffset, color)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(width, 16)
-    btn.Position = UDim2.fromOffset(xOffset, 2)
-    btn.Text = text
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.TextSize = 8
-    btn.Font = Enum.Font.Code
-    btn.BackgroundColor3 = color
-    btn.BorderSizePixel = 0
-    btn.Parent = parent
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 3)
-    corner.Parent = btn
-    return btn
-end
-
-local exportBtn = createButton(spyFooter, "Copy All", 75, 3, Color3.fromRGB(35, 35, 45))
-local clearBtn = createButton(spyFooter, "Clear Logs", 55, 81, Color3.fromRGB(70, 30, 30))
-
-local recordMacroBtn = createButton(macroFooter, "Start Rec", 75, 3, Color3.fromRGB(40, 80, 40))
-local copyMacroBtn = createButton(macroFooter, "Copy Macro", 75, 81, Color3.fromRGB(40, 50, 80))
-local clearMacroBtn = createButton(macroFooter, "Clear", 50, 159, Color3.fromRGB(70, 30, 30))
-
-local genFuncBtn = createButton(analyzeFooter, "Copy Function", 95, 3, Color3.fromRGB(50, 35, 75))
-local clearMonitorBtn = createButton(monitorFooter, "Clear Monitor", 80, 3, Color3.fromRGB(70, 30, 30))
-
-local saveDnaBtn = createButton(autoFooter, "Save DNA", 65, 3, Color3.fromRGB(40, 90, 50))
-local loadDnaBtn = createButton(autoFooter, "Load DNA", 65, 71, Color3.fromRGB(40, 60, 100))
-local clearAutoBtn = createButton(autoFooter, "Reset", 50, 139, Color3.fromRGB(70, 30, 30))
-
--- Robust Clipboard Handler
-local function safeCopy(str, button, successMsg)
-    if isEngineClosed then return false end
-    
-    if not setclipboard then
-        local origText = button.Text
-        button.Text = "No Clipboard API"
-        local handle
-        handle = task.delay(2, function()
-            if not isEngineClosed and button and button.Parent then button.Text = origText end
-            for idx, th in ipairs(scheduledTaskDelays) do
-                if th == handle then table.remove(scheduledTaskDelays, idx) break end
-            end
-        end)
-        table.insert(scheduledTaskDelays, handle)
+local function enqueueEvent(event)
+    if not isLoggingActive or isShuttingDown or jsonFinalized then return false end
+    if not underRateLimit() or #eventBuffer >= MAX_BUFFER_EVENTS then
+        totalEventsSuppressed = totalEventsSuppressed + 1
         return false
     end
 
-        local success = pcall(setclipboard, str)
-    local origText = button.Text
-    button.Text = success and (successMsg or "Copied!") or "Failed"
-    
-    local handle
-    handle = task.delay(2, function()
-        if not isEngineClosed and button and button.Parent then button.Text = origText end
-        for idx, th in ipairs(scheduledTaskDelays) do
-            if th == handle then table.remove(scheduledTaskDelays, idx) break end
-        end
-    end)
-    table.insert(scheduledTaskDelays, handle)
-    return success
-end
-
-local function switchTab(activeTab)
-    configSubPanel.Visible = false
-    spyContainer.Visible = (activeTab == "spy")
-    macroContainer.Visible = (activeTab == "macro")
-    analyzeContainer.Visible = (activeTab == "analyze")
-    dumpContainer.Visible = (activeTab == "dump")
-    decompContainer.Visible = (activeTab == "decomp")
-    monitorContainer.Visible = (activeTab == "monitor")
-    autoContainer.Visible = (activeTab == "auto")
-
-    local tabs = { 
-        {tabSpyBtn, "spy"},
-        {tabMacroBtn, "macro"},
-        {tabAnalyzeBtn, "analyze"}, 
-        {tabDumpBtn, "dump"}, 
-        {tabDecompBtn, "decomp"},
-        {tabMonitorBtn, "monitor"},
-        {tabAutoBtn, "auto"}
-    }
-    for _, t in ipairs(tabs) do
-        local active = (t[2] == activeTab)
-        t[1].BackgroundColor3 = active and Color3.fromRGB(45, 45, 55) or Color3.fromRGB(22, 22, 26)
-        t[1].TextColor3 = active and Color3.new(1, 1, 1) or Color3.fromRGB(140, 140, 150)
-    end
-end
-
-switchTab("spy")
-
-table.insert(activeConnections, tabSpyBtn.MouseButton1Click:Connect(function() switchTab("spy") end))
-table.insert(activeConnections, tabMacroBtn.MouseButton1Click:Connect(function() switchTab("macro") end))
-table.insert(activeConnections, tabAnalyzeBtn.MouseButton1Click:Connect(function() switchTab("analyze") end))
-table.insert(activeConnections, tabDumpBtn.MouseButton1Click:Connect(function() switchTab("dump") end))
-table.insert(activeConnections, tabDecompBtn.MouseButton1Click:Connect(function() switchTab("decomp") end))
-table.insert(activeConnections, tabMonitorBtn.MouseButton1Click:Connect(function() switchTab("monitor") end))
-table.insert(activeConnections, tabAutoBtn.MouseButton1Click:Connect(function() switchTab("auto") end))
-
--- Strict Segment-Based Instance Resolution Engine
-local function resolveInstance(fullPath)
-    if not fullPath or type(fullPath) ~= "string" then return nil end
-    
-    local pathSegments = {}
-    if string.sub(fullPath, 1, 5) == "game." then
-        fullPath = string.sub(fullPath, 6)
-    end
-    
-    for segment in string.gmatch(fullPath, "[^%.]+") do
-        table.insert(pathSegments, segment)
-    end
-    
-    if #pathSegments == 0 then return nil end
-    
-        local current = game
-    local index = 1
-    while index <= #pathSegments do
-        local matchedChild = nil
-        local matchedLength = 0
-        local children = current:GetChildren()
-
-        for _, child in ipairs(children) do
-            local childSegments = {}
-            for segmentIndex = index, #pathSegments do
-                childSegments[#childSegments + 1] = pathSegments[segmentIndex]
-                if table.concat(childSegments, ".") == child.Name then
-                    matchedChild = child
-                    matchedLength = segmentIndex - index + 1
-                end
-            end
-        end
-
-        if not matchedChild then return nil end
-        current = matchedChild
-        index = index + matchedLength
-    end
-    return current
-end
-
-local function resolveRemote(remoteName, fullPath)
-    local inst = resolveInstance(fullPath)
-    if inst and (inst:IsA("RemoteEvent") or inst:IsA("RemoteFunction")) then
-        return inst
+    local signature = eventSignature(event)
+    local now = _osclock()
+    if signature == lastEventSignature and now - lastEventTime <= DEDUPE_WINDOW then
+        if lastEventObj then lastEventObj.RepeatCount = (lastEventObj.RepeatCount or 1) + 1 end
+        return true
     end
 
-    if remoteName and type(remoteName) == "string" then
-        local found = ReplicatedStorage:FindFirstChild(remoteName, true) or workspace:FindFirstChild(remoteName, true)
-        if found and (found:IsA("RemoteEvent") or found:IsA("RemoteFunction")) then
-            return found
-        end
-    end
-    return nil
-end
-
--- Sparse Array Sanitation Engine
-local function sanitizeArguments(argsPacked, customOverrides)
-    local count = argsPacked.n or #argsPacked
-    local sanitized = { n = count }
-
-    local function sanitizeValue(val, visited)
-        visited = visited or {}
-        local t = type(val)
-        if t == "table" then
-            if visited[val] then return "{Cyclic Table}" end
-            visited[val] = true
-            local newTable = {}
-            for k, v in pairs(val) do
-                local lk = string.lower(tostring(k))
-                if (string.match(lk, "token") or string.match(lk, "nonce") or string.match(lk, "time") or string.match(lk, "stamp")) and type(v) == "number" then
-                    newTable[k] = os.clock()
-                else
-                    newTable[k] = sanitizeValue(v, visited)
-                end
-            end
-            visited[val] = nil
-            return newTable
-        else
-            return val
-        end
-    end
-
-    for i = 1, count do
-                -- Use a presence map so false and explicit nil overrides are preserved.
-        local val
-        if customOverrides and customOverrides._present and customOverrides._present[i] then
-            val = customOverrides[i]
-        else
-            val = argsPacked[i]
-        end
-        sanitized[i] = sanitizeValue(val)
-    end
-    return sanitized
-end
-
-local ignoredRemotePatterns = { "Analytics", "ClientKit", "Telemetry", "Fps", "Ping", "Heartbeat" }
-
--- FIX 7: Case-insensitive ignored pattern matching
-local function shouldIgnoreRemote(remotePath)
-    local lowerPath = string.lower(remotePath)
-    for _, pattern in ipairs(ignoredRemotePatterns) do
-        if string.find(lowerPath, string.lower(pattern), 1, true) then return true end
-    end
-    return false
-end
-
-local function serializeValue(val, depth, visited)
-    depth = depth or 0
-    visited = visited or {}
-    if depth > 3 then return "{... Max Depth}" end
-    if val == nil then return "nil" end
-
-    local t = typeof(val)
-    if t == "string" then 
-        return string.format("%q", val)
-    elseif t == "Instance" then
-        return val:GetFullName()
-    elseif t == "Vector3" then
-        return string.format("Vector3.new(%.2f, %.2f, %.2f)", val.X, val.Y, val.Z)
-    elseif t == "CFrame" then
-        local comps = {val:GetComponents()}
-        for i, c in ipairs(comps) do comps[i] = string.format("%.2f", c) end
-        return string.format("CFrame.new(%s)", table.concat(comps, ", "))
-    elseif t == "number" then
-        if val > 1600000000 and val < 2000000000 then return "os.clock()" end
-        return tostring(val)
-    elseif t == "table" then
-        if visited[val] then return "{Cyclic Table}" end
-        visited[val] = true
-        local parts = {}
-        local count = 0
-        for k, v in pairs(val) do
-            count = count + 1
-            if count > 20 then table.insert(parts, "...and more") break end
-            table.insert(parts, string.format("[%s] = %s", tostring(k), serializeValue(v, depth + 1, visited)))
-        end
-        visited[val] = nil
-        return "{\n" .. string.rep("  ", depth + 1) .. table.concat(parts, ",\n" .. string.rep("  ", depth + 1)) .. "\n" .. string.rep("  ", depth) .. "}"
-    else 
-        return tostring(val) 
-    end
-end
-
--- Human-readable configuration preview. This is display-only and does not alter stored values.
-local function formatConfigValue(value, depth, visited)
-    depth = depth or 0
-    visited = visited or {}
-
-    if depth > 2 then return "{...}" end
-    if value == nil then return "nil" end
-
-    local valueType = typeof(value)
-    if valueType == "string" then
-        local text = value:gsub("\n", "\\n")
-        if #text > 120 then text = text:sub(1, 117) .. "..." end
-        return string.format("string(%q)", text)
-    elseif valueType == "number" or valueType == "boolean" then
-        return string.format("%s(%s)", valueType, tostring(value))
-    elseif valueType == "Instance" then
-        return string.format("Instance<%s>", value:GetFullName())
-    elseif valueType == "Vector3" then
-        return string.format("Vector3(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
-    elseif valueType == "CFrame" then
-        local position = value.Position
-        return string.format("CFrame(position: %.2f, %.2f, %.2f)", position.X, position.Y, position.Z)
-    elseif valueType == "table" then
-        if visited[value] then return "{cyclic table}" end
-        visited[value] = true
-
-        local parts = {}
-        local count = 0
-        for key, item in pairs(value) do
-            count = count + 1
-            if count > 12 then
-                table.insert(parts, "...")
-                break
-            end
-            table.insert(parts, string.format("%s = %s", tostring(key), formatConfigValue(item, depth + 1, visited)))
-        end
-
-        visited[value] = nil
-        if #parts == 0 then return "table{}" end
-        return "table{" .. table.concat(parts, ", ") .. "}"
-    end
-
-    return string.format("%s(%s)", valueType, tostring(value))
-end
-
-local function encodeArgument(val, depth, visited)
-    depth = depth or 0
-    visited = visited or {}
-    if depth > 4 then return {type = "string", val = "{Max Depth}"} end
-    if val == nil then return {type = "nil", val = "nil"} end
-
-    local t = typeof(val)
-    if t == "string" or t == "number" or t == "boolean" then
-        return {type = t, val = val}
-    elseif t == "Vector3" then
-        return {type = "Vector3", val = {val.X, val.Y, val.Z}}
-    elseif t == "CFrame" then
-        return {type = "CFrame", val = {val:GetComponents()}}
-    elseif t == "Instance" then
-        return {type = "Instance", val = val:GetFullName()}
-    elseif t == "table" then
-        if visited[val] then return {type = "string", val = "{Cyclic Table}"} end
-        visited[val] = true
-        local encodedTable = {}
-        for k, v in pairs(val) do
-            table.insert(encodedTable, {key = encodeArgument(k, depth + 1, visited), value = encodeArgument(v, depth + 1, visited)})
-        end
-        visited[val] = nil
-        return {type = "table", val = encodedTable}
-    else
-        return {type = "string", val = tostring(val)}
-    end
-end
-
-local function decodeArgument(data)
-    if not data or type(data) ~= "table" then return nil, false end
-    local t = data.type
-    local v = data.val
-    if t == "nil" then return nil, true end
-    if t == "string" and type(v) == "string" then return v, true end
-    if t == "number" and type(v) == "number" then return v, true end
-    if t == "boolean" and type(v) == "boolean" then return v, true end
-    
-    if t == "Vector3" and type(v) == "table" and #v >= 3 then
-        if type(v[1]) == "number" and type(v[2]) == "number" and type(v[3]) == "number" then
-            return Vector3.new(v[1], v[2], v[3]), true
-        end
-    end
-    
-    if t == "CFrame" and type(v) == "table" and #v >= 12 then
-        local valid = true
-        for i = 1, 12 do
-            if type(v[i]) ~= "number" then valid = false break end
-        end
-        if valid then
-            return CFrame.new(table.unpack(v, 1, 12)), true
-        end
-    end
-    
-    -- FIX 3: Return inst ~= nil so unresolvable Instances are treated as invalid
-    if t == "Instance" and type(v) == "string" then
-        local inst = resolveInstance(v)
-        return inst, inst ~= nil
-    end
-    
-    if t == "table" and type(v) == "table" then
-        local tbl = {}
-        for _, pair in ipairs(v) do
-            if type(pair) == "table" and pair.key and pair.value then
-                local decKey, kValid = decodeArgument(pair.key)
-                local decVal, vValid = decodeArgument(pair.value)
-                if kValid and vValid and decKey ~= nil then
-                    tbl[decKey] = decVal
-                end
-            end
-        end
-        return tbl, true
-    end
-    return nil, false
-end
-
-local function updateTaskScheduler(signature, taskData)
-    local existingThread = activeTaskThreads[signature]
-    if existingThread then
-        local status = coroutine.status(existingThread)
-        if status ~= "dead" then return end
-        activeTaskThreads[signature] = nil
-    end
-
-    activeTaskThreads[signature] = task.spawn(function()
-        local actionCycleCount = 0
-        while not isEngineClosed do
-            if not SchedulerRunning or not taskData.enabled or (taskData.errors or 0) >= 5 then
-                task.wait(0.2)
-            else
-                local remoteInst = resolveRemote(taskData.name, taskData.fullPath)
-                local liveAction = learnedActions[signature]
-                
-                if remoteInst and liveAction and not liveAction.isUnavailable then
-                    local currentArgs = liveAction.args or { n = 0 }
-                    local liveArgs = sanitizeArguments(currentArgs, taskData.overrides)
-                    
-                    local char = player.Character
-                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    if taskData.optInTeleport and taskData.cframe and hrp then
-                        local targetCF = typeof(taskData.cframe) == "CFrame" and taskData.cframe or CFrame.new()
-                        if (hrp.Position - targetCF.Position).Magnitude > 8 then
-                            hrp.CFrame = targetCF
-                            task.wait(0.05)
-                        end
-                    end
-
-                                        local ok = false
-                    _G.IgnoreAutoHooks = true
-                    local protectedCallOk, protectedCallResult = xpcall(function()
-                        if remoteInst:IsA("RemoteEvent") then
-                            return pcall(function()
-                                remoteInst:FireServer(table.unpack(liveArgs, 1, liveArgs.n or #liveArgs))
-                            end)
-                        elseif remoteInst:IsA("RemoteFunction") then
-                            if activeRemoteCalls[signature] then return false end
-                            activeRemoteCalls[signature] = true
-
-                            local callSuccess = false
-                            local invThread = task.spawn(function()
-                                callSuccess = pcall(function()
-                                    remoteInst:InvokeServer(table.unpack(liveArgs, 1, liveArgs.n or #liveArgs))
-                                end)
-                                activeRemoteCalls[signature] = nil
-                            end)
-
-                            local elapsed = 0
-                            while elapsed < 3.0 and coroutine.status(invThread) ~= "dead" do
-                                task.wait(0.1)
-                                elapsed = elapsed + 0.1
-                            end
-
-                            if coroutine.status(invThread) ~= "dead" then
-                                pcall(function() task.cancel(invThread) end)
-                                activeRemoteCalls[signature] = nil
-                                return false
-                            end
-                            return callSuccess
-                        end
-                        return false
-                    end, function()
-                        return false
-                    end)
-                    _G.IgnoreAutoHooks = false
-                    if protectedCallOk then ok = protectedCallResult end
-
-                    if not ok then
-                        taskData.errors = (taskData.errors or 0) + 1
-                        if taskData.errors >= 5 then
-                            taskData.enabled = false
-                            taskData.pausedEnabled = false
-                            
-                            if activeConfigSig == signature then
-                                configLoopBtn.Text = "Loop Execution: OFF (MAX ERRORS)"
-                                configLoopBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-                            end
-                        end
-                        task.wait(math.min(6.0, 0.65 * (2 ^ taskData.errors)))
-                    else
-                        taskData.errors = 0
-                        actionCycleCount = actionCycleCount + 1
-                        if actionCycleCount >= 25 then
-                            actionCycleCount = 0
-                            task.wait(3.5 + math.random() * 3.5)
-                        else
-                            task.wait(0.65 + (math.random() * 0.25))
-                        end
-                    end
-                                else
-                    task.wait(1.0)
-                end
-            end
-        end
-
-        if activeTaskThreads[signature] == coroutine.running() then
-            activeTaskThreads[signature] = nil
-        end
-    end)
-end
-
--- Profile Export/Import Pipeline
-local function exportProfileToJSON()
-    local exportTable = {}
-    for sig, action in pairs(learnedActions) do
-        local encodedArgs = {}
-        local argsCount = action.args and action.args.n or 0
-        for i = 1, argsCount do
-            table.insert(encodedArgs, encodeArgument(action.args[i]))
-        end
-        exportTable[sig] = {
-            signature = action.signature,
-            name = action.name,
-            fullPath = action.fullPath,
-            method = action.method,
-            category = action.category,
-            count = action.count,
-            args = encodedArgs,
-            argsCount = argsCount,
-            cframePos = action.cframe and {action.cframe:GetComponents()} or nil
-        }
-    end
-    
-    local success, encoded = pcall(function() return HttpService:JSONEncode(exportTable) end)
-    if success and writefile then
-        local writeSuccess = pcall(function() writefile(PROFILE_FILENAME, encoded) end)
-        if writeSuccess then
-            safeCopy(PROFILE_FILENAME, saveDnaBtn, "Saved DNA!")
-            return
-        end
-    end
-    safeCopy("Error", saveDnaBtn, "Failed")
-end
-
-local redrawAutoTab
-
-local function importProfileFromJSON()
-    if not readfile then safeCopy("None", loadDnaBtn, "Import Failed"); return end
-    
-    local ok, raw = pcall(function() return readfile(PROFILE_FILENAME) end)
-    if not ok or not raw then safeCopy("None", loadDnaBtn, "Import Failed"); return end
-
-    local decodedOk, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
-    if not decodedOk or type(decoded) ~= "table" then safeCopy("None", loadDnaBtn, "Import Failed"); return end
-
-        -- Validate that the profile contains at least one structurally valid entry
-    local hasValidEntry = false
-    for _, data in pairs(decoded) do
-        if type(data) == "table" and type(data.name) == "string" and type(data.fullPath) == "string" and type(data.method) == "string" then
-            hasValidEntry = true
-            break
-        end
-    end
-    if not hasValidEntry then
-        safeCopy("None", loadDnaBtn, "Import Failed")
-        return
-    end
-
-    -- Replace current state only after the profile has passed basic validation
-    for sig, thread in pairs(activeTaskThreads) do pcall(function() task.cancel(thread) end) end
-    table.clear(activeTaskThreads)
-    table.clear(ActiveSchedulerQueue)
-    table.clear(learnedActions)
-
-    for _, cardObj in pairs(actionCards) do
-        if cardObj.conn then pcall(function() cardObj.conn:Disconnect() end) end
-        if cardObj.card then cardObj.card:Destroy() end
-    end
-    table.clear(actionCards)
-
-    local loadedEntriesCount = 0
-
-    for sig, data in pairs(decoded) do
-        if type(data) == "table" and type(data.name) == "string" and type(data.fullPath) == "string" and type(data.method) == "string" then
-            local targetInstance = resolveRemote(data.name, data.fullPath)
-            
-            -- FIX 4: Clamp fallback argument counts to prevent unbounded arrays
-            local rawArgsCount = tonumber(data.argsCount)
-            local parsedArgsCount
-            if rawArgsCount and rawArgsCount >= 0 then
-                parsedArgsCount = math.clamp(math.floor(rawArgsCount), 0, 256)
-            else
-                local fallbackLength = (type(data.args) == "table" and #data.args or 0)
-                parsedArgsCount = math.clamp(fallbackLength, 0, 256)
-            end
-
-            local restoredArgs = { n = parsedArgsCount }
-            
-            if type(data.args) == "table" then
-                for i = 1, parsedArgsCount do
-                    local encArg = data.args[i]
-                    if encArg then
-                        local decArg, argValid = decodeArgument(encArg)
-                        -- FIX 5: Distinguish valid nil from malformed arguments
-                        if argValid then
-                            restoredArgs[i] = decArg
-                        elseif encArg.type == "nil" then
-                            restoredArgs[i] = nil
-                        end
-                    end
-                end
-            end
-
-            -- Validated CFrame components
-            local resolvedCFrame = nil
-            if type(data.cframePos) == "table" and #data.cframePos >= 12 then
-                local validCF = true
-                for i = 1, 12 do
-                    if type(data.cframePos[i]) ~= "number" then validCF = false break end
-                end
-                if validCF then
-                    resolvedCFrame = CFrame.new(table.unpack(data.cframePos, 1, 12))
-                end
-            end
-
-            local validCount = (type(data.count) == "number" and data.count > 0) and math.clamp(math.floor(data.count), 1, 1000000) or 1
-            local validCategories = { MovementAction = true, InstanceAction = true, StructuredAction = true, StringAction = true, GenericAction = true }
-            local validCategory = (type(data.category) == "string" and validCategories[data.category]) and data.category or "GenericAction"
-
-            learnedActions[sig] = {
-                signature = data.signature or sig,
-                name = data.name,
-                instance = targetInstance,
-                fullPath = data.fullPath,
-                method = data.method,
-                args = restoredArgs,
-                cframe = resolvedCFrame,
-                count = validCount,
-                category = validCategory,
-                isUnavailable = (targetInstance == nil)
-            }
-
-            ActiveSchedulerQueue[sig] = {
-                enabled = false,
-                pausedEnabled = false,
-                optInTeleport = false,
-                name = data.name,
-                fullPath = data.fullPath,
-                args = restoredArgs,
-                cframe = resolvedCFrame,
-                                overrides = {},
-                _present = {}
-            }
-            
-            updateTaskScheduler(sig, ActiveSchedulerQueue[sig])
-            loadedEntriesCount = loadedEntriesCount + 1
-        end
-    end
-
-    if loadedEntriesCount > 0 then
-        if redrawAutoTab then redrawAutoTab() end
-        safeCopy("Loaded", loadDnaBtn, "Loaded (" .. loadedEntriesCount .. ")!")
-    else
-        safeCopy("None", loadDnaBtn, "Import Failed")
-    end
-end
-
--- Precise Movement Classification Engine
-local function classifySignature(argsPacked, isMovementRelated)
-    if isMovementRelated then return "MovementAction" end
-
-    local count = argsPacked.n or #argsPacked
-    for i = 1, count do
-        local arg = argsPacked[i]
-        local valueType = typeof(arg)
-        if valueType == "Instance" then
-            return "InstanceAction"
-        elseif valueType == "table" then
-            return "StructuredAction"
-        elseif valueType == "string" then
-            return "StringAction"
-        end
-    end
-
-    return "GenericAction"
-end
-
-redrawAutoTab = function()
-    local count = 0
-    for _ in pairs(learnedActions) do count = count + 1 end
-    autoEmptyText.Visible = (count == 0)
-
-    for sig, action in pairs(learnedActions) do
-        if not actionCards[sig] then
-            local card = Instance.new("Frame")
-            card.Size = UDim2.new(1, -8, 0, 52)
-            card.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-            card.BorderSizePixel = 0
-            card.Parent = autoScroll
-
-            local cardCorner = Instance.new("UICorner")
-            cardCorner.CornerRadius = UDim.new(0, 4)
-            cardCorner.Parent = card
-
-            local label = Instance.new("TextLabel")
-            label.Size = UDim2.new(1, -12, 0, 24)
-            label.Position = UDim2.fromOffset(6, 4)
-            label.BackgroundTransparency = 1
-            label.TextColor3 = Color3.fromRGB(220, 220, 230)
-            label.TextSize = 7
-            label.Font = Enum.Font.Code
-            label.TextXAlignment = Enum.TextXAlignment.Left
-            label.TextYAlignment = Enum.TextYAlignment.Top
-            label.TextWrapped = true
-            label.Parent = card
-
-            local openConfigPanelBtn = Instance.new("TextButton")
-            openConfigPanelBtn.Size = UDim2.new(1, -12, 0, 18)
-            openConfigPanelBtn.Position = UDim2.fromOffset(6, 28)
-            openConfigPanelBtn.Text = "⚙ Open Configuration Panel"
-            openConfigPanelBtn.TextColor3 = Color3.new(1, 1, 1)
-            openConfigPanelBtn.TextSize = 7
-            openConfigPanelBtn.Font = Enum.Font.Code
-            openConfigPanelBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 48)
-            openConfigPanelBtn.BorderSizePixel = 0
-            openConfigPanelBtn.Parent = card
-
-            local btnCorner = Instance.new("UICorner")
-            btnCorner.CornerRadius = UDim.new(0, 3)
-            btnCorner.Parent = openConfigPanelBtn
-
-            local cardConn = openConfigPanelBtn.MouseButton1Click:Connect(function()
-                activeConfigSig = sig
-                local currentAction = learnedActions[sig]
-                if not currentAction then return end
-                panelHeader.Text = string.format("Configuring:\n[%s] (%s)", currentAction.name, currentAction.method)
-
-                local queueData = ActiveSchedulerQueue[sig]
-                local isLooping = queueData and queueData.enabled or false
-                local isOptInTeleport = queueData and queueData.optInTeleport or false
-
-                if queueData and (queueData.errors or 0) >= 5 then
-                    configLoopBtn.Text = "Loop Execution: OFF (MAX ERRORS)"
-                    configLoopBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-                else
-                    configLoopBtn.Text = isLooping and "Loop Execution: ON" or "Loop Execution: OFF"
-                    configLoopBtn.BackgroundColor3 = isLooping and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
-                end
-
-                configTeleportOptBtn.Text = isOptInTeleport and "Opt-In Spatial Teleport: ON" or "Opt-In Spatial Teleport: OFF"
-                configTeleportOptBtn.BackgroundColor3 = isOptInTeleport and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
-
-                local argsCount = currentAction.args and currentAction.args.n or 0
-                if argsCount > 0 then
-                    -- FIX 1: Explicit nil check so false/nil overrides render correctly
-                    local currentVal
-                                        if queueData and queueData._present and queueData._present[1] then
-                        currentVal = queueData.overrides[1]
-                    else
-                        currentVal = currentAction.args[1]
-                    end
-                    configArg1Btn.Text = "Arg #1: " .. formatConfigValue(currentVal)
-                    configArg1Btn.Visible = true
-                else
-                    configArg1Btn.Text = "Arg #1: [No Arguments Captured]"
-                    configArg1Btn.Visible = false
-                end
-
-                autoContainer.Visible = false
-                configSubPanel.Visible = true
-            end)
-
-            actionCards[sig] = { card = card, label = label, conn = cardConn }
-        end
-
-        local statusTag = action.isUnavailable and " [UNAVAILABLE / BROKEN]" or ""
-        actionCards[sig].label.Text = string.format("⚡ [%s] (%s)%s | Type: %s (%dx)\nPath: %s", 
-            action.name, action.method, statusTag, action.category, action.count, action.fullPath)
-    end
-
-    task.defer(function()
-        autoScroll.CanvasSize = UDim2.new(0, autoLayout.AbsoluteContentSize.X + 10, 0, autoLayout.AbsoluteContentSize.Y + 10)
-    end)
-end
-
-table.insert(activeConnections, configArg1Btn.MouseButton1Click:Connect(function()
-    if not activeConfigSig or not learnedActions[activeConfigSig] then return end
-    local action = learnedActions[activeConfigSig]
-    if not action.args or (action.args.n or 0) == 0 then return end
-
-        if not ActiveSchedulerQueue[activeConfigSig] then
-        ActiveSchedulerQueue[activeConfigSig] = { enabled = false, pausedEnabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {}, _present = {} }
-        updateTaskScheduler(activeConfigSig, ActiveSchedulerQueue[activeConfigSig])
-    end
-
-    local queueData = ActiveSchedulerQueue[activeConfigSig]
-    queueData.overrides = queueData.overrides or {}
-    queueData._present = queueData._present or {}
-
-        local originalVal = action.args[1]
-    local currentVal
-    if queueData._present[1] then
-        currentVal = queueData.overrides[1]
-    else
-        currentVal = originalVal
-    end
-
-        if typeof(originalVal) == "number" then
-        queueData.overrides[1] = currentVal + 1
-    elseif typeof(originalVal) == "boolean" then
-        queueData.overrides[1] = not currentVal
-    else
-        if currentVal == originalVal then queueData.overrides[1] = tostring(originalVal) .. "_Modified"
-        else queueData.overrides[1] = originalVal end
-    end
-    queueData._present[1] = true
-
-    configArg1Btn.Text = "Arg #1: " .. formatConfigValue(queueData.overrides[1])
-end))
-
-table.insert(activeConnections, configLoopBtn.MouseButton1Click:Connect(function()
-    if not activeConfigSig or not learnedActions[activeConfigSig] then return end
-    local action = learnedActions[activeConfigSig]
-    if action.isUnavailable then return end
-
-    if not ActiveSchedulerQueue[activeConfigSig] then
-                    ActiveSchedulerQueue[activeConfigSig] = { enabled = false, pausedEnabled = false, optInTeleport = false, name = action.name, fullPath = action.fullPath, args = action.args, cframe = action.cframe, overrides = {}, _present = {} }
-        updateTaskScheduler(activeConfigSig, ActiveSchedulerQueue[activeConfigSig])
-    end
-
-    local queueData = ActiveSchedulerQueue[activeConfigSig]
-    queueData.enabled = not queueData.enabled
-    queueData.pausedEnabled = queueData.enabled
-    queueData.errors = 0
-
-    configLoopBtn.Text = queueData.enabled and "Loop Execution: ON" or "Loop Execution: OFF"
-    configLoopBtn.BackgroundColor3 = queueData.enabled and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
-end))
-
-table.insert(activeConnections, configTeleportOptBtn.MouseButton1Click:Connect(function()
-    if not activeConfigSig then return end
-    if not ActiveSchedulerQueue[activeConfigSig] then return end
-    local queueData = ActiveSchedulerQueue[activeConfigSig]
-    queueData.optInTeleport = not queueData.optInTeleport
-    configTeleportOptBtn.Text = queueData.optInTeleport and "Opt-In Spatial Teleport: ON" or "Opt-In Spatial Teleport: OFF"
-    configTeleportOptBtn.BackgroundColor3 = queueData.optInTeleport and Color3.fromRGB(40, 120, 60) or Color3.fromRGB(60, 60, 70)
-end))
-
-table.insert(activeConnections, backToListBtn.MouseButton1Click:Connect(function()
-    configSubPanel.Visible = false
-    autoContainer.Visible = true
-end))
-
--- Learned Remote Pipeline
-local function argumentsHaveSameShape(previousArgs, currentArgs)
-    if not previousArgs or not currentArgs then return false end
-    local previousCount = previousArgs.n or #previousArgs
-    local currentCount = currentArgs.n or #currentArgs
-    if previousCount ~= currentCount then return false end
-
-    for i = 1, currentCount do
-        local previousType = typeof(previousArgs[i])
-        local currentType = typeof(currentArgs[i])
-        if previousType ~= currentType then return false end
+    _tinsert(eventBuffer, event)
+    lastEventSignature, lastEventTime, lastEventObj = signature, now, event
+    totalEventsCaptured = totalEventsCaptured + 1
+    refreshCounterUI()
+    pushLiveFeed(event.FeedText or event.EventType or event.Method or "Event")
+
+    if #eventBuffer >= BUFFER_FLUSH_COUNT then
+        _pcall(flushBuffer)
     end
     return true
 end
 
-local function processLearnedRemote(self, method, argsPacked, callingScript, currentCFrame, isMovementRelated)
-    local fullPath = "game." .. self:GetFullName()
-    if shouldIgnoreRemote(fullPath) then return end
-
-    local signature = fullPath .. ":" .. method
-    local now = os.clock()
-    local category = classifySignature(argsPacked, isMovementRelated)
-
-    if learnedActions[signature] then
-                local entry = learnedActions[signature]
-        local shapeChanged = not argumentsHaveSameShape(entry.args, argsPacked)
-        entry.count = entry.count + 1
-        entry.lastSeen = now
-        entry.args = argsPacked
-        entry.isUnavailable = false
-        if shapeChanged and ActiveSchedulerQueue[signature] then
-            ActiveSchedulerQueue[signature].overrides = {}
-            ActiveSchedulerQueue[signature]._present = {}
-        end
-        if isMovementRelated and currentCFrame then
-            entry.cframe = currentCFrame
-            if ActiveSchedulerQueue[signature] then ActiveSchedulerQueue[signature].cframe = currentCFrame end
-        end
-    else
-        learnedActions[signature] = {
-            signature = signature,
-            name = self.Name,
-            instance = self,
-            fullPath = fullPath,
-            method = method,
-            args = argsPacked,
-            callingScript = callingScript,
-            cframe = isMovementRelated and currentCFrame or nil,
-            count = 1,
-            firstSeen = now,
-            lastSeen = now,
-            category = category,
-            isUnavailable = false
-        }
-    end
-
-    if not ActiveSchedulerQueue[signature] then
-                ActiveSchedulerQueue[signature] = {
-            enabled = false,
-            pausedEnabled = false,
-            optInTeleport = false,
-            name = self.Name,
-            fullPath = fullPath,
-            args = argsPacked,
-            cframe = learnedActions[signature].cframe,
-            overrides = {},
-            _present = {}
-        }
-        updateTaskScheduler(signature, ActiveSchedulerQueue[signature])
-    else
-        ActiveSchedulerQueue[signature].args = argsPacked
-    end
-
-    redrawAutoTab()
+captureLocalEvent = function(eventType, details)
+    enqueueEvent({
+        Timestamp = _tick(),
+        EventType = eventType,
+        FeedText = eventType,
+        Details = details or {},
+        RepeatCount = 1
+    })
 end
 
-table.insert(activeConnections, clearAutoBtn.MouseButton1Click:Connect(function()
-    for sig, thread in pairs(activeTaskThreads) do pcall(function() task.cancel(thread) end) end
-    table.clear(activeTaskThreads)
-    table.clear(ActiveSchedulerQueue)
-    table.clear(learnedActions)
+local scanInteractablesBtn = Instance.new("TextButton")
+scanInteractablesBtn.Size = UDim2.new(0.5, -10, 0, 22)
+scanInteractablesBtn.Position = UDim2.new(0, 8, 0, 172)
+scanInteractablesBtn.BackgroundColor3 = Color3.fromRGB(130, 80, 210)
+scanInteractablesBtn.Text = "Trigger Interactables"
+scanInteractablesBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+scanInteractablesBtn.TextSize, scanInteractablesBtn.Font = 10, Enum.Font.SourceSansBold
+scanInteractablesBtn.Parent = container
+Instance.new("UICorner", scanInteractablesBtn).CornerRadius = UDim.new(0, 5)
 
-    for _, cardObj in pairs(actionCards) do
-        if cardObj.conn then pcall(function() cardObj.conn:Disconnect() end) end
-        if cardObj.card then cardObj.card:Destroy() end
+local saveBtn = Instance.new("TextButton")
+saveBtn.Size = UDim2.new(0.5, -10, 0, 22)
+saveBtn.Position = UDim2.new(0.5, 2, 0, 172)
+saveBtn.BackgroundColor3 = Color3.fromRGB(45, 110, 210)
+saveBtn.Text = "Force Save"
+saveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+saveBtn.TextSize, saveBtn.Font = 10, Enum.Font.SourceSansBold
+saveBtn.Parent = container
+Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 5)
+
+-- =====================================================================
+-- EXACT SENSITIVE KEY REDACTION & SAFE SERIALIZATION
+-- =====================================================================
+local function isSensitiveKeyStrict(key)
+    local str = string.lower(tostring(key))
+    if str == "token" or str == "password" or str == "secret" or str == "auth"
+       or str == "authorization" or str == "session" or str == "credential"
+       or str == "authtoken" or str == "accesstoken" or str == "passwordhash"
+       or str == "session_id" or str == "sessionid" or str == "apikey" or str == "api_key"
+       or str:find("_token$") or str:find("^token_")
+       or str:find("_key$") or str:find("^key_")
+       or str:find("pass_") or str:find("_pass") then
+        return true
     end
-    table.clear(actionCards)
-
-    activeConfigSig = nil
-    configSubPanel.Visible = false
-    autoContainer.Visible = true
-    redrawAutoTab()
-end))
-
--- Hook Engine with Redraw Leak Protection
-local ignoredRemotes = { ["Heartbeat"] = true, ["Ping"] = true, ["AnalyticsEvent"] = true }
-local callCooldowns = {}
-local isHookingCall = false
-
-local function redrawLogs()
-    for _, conn in ipairs(logConnections) do pcall(function() conn:Disconnect() end) end
-    table.clear(logConnections)
-
-    for _, row in ipairs(logRows) do row:Destroy() end
-    table.clear(logRows)
-
-    for _, logEntry in ipairs(rawLogs) do
-        local rowBtn = Instance.new("TextButton")
-        rowBtn.Size = UDim2.new(1, 0, 0, 36)
-        rowBtn.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
-        rowBtn.BorderSizePixel = 0
-        rowBtn.Text = ""
-        rowBtn.Parent = spyScroll
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 3)
-        corner.Parent = rowBtn
-
-        local lbl = Instance.new("TextLabel")
-        lbl.Size = UDim2.new(1, -8, 1, 0)
-        lbl.Position = UDim2.fromOffset(4, 0)
-        lbl.BackgroundTransparency = 1
-        lbl.TextColor3 = Color3.fromRGB(100, 255, 120)
-        lbl.TextSize = 8
-        lbl.Font = Enum.Font.Code
-        lbl.TextXAlignment = Enum.TextXAlignment.Left
-        lbl.TextYAlignment = Enum.TextYAlignment.Center
-        lbl.TextWrapped = true
-        lbl.Text = logEntry.text
-        lbl.Parent = rowBtn
-
-        local rowConn = rowBtn.MouseButton1Click:Connect(function()
-            local lines = {
-                string.format("=== INTEL: %s (%s) ===", logEntry.name, logEntry.method),
-                string.format("[i] Path: %s", logEntry.fullPath or "Unknown"),
-                string.format("[i] Script: %s", logEntry.callingScript and logEntry.callingScript:GetFullName() or "Unknown"),
-                "\n[1] Arguments Captured:"
-            }
-            local count = logEntry.args.n or #logEntry.args
-            for i = 1, count do
-                local arg = logEntry.args[i]
-                table.insert(lines, string.format("  Arg #%d [%s] =\n%s", i, typeof(arg), serializeValue(arg)))
-            end
-            analyzeOutput.Text = table.concat(lines, "\n")
-            switchTab("analyze")
-        end)
-        table.insert(logConnections, rowConn)
-        table.insert(logRows, rowBtn)
-    end
+    return false
 end
 
-local function captureLog(self, method, ...)
-    if isEngineClosed or _G.IgnoreAutoHooks or isHookingCall then return end
-    local fullPath = "game." .. self:GetFullName()
-    if shouldIgnoreRemote(fullPath) then return end
-
-    local now = os.clock()
-    if callCooldowns[self] and (now - callCooldowns[self]) < 0.05 then return end
-    callCooldowns[self] = now
-
-    isHookingCall = true
-    xpcall(function(...)
-        local argsPacked = table.pack(...)
-        local callingScript = getcallingscript and getcallingscript() or nil
-        local currentCFrame = nil
-        local isMovementRelated = false
-
-        -- Precise Movement Heuristics: Explicit patterns prevent false positives
-        local lowName = string.lower(self.Name)
-        if string.match(lowName, "^move_") or string.match(lowName, "_pos$") or string.match(lowName, "^teleport") or string.match(lowName, "updateposition") or string.match(lowName, "walkto") then
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                isMovementRelated = true
-                currentCFrame = player.Character.HumanoidRootPart.CFrame
-            end
-        end
-
-        processLearnedRemote(self, method, argsPacked, callingScript, currentCFrame, isMovementRelated)
-
-        local serializedArgs = {}
-        for i = 1, argsPacked.n do
-            table.insert(serializedArgs, serializeValue(argsPacked[i]))
-        end
-
-        local snippet = string.format("%s:%s(%s)", fullPath, method, table.concat(serializedArgs, ", "))
-        local entryText = string.format("[%s] (%s)\n%s", self.Name, method, snippet)
-
-        local logObj = { 
-            text = entryText, 
-            snippet = snippet, 
-            name = self.Name, 
-            method = method, 
-            args = argsPacked, 
-            fullPath = fullPath, 
-            callingScript = callingScript, 
-            cframe = currentCFrame 
-        }
-        table.insert(rawLogs, logObj)
-        if #rawLogs > 15 then table.remove(rawLogs, 1) end
-        redrawLogs()
-    end, function(e)
-        warn("Aetherius Core Log Capture Error:", e)
-    end, ...)
-    isHookingCall = false
+local function truncateString(value)
+    value = tostring(value)
+    if #value > MAX_EVENT_STRING_LENGTH then
+        return value:sub(1, MAX_EVENT_STRING_LENGTH) .. "...[Truncated]"
+    end
+    return value
 end
 
--- Isolated Metamethod Hook Installation
-if hookmetamethod and newcclosure then
-    local success, err = pcall(function()
-        originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-            if not isEngineClosed and not isHookingCall and typeof(self) == "Instance" and not ignoredRemotes[self.Name] then
-                local method = getnamecallmethod()
-                if (method == "FireServer" or method == "InvokeServer") and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
-                    captureLog(self, method, ...)
-                end
-            end
-            return originalNamecall(self, ...)
-        end))
-        if not _G._AetheriusOriginalNamecall_v6 then
-            _G._AetheriusOriginalNamecall_v6 = originalNamecall
+local function safeGetInstancePath(inst)
+    if isShuttingDown then return "[Engine Teardown]" end
+    local path = "[Destroyed Instance]"
+    _pcall(function()
+        if inst and typeof(inst) == "Instance" and inst.Parent then
+            path = inst:GetFullName()
+        else
+            path = tostring(inst)
         end
     end)
-    if not success then
-        hookStatusMessage = "[!] Warning: Hook engine installation failed (" .. tostring(err) .. ")"
-        warn(hookStatusMessage)
-    end
-else
-    hookStatusMessage = "[!] Warning: hookmetamethod/newcclosure unsupported in current environment."
-    warn(hookStatusMessage)
+    return truncateString(path)
 end
 
--- Event Listeners & Drag Engine
-table.insert(activeConnections, clearBtn.MouseButton1Click:Connect(function() table.clear(rawLogs) redrawLogs() end))
-table.insert(activeConnections, exportBtn.MouseButton1Click:Connect(function()
-    if #rawLogs == 0 then return end
-    local snippets = {}
-    for _, log in ipairs(rawLogs) do table.insert(snippets, log.snippet) end
-    safeCopy(table.concat(snippets, "\n"), exportBtn, "Copied!")
-end))
-
-table.insert(activeConnections, recordMacroBtn.MouseButton1Click:Connect(function() safeCopy("Inactive", recordMacroBtn, "Inactive") end))
-table.insert(activeConnections, copyMacroBtn.MouseButton1Click:Connect(function() safeCopy("-- Placeholder Macro Buffer", copyMacroBtn, "Copied") end))
-table.insert(activeConnections, clearMacroBtn.MouseButton1Click:Connect(function() macroOutput.Text = "[STATUS]: Macro Recorder Engine - INACTIVE (Placeholder UI)\n" end))
-table.insert(activeConnections, genFuncBtn.MouseButton1Click:Connect(function() safeCopy("-- Placeholder Analysis Output", genFuncBtn, "Copied") end))
-table.insert(activeConnections, clearMonitorBtn.MouseButton1Click:Connect(function() monitorOutput.Text = "[STATUS]: Attribute Monitor - INACTIVE (Placeholder UI)\n\n" end))
-table.insert(activeConnections, saveDnaBtn.MouseButton1Click:Connect(exportProfileToJSON))
-table.insert(activeConnections, loadDnaBtn.MouseButton1Click:Connect(importProfileFromJSON))
-
-local dragging, dragStart, startPos
-table.insert(activeConnections, bar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = frame.Position
+local function sanitizeValue(val)
+    local vType = typeof(val)
+    if vType == "nil" then
+        return nil
+    elseif vType == "boolean" then
+        return val
+    elseif vType == "number" then
+        if val ~= val then return "NaN" end
+        if val == math.huge then return "Infinity" end
+        if val == -math.huge then return "-Infinity" end
+        return val
+    elseif vType == "string" then
+        return truncateString(val)
+    elseif vType == "Instance" then
+        return safeGetInstancePath(val)
+    elseif vType == "Vector3" or vType == "CFrame" or vType == "Color3" or vType == "UDim2" or vType == "EnumItem" then
+        return tostring(val)
+    else
+        return "[" .. vType .. "]"
     end
-end))
+end
 
-table.insert(activeConnections, UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end))
+local function sanitizeArg(value, seen, depth)
+    seen = seen or {}
+    depth = depth or 0
+    if depth > 3 then return "[Max Depth Reached]" end
 
-table.insert(activeConnections, UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
+    local vType = typeof(value)
+    if value == nil then
+        return nil
+    elseif vType == "boolean" then
+        return value
+    elseif vType == "number" then
+        return sanitizeValue(value)
+    elseif vType == "string" then
+        return truncateString(value)
+    elseif vType == "Instance" then
+        return {__Type = "Instance", __Value = safeGetInstancePath(value)}
+    elseif vType == "table" then
+        if seen[value] then return "{Circular Reference}" end
+        seen[value] = true
+        local sanitized, count = {}, 0
+        for k, v in pairs(value) do
+            count = count + 1
+            if count > MAX_TABLE_ENTRIES then
+                sanitized.__Truncated = true
+                break
+            end
+            local kType = typeof(k)
+            local rawKeyStr = tostring(k)
+            local keyStr = kType == "string" and rawKeyStr or ("[" .. kType .. "]" .. rawKeyStr)
+            
+            if isSensitiveKeyStrict(rawKeyStr) then
+                sanitized[keyStr] = "[Redacted]"
+            else
+                sanitized[keyStr] = sanitizeArg(v, seen, depth + 1)
+            end
+        end
+        seen[value] = nil
+        return sanitized
+    elseif vType == "Vector3" or vType == "CFrame" or vType == "Color3" or vType == "UDim2" or vType == "EnumItem" then
+        return {__Type = vType, __Value = tostring(value)}
+    else
+        return "[" .. vType .. "]"
     end
-end))
+end
+
+local function updateRemoteSchema(remotePath, method, args, direction)
+    local key = (direction or "Outbound") .. ":" .. remotePath
+    if not ExtractedSchemas[key] then
+        if schemaCount >= MAX_SCHEMAS then return end
+        ExtractedSchemas[key] = {
+            Path = remotePath,
+            Direction = direction or "Outbound",
+            Method = method,
+            CallCount = 0,
+            ArgumentTypes = {}
+        }
+        schemaCount = schemaCount + 1
+    end
+
+    local schema = ExtractedSchemas[key]
+    schema.CallCount = schema.CallCount + 1
+
+    local argCount = args.n or #args
+    for i = 1, argCount do
+        local val = args[i]
+        local vType = typeof(val)
+
+        if not schema.ArgumentTypes[i] then
+            schema.ArgumentTypes[i] = {Type = vType, Samples = {}}
+        end
+
+        local argInfo = schema.ArgumentTypes[i]
+        if #argInfo.Samples < 5 then
+            _tinsert(argInfo.Samples, sanitizeArg(val))
+        end
+    end
+end
+
+local function updateUICausality(remotePath, args, currentTime)
+    if lastClickedUI ~= "None" and (currentTime - lastClickTime < 0.25) then
+        if causalityCount >= MAX_UI_CAUSALITY_ENTRIES then return end
+        if not UICausalityMap[lastClickedUI] then
+            UICausalityMap[lastClickedUI] = {}
+            causalityCount = causalityCount + 1
+        end
+
+        if #UICausalityMap[lastClickedUI] < 10 then
+            _tinsert(UICausalityMap[lastClickedUI], {
+                TargetRemote = remotePath,
+                TimeOffsetMs = _floor((currentTime - lastClickTime) * 1000),
+                SampleArguments = sanitizeArg(args)
+            })
+        end
+    end
+end
+
+local function isSystemRemote(path)
+    if path == "" then return true end
+    local lower = string.lower(path)
+    if string.find(lower, "chat") or string.find(lower, "voice") or string.find(lower, "analytics") then
+        return true
+    end
+    for keyword in pairs(noiseBlacklist) do
+        if string.find(lower, keyword) then return true end
+    end
+    return false
+end
+
+-- =====================================================================
+-- DYNAMIC RETRYING UI CLICK TRACKER
+-- =====================================================================
+local function attachButtonTracker(btn)
+    if connectedButtons[btn] then return end
+    connectedButtons[btn] = true
+
+    local conn = btn.InputBegan:Connect(function(input)
+        if isShuttingDown then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            lastClickedUI = safeGetInstancePath(btn)
+            lastClickTime = _tick()
+            captureLocalEvent("UIClick", {Target = lastClickedUI})
+        end
+    end)
+    _tinsert(uiConnections, conn)
+end
+
+local function scanPlayerGuiContainer(pGui)
+    if HookedPlayerGuis[pGui] then return end
+    HookedPlayerGuis[pGui] = true
+
+    _pcall(function()
+        for _, desc in ipairs(pGui:GetDescendants()) do
+            if desc:IsA("GuiButton") then
+                attachButtonTracker(desc)
+            end
+        end
+    end)
+
+    local addedConn = pGui.DescendantAdded:Connect(function(desc)
+        if isShuttingDown then return end
+        if desc:IsA("GuiButton") then
+            attachButtonTracker(desc)
+        end
+    end)
+    _tinsert(uiConnections, addedConn)
+end
+
+local function scanAndHookUI()
+    task.spawn(function()
+        while not isShuttingDown do
+            local pGui = localPlayer:FindFirstChildOfClass("PlayerGui")
+            if pGui then
+                scanPlayerGuiContainer(pGui)
+                setStatus("UIClickTracker", "Active")
+                break
+            else
+                setStatus("UIClickTracker", "Pending")
+            end
+            task.wait(1)
+        end
+    end)
+end
+
+scanAndHookUI()
+
+local playerGuiRespawnConn = localPlayer.ChildAdded:Connect(function(child)
+    if child:IsA("PlayerGui") then
+        scanPlayerGuiContainer(child)
+    end
+end)
+_tinsert(uiConnections, playerGuiRespawnConn)
+
+-- =====================================================================
+-- INBOUND NETWORK SNIFFER WITH FAILSAFE CONNECTION HANDLING
+-- =====================================================================
+local function hookInboundRemote(remote)
+    if isShuttingDown or HookedInboundRemotes[remote] or HookingInboundRemotes[remote] then return end
+    HookingInboundRemotes[remote] = true
+
+    if remote:IsA("RemoteEvent") and getconnections then
+        local connSuccess, conns = _pcall(getconnections, remote.OnClientEvent)
+        if connSuccess and conns then
+            HookedInboundRemotes[remote] = true
+            HookingInboundRemotes[remote] = nil
+
+            for _, connection in ipairs(conns) do
+                if connection.Function then
+                    local oldFunc = connection.Function
+                    local wasDisabled = false
+
+                    local canManipulate = connection.Disable and connection.Enable
+                    if canManipulate then
+                        local disableSuccess = _pcall(function() connection:Disable() end)
+                        if disableSuccess then
+                            wasDisabled = true
+                            _tinsert(DisabledOriginalConnections, connection)
+                        end
+                    end
+
+                    local wrapperFunc = function(...)
+                        local args = _tpack(...)
+                        if isLoggingActive and not isShuttingDown then
+                            local path = safeGetInstancePath(remote)
+                            if not isSystemRemote(path) then
+                                task.defer(function()
+                                    if isShuttingDown then return end
+                                    updateRemoteSchema(path, "OnClientEvent", args, "Inbound")
+                                    local sanitized = {Count = args.n, Values = {}}
+                                    for i = 1, args.n do
+                                        sanitized.Values[i] = sanitizeArg(args[i])
+                                    end
+                                    enqueueEvent({
+                                        Timestamp = _tick(),
+                                        RemotePath = path,
+                                        Direction = "Inbound",
+                                        EventType = "OnClientEvent",
+                                        FeedText = "Inbound: " .. remote.Name,
+                                        Arguments = sanitized,
+                                        RepeatCount = 1
+                                    })
+                                end)
+                            end
+                        end
+
+                        if wasDisabled then
+                            return oldFunc(...)
+                        end
+                    end
+
+                    local safeWrapper = newcclosure and newcclosure(wrapperFunc) or wrapperFunc
+                    local newConn = remote.OnClientEvent:Connect(safeWrapper)
+                    _tinsert(shutdownConnections, newConn)
+                end
+            end
+            setStatus("InboundSniffer", "Active")
+        else
+            HookingInboundRemotes[remote] = nil
+        end
+    elseif remote:IsA("RemoteFunction") then
+        HookedInboundRemotes[remote] = {
+            InboundStatus = "Unsupported",
+            Reason = "Client-side RemoteFunction callback interception is unavailable"
+        }
+        HookingInboundRemotes[remote] = nil
+    else
+        HookingInboundRemotes[remote] = nil
+    end
+end
+
+local function scanInboundContainer(containerObj)
+    _pcall(function()
+        for _, desc in ipairs(containerObj:GetDescendants()) do
+            _pcall(function()
+                if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
+                    hookInboundRemote(desc)
+                end
+            end)
+        end
+    end)
+end
+
+local function bindDynamicInboundSniffer()
+    if not getconnections then
+        setStatus("InboundSniffer", "Unsupported")
+        return
+    end
+
+    local containersToScan = {ReplicatedStorage, Workspace, Players}
+    for _, cont in ipairs(containersToScan) do
+        scanInboundContainer(cont)
+        local conn = cont.DescendantAdded:Connect(function(desc)
+            if isShuttingDown then return end
+            _pcall(function()
+                if desc:IsA("RemoteEvent") or desc:IsA("RemoteFunction") then
+                    hookInboundRemote(desc)
+                end
+            end)
+        end)
+        _tinsert(uiConnections, conn)
+    end
+end
+
+bindDynamicInboundSniffer()
+
+-- =====================================================================
+-- MEMORY-BOUNDED & YIELDABLE LOCAL SCRIPT UPVALUE INSPECTOR
+-- =====================================================================
+local function resolveScriptOwner(fn)
+    local scriptObj = nil
+    _pcall(function()
+        if getfenv then
+            local env = getfenv(fn)
+            if env and env.script then
+                scriptObj = env.script
+            end
+        end
+    end)
+    if scriptObj then return safeGetInstancePath(scriptObj) end
+
+    _pcall(function()
+        if getscriptfromthread then
+            local th = coroutine.running()
+            scriptObj = getscriptfromthread(th)
+        end
+    end)
+    if scriptObj then return safeGetInstancePath(scriptObj) end
+
+    return "Anonymous_GC_Closure"
+end
+
+local function scanGarbageCollectionUpvalues()
+    if not getgc or not debug or not debug.getupvalues then
+        setStatus("UpvalueScanner", "Unsupported")
+        return
+    end
+
+    task.spawn(function()
+        local gcObjects
+        local success = pcall(function() gcObjects = getgc(true) end)
+        if not success or type(gcObjects) ~= "table" then
+            setStatus("UpvalueScanner", "Failed")
+            return
+        end
+
+        local processedCount = 0
+        local BATCH_SIZE = 250
+
+        for _, obj in ipairs(gcObjects) do
+            if isShuttingDown or upvalueScriptCount >= MAX_UPVALUE_SCRIPTS then break end
+
+            processedCount = processedCount + 1
+            if processedCount % BATCH_SIZE == 0 then
+                task.wait()
+            end
+
+            if type(obj) == "function" and (not islclosure or islclosure(obj)) then
+                if not (checkcaller and checkcaller()) then
+                    local ownerName = resolveScriptOwner(obj)
+                    if not LocalScriptUpvalueStore[ownerName] then
+                        if upvalueScriptCount >= MAX_UPVALUE_SCRIPTS then continue end
+                        LocalScriptUpvalueStore[ownerName] = {}
+                        upvalueScriptCount = upvalueScriptCount + 1
+                    end
+
+                    if #LocalScriptUpvalueStore[ownerName] < MAX_UPVALUES_PER_SCRIPT then
+                        local upvalSuccess, upvalues = _pcall(debug.getupvalues, obj)
+                        if upvalSuccess and type(upvalues) == "table" and next(upvalues) ~= nil then
+                            _tinsert(LocalScriptUpvalueStore[ownerName], sanitizeArg(upvalues))
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- =====================================================================
+-- MEMORY-BOUNDED MODULE ENVIRONMENT HARVESTER
+-- =====================================================================
+local function harvestModuleEnvironments()
+    if not getloadedmodules or not getsenv then return end
+
+    _pcall(function()
+        local modules = getloadedmodules()
+        for _, mod in ipairs(modules) do
+            if isShuttingDown or worldStateCount >= MAX_WORLD_STATE_ENTRIES then break end
+            _pcall(function()
+                if mod:IsA("ModuleScript") then
+                    local envSuccess, env = _pcall(getsenv, mod)
+                    if envSuccess and type(env) == "table" then
+                        local modPath = safeGetInstancePath(mod)
+                        if not WorldStateModel[modPath] then
+                            local truncatedEnv = {}
+                            local keyCount = 0
+
+                            for k, v in pairs(env) do
+                                keyCount = keyCount + 1
+                                if keyCount > MAX_MODULE_KEYS then
+                                    truncatedEnv.__Truncated = true
+                                    break
+                                end
+                                local kStr = tostring(k)
+                                if isSensitiveKeyStrict(kStr) then
+                                    truncatedEnv[kStr] = "[Redacted]"
+                                else
+                                    truncatedEnv[kStr] = sanitizeValue(v)
+                                end
+                            end
+
+                            WorldStateModel[modPath] = {
+                                Type = "ModuleEnvironment",
+                                ExportedKeys = truncatedEnv
+                            }
+                            worldStateCount = worldStateCount + 1
+                        end
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+-- =====================================================================
+-- AUTOMATED INTERACTION ENGINE WITH SAFETY GATES
+-- =====================================================================
+local function triggerNearbyInteractables()
+    if isShuttingDown or not localPlayer.Character or not localPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+    
+    if AUTO_INTERACT_CONFIRMATION then
+        scanInteractablesBtn.Text = "Confirm Trigger?"
+        scanInteractablesBtn.BackgroundColor3 = Color3.fromRGB(210, 130, 45)
+        AUTO_INTERACT_CONFIRMATION = false
+        task.delay(3, function()
+            if not AUTO_INTERACT_CONFIRMATION and scanInteractablesBtn.Parent then
+                scanInteractablesBtn.Text = "Trigger Interactables"
+                scanInteractablesBtn.BackgroundColor3 = Color3.fromRGB(130, 80, 210)
+                AUTO_INTERACT_CONFIRMATION = true
+            end
+        end)
+        return
+    end
+
+    AUTO_INTERACT_CONFIRMATION = true
+    scanInteractablesBtn.Text = "Trigger Interactables"
+    scanInteractablesBtn.BackgroundColor3 = Color3.fromRGB(130, 80, 210)
+
+    local rootPos = localPlayer.Character.HumanoidRootPart.Position
+    pushLiveFeed("Scanning interactables...")
+
+    _pcall(function()
+        for _, desc in ipairs(Workspace:GetDescendants()) do
+            if isShuttingDown then break end
+            _pcall(function()
+                if desc:IsA("ProximityPrompt") and fireproximityprompt then
+                    local parentPart = desc.Parent
+                    if parentPart and parentPart:IsA("BasePart") and (parentPart.Position - rootPos).Magnitude <= 15 then
+                        fireproximityprompt(desc)
+                        captureLocalEvent("AutoInteract", {Type = "ProximityPrompt", Target = safeGetInstancePath(desc)})
+                    end
+                elseif desc:IsA("ClickDetector") and fireclickdetector then
+                    local parentPart = desc.Parent
+                    if parentPart and parentPart:IsA("BasePart") and (parentPart.Position - rootPos).Magnitude <= 15 then
+                        fireclickdetector(desc)
+                        captureLocalEvent("AutoInteract", {Type = "ClickDetector", Target = safeGetInstancePath(desc)})
+                    end
+                elseif desc:IsA("TouchTransmitter") and firetouchinterest and localPlayer.Character:FindFirstChild("Head") then
+                    local parentPart = desc.Parent
+                    if parentPart and parentPart:IsA("BasePart") and (parentPart.Position - rootPos).Magnitude <= 15 then
+                        firetouchinterest(localPlayer.Character.Head, parentPart, 0)
+                        task.wait(0.05)
+                        firetouchinterest(localPlayer.Character.Head, parentPart, 1)
+                        captureLocalEvent("AutoInteract", {Type = "TouchInterest", Target = safeGetInstancePath(parentPart)})
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+scanInteractablesBtn.MouseButton1Click:Connect(triggerNearbyInteractables)
+
+-- =====================================================================
+-- METATABLE HOOK WITH RESILIENT STATE VALIDATION
+-- =====================================================================
+local isHookActive = runtimeEnv.TelemetryProductionHookInstalled and type(originalNamecall) == "function"
+
+if ENABLE_NETWORK_HOOK and not isHookActive then
+    if hookmetamethod then
+        local hookSuccess = _pcall(function()
+            rawMetatable = getrawmetatable(rawGame)
+            local function namecallCallback(self, ...)
+                local method = getnamecallmethod and getnamecallmethod()
+
+                if checkcaller and checkcaller() then
+                    return originalNamecall(self, ...)
+                end
+
+                if not isLoggingActive or isShuttingDown then
+                    return originalNamecall(self, ...)
+                end
+
+                if typeof(self) ~= "Instance" then
+                    return originalNamecall(self, ...)
+                end
+
+                if not (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
+                    return originalNamecall(self, ...)
+                end
+
+                if (method ~= "FireServer" and method ~= "InvokeServer") then
+                    return originalNamecall(self, ...)
+                end
+
+                local remotePath = safeGetInstancePath(self)
+                if isSystemRemote(remotePath) then
+                    return originalNamecall(self, ...)
+                end
+
+                local args = _tpack(...)
+                local currentTime = _tick()
+
+                task.defer(function()
+                    if isShuttingDown or jsonFinalized then return end
+                    updateRemoteSchema(remotePath, method, args, "Outbound")
+                    updateUICausality(remotePath, args, currentTime)
+
+                    local sanitizedArgs = {Count = args.n, Values = {}}
+                    for i = 1, args.n do sanitizedArgs.Values[i] = sanitizeArg(args[i]) end
+
+                    enqueueEvent({
+                        Timestamp = currentTime,
+                        RemotePath = remotePath,
+                        Direction = "Outbound",
+                        Method = method,
+                        FeedText = method .. ": " .. (remotePath:match("[^%.]+$") or remotePath),
+                        TriggeredByUI = (currentTime - lastClickTime < 0.25) and lastClickedUI or "None",
+                        Arguments = sanitizedArgs,
+                        RepeatCount = 1
+                    })
+                end)
+
+                return originalNamecall(self, ...)
+            end
+
+            local safeCallback = newcclosure and newcclosure(namecallCallback) or namecallCallback
+            originalNamecall = hookmetamethod(rawGame, "__namecall", safeCallback)
+        end)
+
+        if hookSuccess then
+            runtimeEnv.TelemetryProductionHookInstalled = true
+            setStatus("NamecallHook", "Active")
+        else
+            runtimeEnv.TelemetryProductionHookInstalled = false
+            setStatus("NamecallHook", "Failed", Color3.fromRGB(255, 69, 0))
+        end
+    else
+        setStatus("NamecallHook", "Unsupported")
+    end
+end
+
+-- =====================================================================
+-- DIFFERENTIAL STATE ENGINE WITH REDACTION
+-- =====================================================================
+takeStateSnapshot = function()
+    local state = {Attributes = {}, Leaderstats = {}, Backpack = {}}
+    if isShuttingDown then return state end
+
+    _pcall(function()
+        for k, v in pairs(localPlayer:GetAttributes()) do 
+            local kStr = tostring(k)
+            if isSensitiveKeyStrict(kStr) then
+                state.Attributes[kStr] = "[Redacted]"
+            else
+                state.Attributes[kStr] = sanitizeValue(v)
+            end
+        end
+        local ls = localPlayer:FindFirstChild("leaderstats")
+        if ls then 
+            for _, stat in ipairs(ls:GetChildren()) do 
+                local kStr = stat.Name
+                if isSensitiveKeyStrict(kStr) then
+                    state.Leaderstats[kStr] = "[Redacted]"
+                else
+                    state.Leaderstats[kStr] = sanitizeValue(stat.Value)
+                end
+            end 
+        end
+        local backpack = localPlayer:FindFirstChild("Backpack")
+        if backpack then 
+            for _, item in ipairs(backpack:GetChildren()) do 
+                state.Backpack[item.Name] = (state.Backpack[item.Name] or 0) + 1 
+            end 
+        end
+    end)
+    return state
+end
+
+computeStateDeltas = function(oldState, newState)
+    if not oldState or not newState or isShuttingDown then return end
+    local deltas = {}
+
+    for k, v in pairs(newState.Attributes) do
+        if oldState.Attributes[k] ~= v then
+            deltas["Attribute:" .. k] = {Old = oldState.Attributes[k], New = v}
+        end
+    end
+    for k, v in pairs(oldState.Attributes) do
+        if newState.Attributes[k] == nil then
+            deltas["Attribute:" .. k] = {Old = v, New = "[Removed]"}
+        end
+    end
+
+    for k, v in pairs(newState.Leaderstats) do
+        if oldState.Leaderstats[k] ~= v then
+            deltas["Leaderstat:" .. k] = {Old = oldState.Leaderstats[k], New = v}
+        end
+    end
+    for k, v in pairs(oldState.Leaderstats) do
+        if newState.Leaderstats[k] == nil then
+            deltas["Leaderstat:" .. k] = {Old = v, New = "[Removed]"}
+        end
+    end
+
+    for k, v in pairs(newState.Backpack) do
+        if oldState.Backpack[k] ~= v then
+            deltas["BackpackItem:" .. k] = {Old = oldState.Backpack[k] or 0, New = v}
+        end
+    end
+    for k, v in pairs(oldState.Backpack) do
+        if newState.Backpack[k] == nil then
+            deltas["BackpackItem:" .. k] = {Old = v, New = 0}
+        end
+    end
+
+    if next(deltas) ~= nil and mutationCount < MAX_STATE_MUTATION_KEYS then
+        local timestampKey = tostring(_tick())
+        StateMutationTracker[timestampKey] = deltas
+        mutationCount = mutationCount + 1
+        captureLocalEvent("StateDelta", {Mutations = deltas})
+    end
+end
+
+-- =====================================================================
+-- DISK FLUSH ENGINE
+-- =====================================================================
+flushBuffer = function()
+    if #eventBuffer == 0 or not storageReady or jsonFinalized then return true end
+
+    local encodedEvents = {}
+    local remainingEvents = {}
+
+    for _, event in ipairs(eventBuffer) do
+        local success, encoded = _pcall(function() return HttpService:JSONEncode(event) end)
+        if success then 
+            _tinsert(encodedEvents, encoded) 
+        else
+            totalEncodeFailures = totalEncodeFailures + 1
+            _tinsert(remainingEvents, event)
+        end
+    end
+
+    if #encodedEvents == 0 then
+        eventBuffer = remainingEvents
+        return #eventBuffer == 0
+    end
+
+    local prefix = jsonHasRecords and ",\n" or ""
+    local chunk = prefix .. "  " .. table.concat(encodedEvents, ",\n  ")
+    local success = _pcall(function() appendfile(SESSION_FILE, chunk) end)
+
+    if success then
+        setStatus("DiskWriter", "Active")
+        jsonHasRecords = true
+        eventBuffer = remainingEvents
+        return #eventBuffer == 0
+    end
+
+    totalFlushFailures = totalFlushFailures + 1
+    setDiskError("Error")
+    return false
+end
+
+local function finalizeJsonFile()
+    if jsonFinalized or not storageReady then return false end
+
+    local flushOk = flushBuffer()
+    if not flushOk or #eventBuffer > 0 then
+        setDiskError("Flush Partial")
+        return false
+    end
+
+    local analysisSections = {
+        ExtractedSchemas = ExtractedSchemas,
+        UICausalityMap = UICausalityMap,
+        WorldStateModel = WorldStateModel,
+        StateMutationTracker = StateMutationTracker,
+        LocalScriptUpvalues = LocalScriptUpvalueStore
+    }
+
+    local serializedSections = {}
+    for sectionKey, sectionData in pairs(analysisSections) do
+        local encSuccess, encodedSection = _pcall(function()
+            return HttpService:JSONEncode(sectionData)
+        end)
+        if encSuccess then
+            serializedSections[sectionKey] = encodedSection
+        else
+            totalEncodeFailures = totalEncodeFailures + 1
+            serializedSections[sectionKey] = '"[Section Omitted: Exceeded Encoding Size Limit]"'
+        end
+    end
+
+    local sectionEntries = {}
+    for key, jsonStr in pairs(serializedSections) do
+        _tinsert(sectionEntries, '      "' .. key .. '": ' .. jsonStr)
+    end
+    local preformattedAnalysisJson = "{\n" .. table.concat(sectionEntries, ",\n") .. "\n    }"
+
+    local endingRecordHeader = "  {\n" ..
+        '    "SessionEnded": true,\n' ..
+        '    "EndedAt": ' .. tostring(_tick()) .. ',\n' ..
+        '    "TotalCaptured": ' .. tostring(totalEventsCaptured) .. ',\n' ..
+        '    "TotalSuppressed": ' .. tostring(totalEventsSuppressed) .. ',\n' ..
+        '    "EncodeFailures": ' .. tostring(totalEncodeFailures) .. ',\n' ..
+        '    "FlushFailures": ' .. tostring(totalFlushFailures) .. ',\n' ..
+        '    "GameAnalysis": ' .. preformattedAnalysisJson .. '\n' ..
+        "  }\n]\n"
+
+    local prefix = jsonHasRecords and ",\n" or ""
+    local appendSuccess = _pcall(function()
+        appendfile(SESSION_FILE, prefix .. endingRecordHeader)
+    end)
+
+    if appendSuccess then
+        jsonFinalized = true
+        return true
+    end
+
+    totalFlushFailures = totalFlushFailures + 1
+    setDiskError("Finalize Fail")
+    return false
+end
+
+-- =====================================================================
+-- COMPLETE ENGINE TEARDOWN
+-- =====================================================================
+local function unloadEngine()
+    isShuttingDown = true
+    isLoggingActive = false
+
+    -- Restore Original Metatable Hook
+    if originalNamecall and hookmetamethod and rawGame then
+        _pcall(function()
+            hookmetamethod(rawGame, "__namecall", originalNamecall)
+        end)
+        originalNamecall = nil
+    end
+    runtimeEnv.TelemetryProductionHookInstalled = false
+
+    -- Re-enable Original Inbound Connections
+    for _, originalConn in ipairs(DisabledOriginalConnections) do
+        if originalConn then
+            local enableSuccess = _pcall(function()
+                if originalConn.Enable then
+                    originalConn:Enable()
+                elseif originalConn.EnableConnection then
+                    originalConn:EnableConnection()
+                end
+            end)
+            if not enableSuccess then
+                warn("[Telemetry Engine Warning] Failed to restore disabled inbound connection on teardown.")
+            end
+        end
+    end
+    DisabledOriginalConnections = {}
+
+    -- Disconnect Internal Wrappers
+    for _, conn in ipairs(shutdownConnections) do
+        _pcall(function() conn:Disconnect() end)
+    end
+    shutdownConnections = {}
+
+    -- Disconnect UI Listeners
+    for _, conn in ipairs(uiConnections) do
+        _pcall(function() conn:Disconnect() end)
+    end
+    uiConnections = {}
+
+    -- Flush Remaining Data & Seal File
+    finalizeJsonFile()
+
+    -- Clear Global Keys
+    runtimeEnv.TelemetryProductionRunning = nil
+    runtimeEnv.TelemetryProductionScreenGui = nil
+
+    if screenGui then
+        screenGui:Destroy()
+    end
+    print("[Telemetry Engine] Shutdown complete. All connections and hooks restored.")
+end
+
+-- =====================================================================
+-- MAIN WORKER LOOP
+-- =====================================================================
+task.spawn(function()
+    previousStateSnapshot = takeStateSnapshot()
+    harvestModuleEnvironments()
+    scanGarbageCollectionUpvalues()
+
+    while not isShuttingDown do
+        task.wait(STATE_SNAPSHOT_INTERVAL + _random() * 0.5)
+        if not isShuttingDown then
+            _pcall(function()
+                if CAPTURE_STATE_DELTAS and isLoggingActive then
+                    local currentSnapshot = takeStateSnapshot()
+                    computeStateDeltas(previousStateSnapshot, currentSnapshot)
+                    previousStateSnapshot = currentSnapshot
+                end
+
+                if #eventBuffer > 0 then
+                    flushBuffer()
+                end
+            end)
+        end
+    end
+end)
+
+-- UI Interaction Bindings
+minBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    container.Visible = not isMinimized
+    mainFrame.Size = isMinimized and UDim2.new(0, 180, 0, 28) or UDim2.new(0, 250, 0, 260)
+    minBtn.Text = isMinimized and "+" or "-"
+    refreshCounterUI()
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    if isShuttingDown then return end
+    unloadEngine()
+end)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    if isShuttingDown or jsonFinalized then return end
+    isLoggingActive = not isLoggingActive
+    toggleBtn.BackgroundColor3 = isLoggingActive and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    toggleBtn.Text = isLoggingActive and "Status: ACTIVE" or "Status: PAUSED"
+end)
+
+saveBtn.MouseButton1Click:Connect(function()
+    local saved = #eventBuffer == 0 or flushBuffer()
+    counterLabel.Text = saved and "Saved!" or "Save failed"
+    task.delay(1.5, refreshCounterUI)
+end)
+
+print("[Delta Telemetry Engine] Engine Ready.")
