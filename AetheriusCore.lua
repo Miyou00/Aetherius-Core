@@ -1,5 +1,5 @@
 -- =====================================================================
--- ADVANCED TELEMETRY & REVERSE-ENGINEERING ENGINE (v4.9 UI-SYNCHRONIZED)
+-- ADVANCED TELEMETRY & REVERSE-ENGINEERING ENGINE (v4.9.1 OPTIMIZED)
 -- =====================================================================
 
 local rawGame = game
@@ -74,7 +74,7 @@ local MAX_UPVALUE_SCRIPTS = 50
 local MAX_UPVALUES_PER_SCRIPT = 15
 local MAX_MODULE_KEYS = 20
 
-local SESSION_VERSION = "4.9-ProductionHardened"
+local SESSION_VERSION = "4.9.1-ProductionOptimized"
 
 -- Engine Storage
 local ExtractedSchemas = {}
@@ -120,7 +120,11 @@ local statusStates = {
 local uiConnections = {}
 local shutdownConnections = {}
 local connectedButtons = setmetatable({}, {__mode = "k"})
-local recentEventTimes = {}
+
+-- Optimized O(1) Rate Limiter Variables
+local rateLimitWindowStart = _osclock()
+local rateLimitCurrentCount = 0
+
 local lastEventSignature = nil
 local lastEventTime = 0
 local lastEventObj = nil
@@ -135,7 +139,7 @@ local noiseBlacklist = {
     ["camera"] = true, ["ping"] = true
 }
 
--- Storage Setup (Modifies statusStates before UI is instantiated)
+-- Storage Setup
 local storageReady = false
 local storageSuccess = _pcall(function()
     if not writefile or not makefolder or not appendfile or not isfolder then
@@ -288,7 +292,6 @@ subTitle.TextSize, subTitle.Font = 10, Enum.Font.SourceSansBold
 subTitle.TextXAlignment = Enum.TextXAlignment.Left
 subTitle.Parent = subCard
 
--- Dynamically reflects actual initial state from statusStates
 local function createStatusLabel(name, posY)
     local initialState = statusStates[name] or "Active"
     local initialColor = (initialState == "Active" and Color3.fromRGB(0, 255, 128))
@@ -366,15 +369,17 @@ local function eventSignature(event)
     return tostring(event.EventType or "") .. "|" .. tostring(event.Path or (event.Details and event.Details.Path) or "") .. "|" .. tostring(event.RemotePath or "")
 end
 
+-- Optimized O(1) Sliding Window Rate Limiter
 local function underRateLimit()
     local now = _osclock()
-    for i = #recentEventTimes, 1, -1 do
-        if now - recentEventTimes[i] > 1 then
-            table.remove(recentEventTimes, i)
-        end
+    if now - rateLimitWindowStart >= 1 then
+        rateLimitWindowStart = now
+        rateLimitCurrentCount = 0
     end
-    if #recentEventTimes >= MAX_EVENTS_PER_SECOND then return false end
-    _tinsert(recentEventTimes, now)
+    if rateLimitCurrentCount >= MAX_EVENTS_PER_SECOND then
+        return false
+    end
+    rateLimitCurrentCount = rateLimitCurrentCount + 1
     return true
 end
 
@@ -779,7 +784,7 @@ end
 bindDynamicInboundSniffer()
 
 -- =====================================================================
--- MEMORY-BOUNDED & YIELDABLE LOCAL SCRIPT UPVALUE INSPECTOR
+-- MEMORY-BOUNDED & THROTTLED LOCAL SCRIPT UPVALUE INSPECTOR
 -- =====================================================================
 local function resolveScriptOwner(fn)
     local scriptObj = nil
@@ -811,38 +816,34 @@ local function scanGarbageCollectionUpvalues()
     end
 
     task.spawn(function()
-        local gcObjects
-        local success = pcall(function() gcObjects = getgc(true) end)
+        task.wait(2) -- Let the engine settle down before scanning
+        local success, gcObjects = pcall(function() return getgc(false) end)
         if not success or type(gcObjects) ~= "table" then
             setStatus("UpvalueScanner", "Failed")
             return
         end
 
         local processedCount = 0
-        local BATCH_SIZE = 250
-
         for _, obj in ipairs(gcObjects) do
             if isShuttingDown or upvalueScriptCount >= MAX_UPVALUE_SCRIPTS then break end
 
             processedCount = processedCount + 1
-            if processedCount % BATCH_SIZE == 0 then
-                task.wait()
+            if processedCount % 100 == 0 then
+                task.wait(0.05) -- Throttled yielding to protect frame rates
             end
 
-            if type(obj) == "function" and (not islclosure or islclosure(obj)) then
-                if not (checkcaller and checkcaller()) then
-                    local ownerName = resolveScriptOwner(obj)
-                    if not LocalScriptUpvalueStore[ownerName] then
-                        if upvalueScriptCount >= MAX_UPVALUE_SCRIPTS then continue end
-                        LocalScriptUpvalueStore[ownerName] = {}
-                        upvalueScriptCount = upvalueScriptCount + 1
-                    end
+            if type(obj) == "function" then
+                local ownerName = resolveScriptOwner(obj)
+                if not LocalScriptUpvalueStore[ownerName] then
+                    if upvalueScriptCount >= MAX_UPVALUE_SCRIPTS then continue end
+                    LocalScriptUpvalueStore[ownerName] = {}
+                    upvalueScriptCount = upvalueScriptCount + 1
+                end
 
-                    if #LocalScriptUpvalueStore[ownerName] < MAX_UPVALUES_PER_SCRIPT then
-                        local upvalSuccess, upvalues = _pcall(debug.getupvalues, obj)
-                        if upvalSuccess and type(upvalues) == "table" and next(upvalues) ~= nil then
-                            _tinsert(LocalScriptUpvalueStore[ownerName], sanitizeArg(upvalues))
-                        end
+                if #LocalScriptUpvalueStore[ownerName] < MAX_UPVALUES_PER_SCRIPT then
+                    local upvalSuccess, upvalues = _pcall(debug.getupvalues, obj)
+                    if upvalSuccess and type(upvalues) == "table" and next(upvalues) ~= nil then
+                        _tinsert(LocalScriptUpvalueStore[ownerName], sanitizeArg(upvalues))
                     end
                 end
             end
@@ -1328,4 +1329,4 @@ saveBtn.MouseButton1Click:Connect(function()
     task.delay(1.5, refreshCounterUI)
 end)
 
-print("[Delta Telemetry Engine] Engine Ready.")
+print("[Delta Telemetry Engine] Optimized Engine Ready.")
