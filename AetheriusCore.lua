@@ -17,10 +17,10 @@
     • Compact live status system
     • Pause / Resume
     • Rescan
-    • Hide / Show
-    • High-priority UI layering
+    • Minimize
     • Draggable analyzer window
     • Draggable floating button
+    • High-priority UI layering
 
     Intended for games you own or are authorized to analyze.
 
@@ -52,7 +52,6 @@ local YIELD_TIME = 0.03
 local MAX_RESULTS = 50000
 local MAX_ATTRIBUTES_PER_OBJECT = 100
 local MAX_TAGS_PER_OBJECT = 50
-local MAX_VISIBLE_RESULTS = 100
 
 local AUTO_SCAN = true
 
@@ -311,7 +310,7 @@ local function GetValue(instance)
 end
 
 --------------------------------------------------
--- STATUS HELPERS
+-- STATUS
 --------------------------------------------------
 
 local StatusHeader
@@ -332,12 +331,17 @@ local function SetStatus(name, status)
 
 	if status == "COMPLETE" then
 		label.TextColor3 = COLORS.Success
-	elseif status == "RUNNING" or status == "PROCESSING" then
+	elseif status == "RUNNING"
+		or status == "PROCESSING" then
+
 		label.TextColor3 = COLORS.Accent
+
 	elseif status == "ERROR" then
 		label.TextColor3 = COLORS.Error
+
 	elseif status == "PAUSED" then
 		label.TextColor3 = COLORS.Warning
+
 	else
 		label.TextColor3 = COLORS.Muted
 	end
@@ -531,7 +535,7 @@ TabLayout.Parent = TabBar
 local Content = Instance.new("Frame")
 
 Content.Name = "Content"
-Content.Size = UDim2.new(1, -16, 1, -148)
+Content.Size = UDim2.new(1, -16, 1, -187)
 Content.Position = UDim2.fromOffset(8, 112)
 Content.BackgroundColor3 = COLORS.Panel
 Content.BorderSizePixel = 0
@@ -571,6 +575,7 @@ local TabNames = {
 }
 
 local function CreatePage(name)
+
 	local page = Instance.new("Frame")
 
 	page.Name = name .. "Page"
@@ -587,7 +592,12 @@ local function CreatePage(name)
 end
 
 for _, name in ipairs(TabNames) do
-	local button = MakeButton(TabBar, name, 8)
+
+	local button = MakeButton(
+		TabBar,
+		name,
+		8
+	)
 
 	button.Size = UDim2.new(
 		1 / #TabNames,
@@ -608,28 +618,29 @@ end
 -- PAGE SWITCHING
 --------------------------------------------------
 
-local CurrentPage = nil
-
 local function ShowPage(name)
+
 	for pageName, page in pairs(Pages) do
 		page.Visible = pageName == name
 	end
 
 	for buttonName, button in pairs(TabButtons) do
+
 		if buttonName == name then
 			button.BackgroundColor3 = COLORS.Accent
 		else
 			button.BackgroundColor3 = COLORS.Panel3
 		end
-	end
 
-	CurrentPage = name
+	end
 end
 
 for name, button in pairs(TabButtons) do
+
 	button.MouseButton1Click:Connect(function()
 		ShowPage(name)
 	end)
+
 end
 
 --------------------------------------------------
@@ -681,6 +692,7 @@ StatLayout.Parent = StatContainer
 local StatLabels = {}
 
 local function CreateStat(name, initial)
+
 	local frame = Instance.new("Frame")
 
 	frame.BackgroundColor3 = COLORS.Panel2
@@ -818,6 +830,7 @@ PlayerInfo.TextWrapped = true
 PlayerInfo.ZIndex = BASE_ZINDEX + 3
 
 local function UpdatePlayerInfo()
+
 	local character = LocalPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 
@@ -828,11 +841,13 @@ local function UpdatePlayerInfo()
 	table.insert(lines, "Character: " .. (character and character.Name or "None"))
 
 	if humanoid then
+
 		table.insert(lines, "")
 		table.insert(lines, "Health: " .. tostring(humanoid.Health))
 		table.insert(lines, "MaxHealth: " .. tostring(humanoid.MaxHealth))
 		table.insert(lines, "WalkSpeed: " .. tostring(humanoid.WalkSpeed))
 		table.insert(lines, "JumpPower: " .. tostring(humanoid.JumpPower))
+
 	end
 
 	PlayerInfo.Text = table.concat(lines, "\n")
@@ -841,7 +856,7 @@ end
 UpdatePlayerInfo()
 
 --------------------------------------------------
--- RELATIONS PAGE
+-- RELATIONS
 --------------------------------------------------
 
 local RelationsPage = Pages.Relations
@@ -870,7 +885,7 @@ RelationsInfo.TextWrapped = true
 RelationsInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
--- BEHAVIOR PAGE
+-- BEHAVIOR
 --------------------------------------------------
 
 local BehaviorPage = Pages.Behavior
@@ -899,7 +914,7 @@ BehaviorInfo.TextWrapped = true
 BehaviorInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
--- REMOTES PAGE
+-- REMOTES
 --------------------------------------------------
 
 local RemotesPage = Pages.Remotes
@@ -928,7 +943,7 @@ RemotesInfo.TextWrapped = true
 RemotesInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
--- DATA PAGE
+-- DATA
 --------------------------------------------------
 
 local DataPage = Pages.Data
@@ -958,7 +973,7 @@ DataInfo.TextWrapped = true
 DataInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
--- BOTTOM BUTTONS
+-- BOTTOM CONTROLS
 --------------------------------------------------
 
 local PauseButton = MakeButton(
@@ -967,8 +982,8 @@ local PauseButton = MakeButton(
 	10
 )
 
-PauseButton.Size = UDim2.fromOffset(65, 27)
-PauseButton.Position = UDim2.fromOffset(0, 2)
+PauseButton.Size = UDim2.fromOffset(62, 27)
+PauseButton.Position = UDim2.new(1, -134, 0, 2)
 PauseButton.ZIndex = BASE_ZINDEX + 4
 
 local RescanButton = MakeButton(
@@ -977,19 +992,9 @@ local RescanButton = MakeButton(
 	10
 )
 
-RescanButton.Size = UDim2.fromOffset(65, 27)
-RescanButton.Position = UDim2.fromOffset(70, 2)
+RescanButton.Size = UDim2.fromOffset(62, 27)
+RescanButton.Position = UDim2.new(1, -66, 0, 2)
 RescanButton.ZIndex = BASE_ZINDEX + 4
-
-local HideButton = MakeButton(
-	BottomBar,
-	"Hide",
-	10
-)
-
-HideButton.Size = UDim2.fromOffset(65, 27)
-HideButton.Position = UDim2.fromOffset(140, 2)
-HideButton.ZIndex = BASE_ZINDEX + 4
 
 --------------------------------------------------
 -- FLOATING BUTTON
@@ -1004,7 +1009,6 @@ local OpenButton = MakeButton(
 OpenButton.Name = "AnalyzerOpenButton"
 OpenButton.Size = UDim2.fromOffset(46, 46)
 OpenButton.Position = UDim2.new(1, -65, 0.5, -23)
-OpenButton.AnchorPoint = Vector2.new(0, 0)
 OpenButton.BackgroundColor3 = COLORS.Accent
 OpenButton.TextColor3 = Color3.new(1, 1, 1)
 OpenButton.Font = Enum.Font.GothamBold
@@ -1018,6 +1022,7 @@ Corner(OpenButton, 23)
 --------------------------------------------------
 
 local function MakeDraggable(object, handle)
+
 	local dragging = false
 	local dragStart
 	local startPosition
@@ -1025,6 +1030,7 @@ local function MakeDraggable(object, handle)
 	handle = handle or object
 
 	handle.InputBegan:Connect(function(input)
+
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 
@@ -1033,20 +1039,26 @@ local function MakeDraggable(object, handle)
 			startPosition = object.Position
 
 			input.Changed:Connect(function()
+
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 				end
+
 			end)
+
 		end
+
 	end)
 
 	handle.InputChanged:Connect(function(input)
+
 		if not dragging then
 			return
 		end
 
 		if input.UserInputType ~= Enum.UserInputType.MouseMovement
 			and input.UserInputType ~= Enum.UserInputType.Touch then
+
 			return
 		end
 
@@ -1058,6 +1070,7 @@ local function MakeDraggable(object, handle)
 			startPosition.Y.Scale,
 			startPosition.Y.Offset + delta.Y
 		)
+
 	end)
 end
 
@@ -1071,14 +1084,16 @@ MakeDraggable(OpenButton, OpenButton)
 local StatusExpanded = false
 
 local function UpdateStatusLayout()
+
 	if StatusExpanded then
 
 		StatusDetails.Visible = true
 		StatusDetails.Size = UDim2.new(1, -16, 0, 92)
 
 		TabBar.Position = UDim2.fromOffset(8, 177)
+
 		Content.Position = UDim2.fromOffset(8, 210)
-		Content.Size = UDim2.new(1, -16, 1, -246)
+		Content.Size = UDim2.new(1, -16, 1, -187)
 
 		StatusExpand.Text = "▲"
 
@@ -1088,45 +1103,64 @@ local function UpdateStatusLayout()
 		StatusDetails.Size = UDim2.new(1, -16, 0, 0)
 
 		TabBar.Position = UDim2.fromOffset(8, 79)
+
 		Content.Position = UDim2.fromOffset(8, 112)
-		Content.Size = UDim2.new(1, -16, 1, -148)
+		Content.Size = UDim2.new(1, -16, 1, -187)
 
 		StatusExpand.Text = "▼"
+
 	end
 end
 
 StatusExpand.MouseButton1Click:Connect(function()
+
 	StatusExpanded = not StatusExpanded
+
 	UpdateStatusLayout()
+
 end)
 
 --------------------------------------------------
--- SCAN STATUS
+-- STATUS UPDATE
 --------------------------------------------------
 
 local function UpdateOverallStatus(status, progress)
+
 	OverallStatus.Text = "● " .. status
-	ProgressLabel.Text = tostring(math.floor(progress)) .. "%"
+
+	ProgressLabel.Text =
+		tostring(math.floor(progress)) .. "%"
 
 	if status == "COMPLETE" then
+
 		OverallStatus.TextColor3 = COLORS.Success
+
 	elseif status == "ANALYZING"
 		or status == "PROCESSING" then
+
 		OverallStatus.TextColor3 = COLORS.Accent
+
 	elseif status == "PAUSED" then
+
 		OverallStatus.TextColor3 = COLORS.Warning
+
 	elseif status == "ERROR" then
+
 		OverallStatus.TextColor3 = COLORS.Error
+
 	else
+
 		OverallStatus.TextColor3 = COLORS.Muted
+
 	end
 end
 
 --------------------------------------------------
--- UPDATE COUNTERS
+-- COUNTERS
 --------------------------------------------------
 
 local function UpdateCounters()
+
 	StatLabels.Objects.Text = tostring(ObjectCount)
 	StatLabels.Attributes.Text = tostring(AttributeCount)
 	StatLabels.Tags.Text = tostring(TagCount)
@@ -1151,6 +1185,7 @@ end
 --------------------------------------------------
 
 local function ScanInstance(instance)
+
 	if #ScanData >= MAX_RESULTS then
 		return
 	end
@@ -1160,49 +1195,69 @@ local function ScanInstance(instance)
 	local properties = GetRelevantProperties(instance)
 	local value = GetValue(instance)
 
-	local attributeCountForObject = 0
-	local tagCountForObject = 0
-
 	local limitedAttributes = {}
+	local attributeCountForObject = 0
 
 	for name, attributeValue in pairs(attributes) do
+
 		attributeCountForObject += 1
 
 		if attributeCountForObject <= MAX_ATTRIBUTES_PER_OBJECT then
 			limitedAttributes[name] = attributeValue
 		end
+
 	end
 
 	local limitedTags = {}
+	local tagCountForObject = 0
 
 	for _, tag in ipairs(tags) do
+
 		tagCountForObject += 1
 
 		if tagCountForObject <= MAX_TAGS_PER_OBJECT then
 			table.insert(limitedTags, tag)
 		end
+
 	end
 
 	local record = {
+
 		Instance = instance,
+
 		Name = instance.Name,
+
 		ClassName = instance.ClassName,
+
 		FullName = SafeFullName(instance),
 
 		Parent = instance.Parent,
-		ParentName = instance.Parent and instance.Parent.Name or nil,
+
+		ParentName = instance.Parent
+			and instance.Parent.Name
+			or nil,
 
 		Attributes = limitedAttributes,
+
 		Tags = limitedTags,
+
 		Properties = properties,
+
 		Value = value
 	}
 
-	table.insert(ScanData, record)
+	table.insert(
+		ScanData,
+		record
+	)
 
 	ObjectCount += 1
-	AttributeCount += attributeCountForObject
-	TagCount += tagCountForObject
+
+	AttributeCount +=
+		attributeCountForObject
+
+	TagCount +=
+		tagCountForObject
 
 	if instance:IsA("ValueBase") then
 		ValueCount += 1
@@ -1210,16 +1265,18 @@ local function ScanInstance(instance)
 end
 
 --------------------------------------------------
--- SCAN
+-- RUN SCAN
 --------------------------------------------------
 
 local function RunScan()
+
 	if ScanRunning then
 		return
 	end
 
 	ScanRunning = true
 	ScanPaused = false
+
 	CurrentScan += 1
 
 	local thisScan = CurrentScan
@@ -1233,7 +1290,10 @@ local function RunScan()
 	SetStatus("Tags", "RUNNING")
 	SetStatus("Values", "RUNNING")
 
-	UpdateOverallStatus("ANALYZING", 0)
+	UpdateOverallStatus(
+		"ANALYZING",
+		0
+	)
 
 	PauseButton.Text = "Pause"
 
@@ -1246,13 +1306,40 @@ local function RunScan()
 			break
 		end
 
-		while ScanPaused and thisScan == CurrentScan do
-			UpdateOverallStatus("PAUSED", total > 0 and (index / total) * 100 or 0)
+		while ScanPaused
+			and thisScan == CurrentScan do
 
-			SetStatus("Structure", "PAUSED")
-			SetStatus("Attributes", "PAUSED")
-			SetStatus("Tags", "PAUSED")
-			SetStatus("Values", "PAUSED")
+			local progress = 0
+
+			if total > 0 then
+				progress =
+					(index / total) * 100
+			end
+
+			UpdateOverallStatus(
+				"PAUSED",
+				progress
+			)
+
+			SetStatus(
+				"Structure",
+				"PAUSED"
+			)
+
+			SetStatus(
+				"Attributes",
+				"PAUSED"
+			)
+
+			SetStatus(
+				"Tags",
+				"PAUSED"
+			)
+
+			SetStatus(
+				"Values",
+				"PAUSED"
+			)
 
 			task.wait(0.1)
 		end
@@ -1268,17 +1355,36 @@ local function RunScan()
 			local progress = 0
 
 			if total > 0 then
-				progress = (index / total) * 100
+				progress =
+					(index / total) * 100
 			end
 
-			UpdateOverallStatus("ANALYZING", progress)
+			UpdateOverallStatus(
+				"ANALYZING",
+				progress
+			)
 
 			UpdateCounters()
 
-			SetStatus("Structure", "PROCESSING")
-			SetStatus("Attributes", "PROCESSING")
-			SetStatus("Tags", "PROCESSING")
-			SetStatus("Values", "PROCESSING")
+			SetStatus(
+				"Structure",
+				"PROCESSING"
+			)
+
+			SetStatus(
+				"Attributes",
+				"PROCESSING"
+			)
+
+			SetStatus(
+				"Tags",
+				"PROCESSING"
+			)
+
+			SetStatus(
+				"Values",
+				"PROCESSING"
+			)
 
 			task.wait(YIELD_TIME)
 		end
@@ -1292,12 +1398,30 @@ local function RunScan()
 
 		UpdateCounters()
 
-		SetStatus("Structure", "COMPLETE")
-		SetStatus("Attributes", "COMPLETE")
-		SetStatus("Tags", "COMPLETE")
-		SetStatus("Values", "COMPLETE")
+		SetStatus(
+			"Structure",
+			"COMPLETE"
+		)
 
-		UpdateOverallStatus("COMPLETE", 100)
+		SetStatus(
+			"Attributes",
+			"COMPLETE"
+		)
+
+		SetStatus(
+			"Tags",
+			"COMPLETE"
+		)
+
+		SetStatus(
+			"Values",
+			"COMPLETE"
+		)
+
+		UpdateOverallStatus(
+			"COMPLETE",
+			100
+		)
 
 		ScanRunning = false
 	end
@@ -1316,11 +1440,27 @@ PauseButton.MouseButton1Click:Connect(function()
 	ScanPaused = not ScanPaused
 
 	if ScanPaused then
+
 		PauseButton.Text = "Resume"
-		UpdateOverallStatus("PAUSED", tonumber(ProgressLabel.Text:match("%d+")) or 0)
+
+		UpdateOverallStatus(
+			"PAUSED",
+			tonumber(
+				ProgressLabel.Text:match("%d+")
+			) or 0
+		)
+
 	else
+
 		PauseButton.Text = "Pause"
-		UpdateOverallStatus("ANALYZING", tonumber(ProgressLabel.Text:match("%d+")) or 0)
+
+		UpdateOverallStatus(
+			"ANALYZING",
+			tonumber(
+				ProgressLabel.Text:match("%d+")
+			) or 0
+		)
+
 	end
 end)
 
@@ -1331,6 +1471,7 @@ end)
 RescanButton.MouseButton1Click:Connect(function()
 
 	CurrentScan += 1
+
 	ScanRunning = false
 	ScanPaused = false
 
@@ -1339,20 +1480,6 @@ RescanButton.MouseButton1Click:Connect(function()
 	task.wait()
 
 	RunScan()
-end)
-
---------------------------------------------------
--- HIDE
---------------------------------------------------
-
-HideButton.MouseButton1Click:Connect(function()
-	Main.Visible = false
-	OpenButton.Visible = true
-end)
-
-OpenButton.MouseButton1Click:Connect(function()
-	Main.Visible = true
-	OpenButton.Visible = false
 end)
 
 --------------------------------------------------
@@ -1366,7 +1493,12 @@ MinimizeButton.MouseButton1Click:Connect(function()
 	Minimized = not Minimized
 
 	if Minimized then
-		Main.Size = UDim2.fromOffset(345, 38)
+
+		Main.Size =
+			UDim2.fromOffset(
+				345,
+				38
+			)
 
 		StatusHeader.Visible = false
 		StatusDetails.Visible = false
@@ -1375,8 +1507,14 @@ MinimizeButton.MouseButton1Click:Connect(function()
 		BottomBar.Visible = false
 
 		MinimizeButton.Text = "+"
+
 	else
-		Main.Size = UDim2.fromOffset(345, 293)
+
+		Main.Size =
+			UDim2.fromOffset(
+				345,
+				293
+			)
 
 		StatusHeader.Visible = true
 		TabBar.Visible = true
@@ -1388,6 +1526,7 @@ MinimizeButton.MouseButton1Click:Connect(function()
 		end
 
 		MinimizeButton.Text = "−"
+
 	end
 end)
 
@@ -1396,8 +1535,21 @@ end)
 --------------------------------------------------
 
 CloseButton.MouseButton1Click:Connect(function()
+
 	Main.Visible = false
 	OpenButton.Visible = true
+
+end)
+
+--------------------------------------------------
+-- OPEN BUTTON
+--------------------------------------------------
+
+OpenButton.MouseButton1Click:Connect(function()
+
+	Main.Visible = true
+	OpenButton.Visible = false
+
 end)
 
 --------------------------------------------------
@@ -1406,7 +1558,9 @@ end)
 
 workspace.DescendantAdded:Connect(function(instance)
 
-	if not ScanRunning and #ScanData < MAX_RESULTS then
+	if not ScanRunning
+		and #ScanData < MAX_RESULTS then
+
 		task.defer(function()
 
 			if not instance.Parent then
@@ -1414,9 +1568,11 @@ workspace.DescendantAdded:Connect(function(instance)
 			end
 
 			ScanInstance(instance)
+
 			UpdateCounters()
 
 		end)
+
 	end
 end)
 
@@ -1425,8 +1581,11 @@ end)
 --------------------------------------------------
 
 LocalPlayer.CharacterAdded:Connect(function()
+
 	task.wait(0.5)
+
 	UpdatePlayerInfo()
+
 end)
 
 task.spawn(function()
@@ -1438,6 +1597,7 @@ task.spawn(function()
 		end
 
 		task.wait(1)
+
 	end
 end)
 
@@ -1446,7 +1606,9 @@ end)
 --------------------------------------------------
 
 ShowPage("Overview")
+
 UpdateStatusLayout()
+
 UpdateCounters()
 
 Main.Visible = true
@@ -1457,8 +1619,13 @@ OpenButton.Visible = false
 --------------------------------------------------
 
 if AUTO_SCAN then
+
 	task.spawn(function()
+
 		task.wait(0.5)
+
 		RunScan()
+
 	end)
+
 end
