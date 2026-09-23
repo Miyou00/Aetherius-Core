@@ -22,6 +22,22 @@
     • Draggable floating button
     • High-priority UI layering
 
+    Phase 2
+
+    Features:
+    • Object classification
+    • Object family / group detection
+    • Object relevance detection
+    • Object relationship detection
+    • Classification signal tracking
+    • Intelligence summary
+    • Classification-based object organization
+    • Object intelligence UI
+    • Stored classification data
+    • Incremental classification for newly detected objects
+    • Classification progress monitoring
+    • Phase 1 scan data integration
+
     Intended for games you own or are authorized to analyze.
 
     This does NOT:
