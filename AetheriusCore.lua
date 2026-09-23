@@ -1,380 +1,564 @@
 --[[
-    CLIENT GAME INTELLIGENCE ANALYZER
-    ==================================
-
-    PHASE 1 - STRUCTURE / ATTRIBUTE SCANNER
+    Client Game Intelligence Analyzer
+    ---------------------------------
+    Phase 1
 
     Features:
-    • Compact mobile-first UI
-    • Tabbed interface
-    • Incremental workspace scanning
-    • Instance discovery
+    • Mobile-first compact UI
+    • 15% larger analyzer panel
+    • Compact buttons and tabs
+    • Incremental instance scanning
     • Attribute scanning
     • CollectionService tag scanning
     • ValueBase scanning
-    • Useful property scanning
-    • Search
+    • Relevant property scanning
+    • Object structure storage
+    • Player information
+    • Compact live status system
     • Pause / Resume
     • Rescan
-    • Scan progress
-    • Compact status panel
-    • Draggable window
-    • Floating open button
-    • High DisplayOrder / Global ZIndex
+    • Hide / Show
+    • High-priority UI layering
+    • Draggable analyzer window
+    • Draggable floating button
 
-    Phase 1 does not:
-    • Access server-only data
-    • Bypass Roblox security
-    • Fire unknown remotes
-    • Perform arbitrary remote probing
-    • Extract protected code
+    Intended for games you own or are authorized to analyze.
+
+    This does NOT:
+    • bypass Roblox security
+    • access server-only data
+    • bypass replication
+    • perform arbitrary remote probing
+    • perform anti-detection
 ]]
 
---========================================================
+--------------------------------------------------
 -- SERVICES
---========================================================
+--------------------------------------------------
 
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
-local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
---========================================================
--- CONFIG
---========================================================
+--------------------------------------------------
+-- CONFIGURATION
+--------------------------------------------------
 
-local CONFIG = {
-	BATCH_SIZE = 100,
-	YIELD_TIME = 0.03,
+local BATCH_SIZE = 100
+local YIELD_TIME = 0.03
 
-	MAX_RESULTS = 50000,
-	MAX_ATTRIBUTES_PER_OBJECT = 100,
-	MAX_TAGS_PER_OBJECT = 50,
+local MAX_RESULTS = 50000
+local MAX_ATTRIBUTES_PER_OBJECT = 100
+local MAX_TAGS_PER_OBJECT = 50
+local MAX_VISIBLE_RESULTS = 100
 
-	MAX_VISIBLE_RESULTS = 100,
+local AUTO_SCAN = true
 
-	AUTO_SCAN = true,
+local DISPLAY_ORDER = 2147483647
+local BASE_ZINDEX = 100000
 
-	DISPLAY_ORDER = 2147483647,
-	BASE_ZINDEX = 100000,
-}
-
---========================================================
--- STATE
---========================================================
-
-local State = {
-	Scanning = false,
-	Paused = false,
-	ScanComplete = false,
-
-	CurrentIndex = 0,
-	TotalInstances = 0,
-
-	ObjectCount = 0,
-	AttributeCount = 0,
-	TagCount = 0,
-	ValueCount = 0,
-
-	Objects = {},
-
-	CurrentTab = "Overview",
-	SearchText = "",
-
-	Status = {
-		Structure = "WAITING",
-		Attributes = "WAITING",
-		Tags = "WAITING",
-		Values = "WAITING",
-	},
-
-	ScanToken = 0,
-}
-
---========================================================
+--------------------------------------------------
 -- REMOVE OLD GUI
---========================================================
+--------------------------------------------------
 
-local OldGui = PlayerGui:FindFirstChild("ClientGameAnalyzer")
+local oldGui = PlayerGui:FindFirstChild("ClientGameAnalyzer")
 
-if OldGui then
-	OldGui:Destroy()
+if oldGui then
+	oldGui:Destroy()
 end
 
---========================================================
+--------------------------------------------------
 -- COLORS
---========================================================
+--------------------------------------------------
 
 local COLORS = {
-	Background = Color3.fromRGB(18, 20, 24),
-	Panel = Color3.fromRGB(25, 28, 34),
-	Panel2 = Color3.fromRGB(31, 35, 42),
+	Background = Color3.fromRGB(18, 20, 27),
+	Panel = Color3.fromRGB(27, 30, 40),
+	Panel2 = Color3.fromRGB(32, 35, 46),
+	Panel3 = Color3.fromRGB(38, 42, 54),
 
-	Border = Color3.fromRGB(55, 61, 72),
+	Accent = Color3.fromRGB(70, 130, 255),
+	AccentDark = Color3.fromRGB(52, 103, 210),
 
-	Text = Color3.fromRGB(235, 238, 243),
-	SubText = Color3.fromRGB(160, 168, 180),
+	Text = Color3.fromRGB(240, 243, 250),
+	Muted = Color3.fromRGB(155, 162, 178),
 
-	Blue = Color3.fromRGB(45, 125, 255),
-	Green = Color3.fromRGB(45, 200, 120),
-	Yellow = Color3.fromRGB(235, 190, 60),
-	Red = Color3.fromRGB(235, 75, 75),
+	Success = Color3.fromRGB(70, 205, 125),
+	Warning = Color3.fromRGB(245, 180, 70),
+	Error = Color3.fromRGB(235, 85, 85),
 
-	Tab = Color3.fromRGB(32, 36, 44),
-	TabActive = Color3.fromRGB(45, 125, 255),
+	Border = Color3.fromRGB(55, 59, 73)
 }
 
---========================================================
--- SCREEN GUI
---========================================================
+--------------------------------------------------
+-- GUI
+--------------------------------------------------
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ClientGameAnalyzer"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-ScreenGui.DisplayOrder = CONFIG.DISPLAY_ORDER
-ScreenGui.Parent = PlayerGui
+local Gui = Instance.new("ScreenGui")
 
---========================================================
--- ZINDEX SYSTEM
---========================================================
+Gui.Name = "ClientGameAnalyzer"
+Gui.ResetOnSpawn = false
+Gui.IgnoreGuiInset = true
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+Gui.DisplayOrder = DISPLAY_ORDER
+Gui.Parent = PlayerGui
 
--- IMPORTANT:
--- Parents/backgrounds receive a lower ZIndex.
--- Their children receive progressively higher ZIndexes.
--- This prevents panels from covering their own text.
+--------------------------------------------------
+-- HELPERS
+--------------------------------------------------
 
-local function ApplyZIndex(object, startingZ)
-	if not object:IsA("GuiObject") then
+local function Corner(object, radius)
+	local corner = Instance.new("UICorner")
+
+	corner.CornerRadius = UDim.new(0, radius)
+	corner.Parent = object
+
+	return corner
+end
+
+local function Stroke(object, color, thickness)
+	local stroke = Instance.new("UIStroke")
+
+	stroke.Color = color
+	stroke.Thickness = thickness or 1
+	stroke.Transparency = 0.25
+	stroke.Parent = object
+
+	return stroke
+end
+
+local function MakeText(parent, text, size, color, font)
+	local label = Instance.new("TextLabel")
+
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = color or COLORS.Text
+	label.TextSize = size or 13
+	label.Font = font or Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextYAlignment = Enum.TextYAlignment.Center
+	label.Parent = parent
+
+	return label
+end
+
+local function MakeButton(parent, text, size)
+	local button = Instance.new("TextButton")
+
+	button.AutoButtonColor = true
+	button.BackgroundColor3 = COLORS.Panel3
+	button.BorderSizePixel = 0
+	button.Text = text
+	button.TextColor3 = COLORS.Text
+	button.TextSize = size or 11
+	button.Font = Enum.Font.GothamMedium
+	button.Parent = parent
+
+	Corner(button, 5)
+
+	return button
+end
+
+--------------------------------------------------
+-- DATA STORAGE
+--------------------------------------------------
+
+local ScanData = {}
+
+local ObjectCount = 0
+local AttributeCount = 0
+local TagCount = 0
+local ValueCount = 0
+
+local ScanPaused = false
+local ScanRunning = false
+local CurrentScan = 0
+
+local Statuses = {
+	Structure = "WAITING",
+	Attributes = "WAITING",
+	Tags = "WAITING",
+	Values = "WAITING"
+}
+
+--------------------------------------------------
+-- SCAN DATA
+--------------------------------------------------
+
+local function ClearScanData()
+	table.clear(ScanData)
+
+	ObjectCount = 0
+	AttributeCount = 0
+	TagCount = 0
+	ValueCount = 0
+end
+
+local function SafeFullName(instance)
+	local success, result = pcall(function()
+		return instance:GetFullName()
+	end)
+
+	if success then
+		return result
+	end
+
+	return instance.Name
+end
+
+local function SafeAttributes(instance)
+	local success, attributes = pcall(function()
+		return instance:GetAttributes()
+	end)
+
+	if not success or type(attributes) ~= "table" then
+		return {}
+	end
+
+	return attributes
+end
+
+local function SafeTags(instance)
+	local success, tags = pcall(function()
+		return CollectionService:GetTags(instance)
+	end)
+
+	if not success or type(tags) ~= "table" then
+		return {}
+	end
+
+	return tags
+end
+
+--------------------------------------------------
+-- RELEVANT PROPERTIES
+--------------------------------------------------
+
+local function GetRelevantProperties(instance)
+	local properties = {}
+
+	pcall(function()
+
+		if instance:IsA("BasePart") then
+			properties.Size = tostring(instance.Size)
+			properties.Position = tostring(instance.Position)
+			properties.Anchored = instance.Anchored
+			properties.CanCollide = instance.CanCollide
+			properties.Transparency = instance.Transparency
+		end
+
+		if instance:IsA("Humanoid") then
+			properties.Health = instance.Health
+			properties.MaxHealth = instance.MaxHealth
+			properties.WalkSpeed = instance.WalkSpeed
+			properties.JumpPower = instance.JumpPower
+			properties.HipHeight = instance.HipHeight
+		end
+
+		if instance:IsA("Tool") then
+			properties.Enabled = instance.Enabled
+			properties.ToolTip = instance.ToolTip
+		end
+
+		if instance:IsA("TextLabel")
+			or instance:IsA("TextButton")
+			or instance:IsA("TextBox") then
+
+			properties.Text = instance.Text
+			properties.Visible = instance.Visible
+		end
+
+		if instance:IsA("ImageLabel")
+			or instance:IsA("ImageButton") then
+
+			properties.Image = instance.Image
+			properties.Visible = instance.Visible
+		end
+
+		if instance:IsA("ProximityPrompt") then
+			properties.ActionText = instance.ActionText
+			properties.ObjectText = instance.ObjectText
+			properties.HoldDuration = instance.HoldDuration
+			properties.MaxActivationDistance = instance.MaxActivationDistance
+			properties.Enabled = instance.Enabled
+		end
+
+	end)
+
+	return properties
+end
+
+--------------------------------------------------
+-- VALUE
+--------------------------------------------------
+
+local function GetValue(instance)
+	if not instance:IsA("ValueBase") then
+		return nil
+	end
+
+	local success, value = pcall(function()
+		return instance.Value
+	end)
+
+	if success then
+		return value
+	end
+
+	return nil
+end
+
+--------------------------------------------------
+-- STATUS HELPERS
+--------------------------------------------------
+
+local StatusHeader
+local StatusDetails
+
+local StatusLabels = {}
+
+local function SetStatus(name, status)
+	Statuses[name] = status
+
+	local label = StatusLabels[name]
+
+	if not label then
 		return
 	end
 
-	object.ZIndex = startingZ
+	label.Text = name .. "    " .. status
 
-	for _, child in ipairs(object:GetChildren()) do
-		if child:IsA("GuiObject") then
-			ApplyZIndex(child, startingZ + 1)
-		end
+	if status == "COMPLETE" then
+		label.TextColor3 = COLORS.Success
+	elseif status == "RUNNING" or status == "PROCESSING" then
+		label.TextColor3 = COLORS.Accent
+	elseif status == "ERROR" then
+		label.TextColor3 = COLORS.Error
+	elseif status == "PAUSED" then
+		label.TextColor3 = COLORS.Warning
+	else
+		label.TextColor3 = COLORS.Muted
 	end
 end
 
---========================================================
+--------------------------------------------------
 -- MAIN WINDOW
---========================================================
+--------------------------------------------------
 
 local Main = Instance.new("Frame")
-Main.Name = "Main"
-Main.Size = UDim2.new(0, 300, 0, 255)
-Main.Position = UDim2.new(0.5, -150, 0.5, -127)
+
+Main.Name = "MainWindow"
+Main.Size = UDim2.fromOffset(345, 293)
+Main.Position = UDim2.fromScale(0.5, 0.5)
+Main.AnchorPoint = Vector2.new(0.5, 0.5)
 Main.BackgroundColor3 = COLORS.Background
 Main.BorderSizePixel = 0
-Main.Parent = ScreenGui
+Main.ZIndex = BASE_ZINDEX
+Main.Parent = Gui
 
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 8)
-MainCorner.Parent = Main
+Corner(Main, 9)
+Stroke(Main, COLORS.Border, 1)
 
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Color = COLORS.Border
-MainStroke.Thickness = 1
-MainStroke.Parent = Main
-
---========================================================
+--------------------------------------------------
 -- TITLE BAR
---========================================================
+--------------------------------------------------
 
 local TitleBar = Instance.new("Frame")
+
 TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 34)
+TitleBar.Size = UDim2.new(1, 0, 0, 38)
 TitleBar.BackgroundColor3 = COLORS.Panel
 TitleBar.BorderSizePixel = 0
+TitleBar.ZIndex = BASE_ZINDEX + 1
 TitleBar.Parent = Main
 
-local Title = Instance.new("TextLabel")
-Title.Name = "Title"
-Title.Size = UDim2.new(1, -72, 1, 0)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "Client Analyzer"
-Title.TextColor3 = COLORS.Text
-Title.TextSize = 14
-Title.Font = Enum.Font.GothamBold
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = TitleBar
+Corner(TitleBar, 9)
 
-local MinimizeButton = Instance.new("TextButton")
-MinimizeButton.Name = "MinimizeButton"
-MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-MinimizeButton.Position = UDim2.new(1, -64, 0, 2)
-MinimizeButton.BackgroundColor3 = COLORS.Tab
-MinimizeButton.BorderSizePixel = 0
-MinimizeButton.Text = "—"
-MinimizeButton.TextColor3 = COLORS.Text
-MinimizeButton.TextSize = 15
-MinimizeButton.Font = Enum.Font.GothamBold
-MinimizeButton.Parent = TitleBar
+local Title = MakeText(
+	TitleBar,
+	"Client Game Analyzer",
+	14,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
 
-local MinCorner = Instance.new("UICorner")
-MinCorner.CornerRadius = UDim.new(0, 5)
-MinCorner.Parent = MinimizeButton
+Title.Position = UDim2.fromOffset(12, 0)
+Title.Size = UDim2.new(1, -75, 1, 0)
+Title.ZIndex = BASE_ZINDEX + 2
 
-local CloseButton = Instance.new("TextButton")
-CloseButton.Name = "CloseButton"
-CloseButton.Size = UDim2.new(0, 30, 0, 30)
-CloseButton.Position = UDim2.new(1, -32, 0, 2)
-CloseButton.BackgroundColor3 = COLORS.Tab
-CloseButton.BorderSizePixel = 0
-CloseButton.Text = "×"
-CloseButton.TextColor3 = COLORS.Text
-CloseButton.TextSize = 17
-CloseButton.Font = Enum.Font.GothamBold
-CloseButton.Parent = TitleBar
+local MinimizeButton = MakeButton(
+	TitleBar,
+	"−",
+	15
+)
 
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 5)
-CloseCorner.Parent = CloseButton
+MinimizeButton.Size = UDim2.fromOffset(24, 24)
+MinimizeButton.Position = UDim2.new(1, -57, 0.5, -12)
+MinimizeButton.BackgroundColor3 = COLORS.Panel3
+MinimizeButton.ZIndex = BASE_ZINDEX + 2
 
---========================================================
+local CloseButton = MakeButton(
+	TitleBar,
+	"×",
+	15
+)
+
+CloseButton.Size = UDim2.fromOffset(24, 24)
+CloseButton.Position = UDim2.new(1, -29, 0.5, -12)
+CloseButton.BackgroundColor3 = COLORS.Panel3
+CloseButton.ZIndex = BASE_ZINDEX + 2
+
+--------------------------------------------------
 -- STATUS HEADER
---========================================================
+--------------------------------------------------
 
-local StatusHeader = Instance.new("Frame")
+StatusHeader = Instance.new("Frame")
+
 StatusHeader.Name = "StatusHeader"
-StatusHeader.Size = UDim2.new(1, -12, 0, 30)
-StatusHeader.Position = UDim2.new(0, 6, 0, 39)
+StatusHeader.Size = UDim2.new(1, -16, 0, 32)
+StatusHeader.Position = UDim2.fromOffset(8, 43)
 StatusHeader.BackgroundColor3 = COLORS.Panel2
 StatusHeader.BorderSizePixel = 0
+StatusHeader.ZIndex = BASE_ZINDEX + 1
 StatusHeader.Parent = Main
 
-local StatusHeaderCorner = Instance.new("UICorner")
-StatusHeaderCorner.CornerRadius = UDim.new(0, 5)
-StatusHeaderCorner.Parent = StatusHeader
+Corner(StatusHeader, 6)
 
-local StatusDot = Instance.new("TextLabel")
-StatusDot.Name = "StatusDot"
-StatusDot.Size = UDim2.new(0, 20, 1, 0)
-StatusDot.Position = UDim2.new(0, 5, 0, 0)
-StatusDot.BackgroundTransparency = 1
-StatusDot.Text = "●"
-StatusDot.TextColor3 = COLORS.Yellow
-StatusDot.TextSize = 12
-StatusDot.Font = Enum.Font.GothamBold
-StatusDot.Parent = StatusHeader
+local OverallStatus = MakeText(
+	StatusHeader,
+	"● READY",
+	11,
+	COLORS.Success,
+	Enum.Font.GothamBold
+)
 
-local OverallStatus = Instance.new("TextLabel")
-OverallStatus.Name = "OverallStatus"
-OverallStatus.Size = UDim2.new(1, -90, 1, 0)
-OverallStatus.Position = UDim2.new(0, 24, 0, 0)
-OverallStatus.BackgroundTransparency = 1
-OverallStatus.Text = "WAITING"
-OverallStatus.TextColor3 = COLORS.Text
-OverallStatus.TextSize = 11
-OverallStatus.Font = Enum.Font.GothamBold
-OverallStatus.TextXAlignment = Enum.TextXAlignment.Left
-OverallStatus.Parent = StatusHeader
+OverallStatus.Position = UDim2.fromOffset(9, 0)
+OverallStatus.Size = UDim2.new(1, -75, 1, 0)
+OverallStatus.ZIndex = BASE_ZINDEX + 3
 
-local ProgressLabel = Instance.new("TextLabel")
-ProgressLabel.Name = "ProgressLabel"
-ProgressLabel.Size = UDim2.new(0, 55, 1, 0)
-ProgressLabel.Position = UDim2.new(1, -82, 0, 0)
-ProgressLabel.BackgroundTransparency = 1
-ProgressLabel.Text = "0%"
-ProgressLabel.TextColor3 = COLORS.SubText
-ProgressLabel.TextSize = 10
-ProgressLabel.Font = Enum.Font.GothamBold
+local ProgressLabel = MakeText(
+	StatusHeader,
+	"0%",
+	10,
+	COLORS.Muted,
+	Enum.Font.GothamMedium
+)
+
+ProgressLabel.Size = UDim2.fromOffset(35, 32)
+ProgressLabel.Position = UDim2.new(1, -64, 0, 0)
 ProgressLabel.TextXAlignment = Enum.TextXAlignment.Right
-ProgressLabel.Parent = StatusHeader
+ProgressLabel.ZIndex = BASE_ZINDEX + 3
 
-local StatusExpandButton = Instance.new("TextButton")
-StatusExpandButton.Name = "StatusExpandButton"
-StatusExpandButton.Size = UDim2.new(0, 25, 1, 0)
-StatusExpandButton.Position = UDim2.new(1, -28, 0, 0)
-StatusExpandButton.BackgroundTransparency = 1
-StatusExpandButton.Text = "▼"
-StatusExpandButton.TextColor3 = COLORS.SubText
-StatusExpandButton.TextSize = 10
-StatusExpandButton.Font = Enum.Font.GothamBold
-StatusExpandButton.Parent = StatusHeader
+local StatusExpand = MakeButton(
+	StatusHeader,
+	"▼",
+	9
+)
 
---========================================================
+StatusExpand.Size = UDim2.fromOffset(22, 22)
+StatusExpand.Position = UDim2.new(1, -28, 0.5, -11)
+StatusExpand.BackgroundTransparency = 1
+StatusExpand.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
 -- STATUS DETAILS
---========================================================
+--------------------------------------------------
 
-local StatusDetails = Instance.new("Frame")
+StatusDetails = Instance.new("Frame")
+
 StatusDetails.Name = "StatusDetails"
-StatusDetails.Size = UDim2.new(1, -12, 0, 76)
-StatusDetails.Position = UDim2.new(0, 6, 0, 73)
-StatusDetails.BackgroundColor3 = COLORS.Panel
+StatusDetails.Size = UDim2.new(1, -16, 0, 0)
+StatusDetails.Position = UDim2.fromOffset(8, 79)
+StatusDetails.BackgroundColor3 = COLORS.Panel2
 StatusDetails.BorderSizePixel = 0
+StatusDetails.ClipsDescendants = true
 StatusDetails.Visible = false
+StatusDetails.ZIndex = BASE_ZINDEX + 1
 StatusDetails.Parent = Main
 
-local StatusDetailsCorner = Instance.new("UICorner")
-StatusDetailsCorner.CornerRadius = UDim.new(0, 5)
-StatusDetailsCorner.Parent = StatusDetails
+Corner(StatusDetails, 6)
 
-local StatusRows = {}
+local statusNames = {
+	"Structure",
+	"Attributes",
+	"Tags",
+	"Values"
+}
 
-local function CreateStatusRow(name, y)
-	local Row = Instance.new("Frame")
-	Row.Name = name .. "Row"
-	Row.Size = UDim2.new(1, -8, 0, 17)
-	Row.Position = UDim2.new(0, 4, 0, y)
-	Row.BackgroundTransparency = 1
-	Row.Parent = StatusDetails
+for i, name in ipairs(statusNames) do
+	local label = MakeText(
+		StatusDetails,
+		name .. "    WAITING",
+		10,
+		COLORS.Muted,
+		Enum.Font.GothamMedium
+	)
 
-	local NameLabel = Instance.new("TextLabel")
-	NameLabel.Size = UDim2.new(0.6, 0, 1, 0)
-	NameLabel.BackgroundTransparency = 1
-	NameLabel.Text = name
-	NameLabel.TextColor3 = COLORS.SubText
-	NameLabel.TextSize = 10
-	NameLabel.Font = Enum.Font.Gotham
-	NameLabel.TextXAlignment = Enum.TextXAlignment.Left
-	NameLabel.Parent = Row
+	label.Position = UDim2.fromOffset(10, (i - 1) * 21)
+	label.Size = UDim2.new(1, -20, 0, 20)
+	label.ZIndex = BASE_ZINDEX + 3
 
-	local ValueLabel = Instance.new("TextLabel")
-	ValueLabel.Size = UDim2.new(0.4, 0, 1, 0)
-	ValueLabel.Position = UDim2.new(0.6, 0, 0, 0)
-	ValueLabel.BackgroundTransparency = 1
-	ValueLabel.Text = "WAITING"
-	ValueLabel.TextColor3 = COLORS.Yellow
-	ValueLabel.TextSize = 10
-	ValueLabel.Font = Enum.Font.GothamBold
-	ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
-	ValueLabel.Parent = Row
-
-	StatusRows[name] = ValueLabel
+	StatusLabels[name] = label
 end
 
-CreateStatusRow("Structure", 4)
-CreateStatusRow("Attributes", 21)
-CreateStatusRow("Tags", 38)
-CreateStatusRow("Values", 55)
-
---========================================================
+--------------------------------------------------
 -- TAB BAR
---========================================================
+--------------------------------------------------
 
-local TabBar = Instance.new("ScrollingFrame")
+local TabBar = Instance.new("Frame")
+
 TabBar.Name = "TabBar"
-TabBar.Size = UDim2.new(1, -12, 0, 31)
-TabBar.Position = UDim2.new(0, 6, 0, 73)
+TabBar.Size = UDim2.new(1, -16, 0, 28)
+TabBar.Position = UDim2.fromOffset(8, 79)
 TabBar.BackgroundTransparency = 1
-TabBar.BorderSizePixel = 0
-TabBar.ScrollBarThickness = 0
-TabBar.ScrollingDirection = Enum.ScrollingDirection.X
-TabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
+TabBar.ZIndex = BASE_ZINDEX + 2
 TabBar.Parent = Main
 
 local TabLayout = Instance.new("UIListLayout")
+
 TabLayout.FillDirection = Enum.FillDirection.Horizontal
-TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-TabLayout.Padding = UDim.new(0, 4)
+TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+TabLayout.Padding = UDim.new(0, 3)
 TabLayout.Parent = TabBar
+
+--------------------------------------------------
+-- CONTENT
+--------------------------------------------------
+
+local Content = Instance.new("Frame")
+
+Content.Name = "Content"
+Content.Size = UDim2.new(1, -16, 1, -148)
+Content.Position = UDim2.fromOffset(8, 112)
+Content.BackgroundColor3 = COLORS.Panel
+Content.BorderSizePixel = 0
+Content.ZIndex = BASE_ZINDEX + 1
+Content.Parent = Main
+
+Corner(Content, 6)
+
+--------------------------------------------------
+-- BOTTOM BAR
+--------------------------------------------------
+
+local BottomBar = Instance.new("Frame")
+
+BottomBar.Name = "BottomBar"
+BottomBar.Size = UDim2.new(1, -16, 0, 31)
+BottomBar.Position = UDim2.new(0, 8, 1, -39)
+BottomBar.BackgroundTransparency = 1
+BottomBar.ZIndex = BASE_ZINDEX + 2
+BottomBar.Parent = Main
+
+--------------------------------------------------
+-- TABS
+--------------------------------------------------
+
+local TabButtons = {}
+local Pages = {}
 
 local TabNames = {
 	"Overview",
@@ -383,1125 +567,898 @@ local TabNames = {
 	"Relations",
 	"Behavior",
 	"Remotes",
-	"Data",
+	"Data"
 }
 
-local TabButtons = {}
+local function CreatePage(name)
+	local page = Instance.new("Frame")
 
---========================================================
--- CONTENT
---========================================================
+	page.Name = name .. "Page"
+	page.Size = UDim2.new(1, -12, 1, -12)
+	page.Position = UDim2.fromOffset(6, 6)
+	page.BackgroundTransparency = 1
+	page.Visible = false
+	page.ZIndex = BASE_ZINDEX + 2
+	page.Parent = Content
 
-local Content = Instance.new("Frame")
-Content.Name = "Content"
-Content.Size = UDim2.new(1, -12, 0, 105)
-Content.Position = UDim2.new(0, 6, 0, 108)
-Content.BackgroundColor3 = COLORS.Panel
-Content.BorderSizePixel = 0
-Content.Parent = Main
+	Pages[name] = page
 
-local ContentCorner = Instance.new("UICorner")
-ContentCorner.CornerRadius = UDim.new(0, 6)
-ContentCorner.Parent = Content
-
---========================================================
--- OVERVIEW
---========================================================
-
-local OverviewFrame = Instance.new("Frame")
-OverviewFrame.Name = "Overview"
-OverviewFrame.Size = UDim2.new(1, 0, 1, 0)
-OverviewFrame.BackgroundTransparency = 1
-OverviewFrame.Parent = Content
-
-local StatsLabel = Instance.new("TextLabel")
-StatsLabel.Name = "Stats"
-StatsLabel.Size = UDim2.new(1, -16, 0, 62)
-StatsLabel.Position = UDim2.new(0, 8, 0, 7)
-StatsLabel.BackgroundTransparency = 1
-StatsLabel.Text = "Objects       0\nAttributes    0\nTags          0\nValues        0"
-StatsLabel.TextColor3 = COLORS.Text
-StatsLabel.TextSize = 11
-StatsLabel.Font = Enum.Font.Gotham
-StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
-StatsLabel.TextYAlignment = Enum.TextYAlignment.Top
-StatsLabel.Parent = OverviewFrame
-
-local OverviewInfo = Instance.new("TextLabel")
-OverviewInfo.Name = "Info"
-OverviewInfo.Size = UDim2.new(1, -16, 0, 28)
-OverviewInfo.Position = UDim2.new(0, 8, 0, 70)
-OverviewInfo.BackgroundTransparency = 1
-OverviewInfo.Text = "Phase 1: client-visible structure scanner"
-OverviewInfo.TextColor3 = COLORS.SubText
-OverviewInfo.TextSize = 10
-OverviewInfo.Font = Enum.Font.Gotham
-OverviewInfo.TextXAlignment = Enum.TextXAlignment.Left
-OverviewInfo.Parent = OverviewFrame
-
---========================================================
--- OBJECTS
---========================================================
-
-local ObjectsFrame = Instance.new("Frame")
-ObjectsFrame.Name = "Objects"
-ObjectsFrame.Size = UDim2.new(1, 0, 1, 0)
-ObjectsFrame.BackgroundTransparency = 1
-ObjectsFrame.Visible = false
-ObjectsFrame.Parent = Content
-
-local SearchBox = Instance.new("TextBox")
-SearchBox.Name = "SearchBox"
-SearchBox.Size = UDim2.new(1, -16, 0, 27)
-SearchBox.Position = UDim2.new(0, 8, 0, 7)
-SearchBox.BackgroundColor3 = COLORS.Panel2
-SearchBox.BorderSizePixel = 0
-SearchBox.PlaceholderText = "Search objects..."
-SearchBox.PlaceholderColor3 = COLORS.SubText
-SearchBox.Text = ""
-SearchBox.TextColor3 = COLORS.Text
-SearchBox.TextSize = 10
-SearchBox.Font = Enum.Font.Gotham
-SearchBox.ClearTextOnFocus = false
-SearchBox.Parent = ObjectsFrame
-
-local SearchCorner = Instance.new("UICorner")
-SearchCorner.CornerRadius = UDim.new(0, 5)
-SearchCorner.Parent = SearchBox
-
-local ResultsFrame = Instance.new("ScrollingFrame")
-ResultsFrame.Name = "Results"
-ResultsFrame.Size = UDim2.new(1, -16, 0, 63)
-ResultsFrame.Position = UDim2.new(0, 8, 0, 38)
-ResultsFrame.BackgroundTransparency = 1
-ResultsFrame.BorderSizePixel = 0
-ResultsFrame.ScrollBarThickness = 3
-ResultsFrame.ScrollBarImageColor3 = COLORS.Border
-ResultsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-ResultsFrame.Parent = ObjectsFrame
-
-local ResultsLayout = Instance.new("UIListLayout")
-ResultsLayout.Padding = UDim.new(0, 2)
-ResultsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ResultsLayout.Parent = ResultsFrame
-
---========================================================
--- PLAYER
---========================================================
-
-local PlayerFrame = Instance.new("Frame")
-PlayerFrame.Name = "Player"
-PlayerFrame.Size = UDim2.new(1, 0, 1, 0)
-PlayerFrame.BackgroundTransparency = 1
-PlayerFrame.Visible = false
-PlayerFrame.Parent = Content
-
-local PlayerInfo = Instance.new("TextLabel")
-PlayerInfo.Name = "PlayerInfo"
-PlayerInfo.Size = UDim2.new(1, -16, 1, -12)
-PlayerInfo.Position = UDim2.new(0, 8, 0, 6)
-PlayerInfo.BackgroundTransparency = 1
-PlayerInfo.Text = "Player information\n\nLoading..."
-PlayerInfo.TextColor3 = COLORS.Text
-PlayerInfo.TextSize = 11
-PlayerInfo.Font = Enum.Font.Gotham
-PlayerInfo.TextXAlignment = Enum.TextXAlignment.Left
-PlayerInfo.TextYAlignment = Enum.TextYAlignment.Top
-PlayerInfo.Parent = PlayerFrame
-
---========================================================
--- PLACEHOLDER TABS
---========================================================
-
-local function CreatePlaceholderTab(name, message)
-	local Frame = Instance.new("Frame")
-	Frame.Name = name
-	Frame.Size = UDim2.new(1, 0, 1, 0)
-	Frame.BackgroundTransparency = 1
-	Frame.Visible = false
-	Frame.Parent = Content
-
-	local Label = Instance.new("TextLabel")
-	Label.Size = UDim2.new(1, -16, 1, -12)
-	Label.Position = UDim2.new(0, 8, 0, 6)
-	Label.BackgroundTransparency = 1
-	Label.Text = message
-	Label.TextColor3 = COLORS.SubText
-	Label.TextSize = 11
-	Label.Font = Enum.Font.Gotham
-	Label.TextWrapped = true
-	Label.TextXAlignment = Enum.TextXAlignment.Left
-	Label.TextYAlignment = Enum.TextYAlignment.Top
-	Label.Parent = Frame
-
-	return Frame
+	return page
 end
 
-local RelationsFrame = CreatePlaceholderTab(
-	"Relations",
-	"RELATIONS\n\nPhase 1 foundation ready.\nRelationship mapping will be added in a later phase."
-)
+for _, name in ipairs(TabNames) do
+	local button = MakeButton(TabBar, name, 8)
 
-local BehaviorFrame = CreatePlaceholderTab(
-	"Behavior",
-	"BEHAVIOR\n\nPhase 1 performs static scanning.\nDynamic state monitoring will be added in a later phase."
-)
+	button.Size = UDim2.new(
+		1 / #TabNames,
+		-3,
+		0,
+		26
+	)
 
-local RemotesFrame = CreatePlaceholderTab(
-	"Remotes",
-	"REMOTES\n\nPhase 1 does not actively fire or test remotes.\nAuthorized remote observation/testing will be added later."
-)
+	button.BackgroundColor3 = COLORS.Panel3
+	button.ZIndex = BASE_ZINDEX + 3
 
-local DataFrame = CreatePlaceholderTab(
-	"Data",
-	"DATA\n\nPhase 1 keeps discovered scan data in memory.\nStructured export will be added in a later phase."
-)
+	TabButtons[name] = button
 
---========================================================
--- BOTTOM BAR
---========================================================
+	CreatePage(name)
+end
 
-local BottomBar = Instance.new("Frame")
-BottomBar.Name = "BottomBar"
-BottomBar.Size = UDim2.new(1, -12, 0, 34)
-BottomBar.Position = UDim2.new(0, 6, 1, -40)
-BottomBar.BackgroundTransparency = 1
-BottomBar.Parent = Main
+--------------------------------------------------
+-- PAGE SWITCHING
+--------------------------------------------------
 
-local PauseButton = Instance.new("TextButton")
-PauseButton.Name = "PauseButton"
-PauseButton.Size = UDim2.new(0.31, -4, 1, 0)
-PauseButton.Position = UDim2.new(0, 0, 0, 0)
-PauseButton.BackgroundColor3 = COLORS.Tab
-PauseButton.BorderSizePixel = 0
-PauseButton.Text = "Pause"
-PauseButton.TextColor3 = COLORS.Text
-PauseButton.TextSize = 10
-PauseButton.Font = Enum.Font.GothamBold
-PauseButton.Parent = BottomBar
+local CurrentPage = nil
 
-local PauseCorner = Instance.new("UICorner")
-PauseCorner.CornerRadius = UDim.new(0, 5)
-PauseCorner.Parent = PauseButton
+local function ShowPage(name)
+	for pageName, page in pairs(Pages) do
+		page.Visible = pageName == name
+	end
 
-local ScanButton = Instance.new("TextButton")
-ScanButton.Name = "ScanButton"
-ScanButton.Size = UDim2.new(0.31, -4, 1, 0)
-ScanButton.Position = UDim2.new(0.345, 0, 0, 0)
-ScanButton.BackgroundColor3 = COLORS.Blue
-ScanButton.BorderSizePixel = 0
-ScanButton.Text = "Rescan"
-ScanButton.TextColor3 = Color3.new(1, 1, 1)
-ScanButton.TextSize = 10
-ScanButton.Font = Enum.Font.GothamBold
-ScanButton.Parent = BottomBar
-
-local ScanCorner = Instance.new("UICorner")
-ScanCorner.CornerRadius = UDim.new(0, 5)
-ScanCorner.Parent = ScanButton
-
-local HideButton = Instance.new("TextButton")
-HideButton.Name = "HideButton"
-HideButton.Size = UDim2.new(0.31, -4, 1, 0)
-HideButton.Position = UDim2.new(0.69, 0, 0, 0)
-HideButton.BackgroundColor3 = COLORS.Tab
-HideButton.BorderSizePixel = 0
-HideButton.Text = "Hide"
-HideButton.TextColor3 = COLORS.Text
-HideButton.TextSize = 10
-HideButton.Font = Enum.Font.GothamBold
-HideButton.Parent = BottomBar
-
-local HideCorner = Instance.new("UICorner")
-HideCorner.CornerRadius = UDim.new(0, 5)
-HideCorner.Parent = HideButton
-
---========================================================
--- FLOATING OPEN BUTTON
---========================================================
-
-local OpenButton = Instance.new("TextButton")
-OpenButton.Name = "OpenButton"
-OpenButton.Size = UDim2.new(0, 46, 0, 46)
-OpenButton.Position = UDim2.new(0, 15, 0.5, -23)
-OpenButton.BackgroundColor3 = COLORS.Blue
-OpenButton.BorderSizePixel = 0
-OpenButton.Text = "AI"
-OpenButton.TextColor3 = Color3.new(1, 1, 1)
-OpenButton.TextSize = 13
-OpenButton.Font = Enum.Font.GothamBold
-OpenButton.Visible = false
-OpenButton.ZIndex = CONFIG.BASE_ZINDEX + 50
-OpenButton.Parent = ScreenGui
-
-local OpenCorner = Instance.new("UICorner")
-OpenCorner.CornerRadius = UDim.new(1, 0)
-OpenCorner.Parent = OpenButton
-
-local OpenStroke = Instance.new("UIStroke")
-OpenStroke.Color = Color3.fromRGB(100, 160, 255)
-OpenStroke.Thickness = 1
-OpenStroke.Parent = OpenButton
-
---========================================================
--- TAB MANAGEMENT
---========================================================
-
-local TabFrames = {
-	Overview = OverviewFrame,
-	Objects = ObjectsFrame,
-	Player = PlayerFrame,
-	Relations = RelationsFrame,
-	Behavior = BehaviorFrame,
-	Remotes = RemotesFrame,
-	Data = DataFrame,
-}
-
-local function UpdateTabButtons()
-	for name, button in pairs(TabButtons) do
-		if name == State.CurrentTab then
-			button.BackgroundColor3 = COLORS.TabActive
-			button.TextColor3 = Color3.new(1, 1, 1)
+	for buttonName, button in pairs(TabButtons) do
+		if buttonName == name then
+			button.BackgroundColor3 = COLORS.Accent
 		else
-			button.BackgroundColor3 = COLORS.Tab
-			button.TextColor3 = COLORS.SubText
+			button.BackgroundColor3 = COLORS.Panel3
 		end
 	end
+
+	CurrentPage = name
 end
 
-local function ShowTab(tabName)
-	if not TabFrames[tabName] then
-		return
-	end
-
-	State.CurrentTab = tabName
-
-	for name, frame in pairs(TabFrames) do
-		frame.Visible = (name == tabName)
-	end
-
-	UpdateTabButtons()
-end
-
-for index, name in ipairs(TabNames) do
-	local Button = Instance.new("TextButton")
-	Button.Name = name .. "Tab"
-	Button.Size = UDim2.new(0, 76, 0, 27)
-	Button.BackgroundColor3 = COLORS.Tab
-	Button.BorderSizePixel = 0
-	Button.Text = name
-	Button.TextColor3 = COLORS.SubText
-	Button.TextSize = 9
-	Button.Font = Enum.Font.GothamBold
-	Button.LayoutOrder = index
-	Button.Parent = TabBar
-
-	local Corner = Instance.new("UICorner")
-	Corner.CornerRadius = UDim.new(0, 5)
-	Corner.Parent = Button
-
-	TabButtons[name] = Button
-
-	Button.MouseButton1Click:Connect(function()
-		ShowTab(name)
+for name, button in pairs(TabButtons) do
+	button.MouseButton1Click:Connect(function()
+		ShowPage(name)
 	end)
 end
 
-local function UpdateTabCanvas()
-	task.defer(function()
-		TabBar.CanvasSize = UDim2.new(
-			0,
-			TabLayout.AbsoluteContentSize.X + 5,
-			0,
-			0
-		)
-	end)
+--------------------------------------------------
+-- OVERVIEW PAGE
+--------------------------------------------------
+
+local OverviewPage = Pages.Overview
+
+local OverviewTitle = MakeText(
+	OverviewPage,
+	"Scan Overview",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+OverviewTitle.Size = UDim2.new(1, 0, 0, 24)
+OverviewTitle.ZIndex = BASE_ZINDEX + 3
+
+local OverviewHint = MakeText(
+	OverviewPage,
+	"Client-visible data collected during the scan.",
+	10,
+	COLORS.Muted
+)
+
+OverviewHint.Position = UDim2.fromOffset(0, 24)
+OverviewHint.Size = UDim2.new(1, 0, 0, 20)
+OverviewHint.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- STAT CARDS
+--------------------------------------------------
+
+local StatContainer = Instance.new("Frame")
+
+StatContainer.Size = UDim2.new(1, 0, 0, 98)
+StatContainer.Position = UDim2.fromOffset(0, 50)
+StatContainer.BackgroundTransparency = 1
+StatContainer.ZIndex = BASE_ZINDEX + 2
+StatContainer.Parent = OverviewPage
+
+local StatLayout = Instance.new("UIGridLayout")
+
+StatLayout.CellSize = UDim2.new(0.5, -4, 0, 45)
+StatLayout.CellPadding = UDim2.fromOffset(8, 7)
+StatLayout.Parent = StatContainer
+
+local StatLabels = {}
+
+local function CreateStat(name, initial)
+	local frame = Instance.new("Frame")
+
+	frame.BackgroundColor3 = COLORS.Panel2
+	frame.BorderSizePixel = 0
+	frame.ZIndex = BASE_ZINDEX + 2
+	frame.Parent = StatContainer
+
+	Corner(frame, 5)
+
+	local nameLabel = MakeText(
+		frame,
+		name,
+		9,
+		COLORS.Muted
+	)
+
+	nameLabel.Position = UDim2.fromOffset(8, 4)
+	nameLabel.Size = UDim2.new(1, -16, 0, 16)
+	nameLabel.ZIndex = BASE_ZINDEX + 3
+
+	local valueLabel = MakeText(
+		frame,
+		tostring(initial),
+		13,
+		COLORS.Text,
+		Enum.Font.GothamBold
+	)
+
+	valueLabel.Position = UDim2.fromOffset(8, 19)
+	valueLabel.Size = UDim2.new(1, -16, 0, 21)
+	valueLabel.ZIndex = BASE_ZINDEX + 3
+
+	StatLabels[name] = valueLabel
+
+	return frame
 end
 
-TabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateTabCanvas)
+CreateStat("Objects", 0)
+CreateStat("Attributes", 0)
+CreateStat("Tags", 0)
+CreateStat("Values", 0)
 
-ShowTab("Overview")
+--------------------------------------------------
+-- OBJECTS PAGE
+--------------------------------------------------
 
---========================================================
--- STATUS FUNCTIONS
---========================================================
+local ObjectsPage = Pages.Objects
 
-local function SetStatus(name, status)
-	State.Status[name] = status
+local ObjectsTitle = MakeText(
+	ObjectsPage,
+	"Object Structure",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
 
-	local label = StatusRows[name]
+ObjectsTitle.Size = UDim2.new(1, 0, 0, 24)
+ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
-	if not label then
-		return
+local ObjectsSummary = MakeText(
+	ObjectsPage,
+	"Collected objects are stored internally for later analysis.",
+	10,
+	COLORS.Muted
+)
+
+ObjectsSummary.Position = UDim2.fromOffset(0, 24)
+ObjectsSummary.Size = UDim2.new(1, 0, 0, 20)
+ObjectsSummary.ZIndex = BASE_ZINDEX + 3
+
+local StructureFrame = Instance.new("Frame")
+
+StructureFrame.Size = UDim2.new(1, 0, 1, -50)
+StructureFrame.Position = UDim2.fromOffset(0, 50)
+StructureFrame.BackgroundColor3 = COLORS.Panel2
+StructureFrame.BorderSizePixel = 0
+StructureFrame.ZIndex = BASE_ZINDEX + 2
+StructureFrame.Parent = ObjectsPage
+
+Corner(StructureFrame, 5)
+
+local StructureLabel = MakeText(
+	StructureFrame,
+	"Structure summary",
+	10,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+StructureLabel.Position = UDim2.fromOffset(9, 6)
+StructureLabel.Size = UDim2.new(1, -18, 0, 20)
+StructureLabel.ZIndex = BASE_ZINDEX + 3
+
+local StructureInfo = MakeText(
+	StructureFrame,
+	"Waiting for scan...",
+	10,
+	COLORS.Muted
+)
+
+StructureInfo.Position = UDim2.fromOffset(9, 30)
+StructureInfo.Size = UDim2.new(1, -18, 1, -36)
+StructureInfo.TextYAlignment = Enum.TextYAlignment.Top
+StructureInfo.TextWrapped = true
+StructureInfo.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- PLAYER PAGE
+--------------------------------------------------
+
+local PlayerPage = Pages.Player
+
+local PlayerTitle = MakeText(
+	PlayerPage,
+	"Player State",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+PlayerTitle.Size = UDim2.new(1, 0, 0, 24)
+PlayerTitle.ZIndex = BASE_ZINDEX + 3
+
+local PlayerInfo = MakeText(
+	PlayerPage,
+	"",
+	10,
+	COLORS.Muted
+)
+
+PlayerInfo.Position = UDim2.fromOffset(0, 28)
+PlayerInfo.Size = UDim2.new(1, 0, 1, -28)
+PlayerInfo.TextYAlignment = Enum.TextYAlignment.Top
+PlayerInfo.TextWrapped = true
+PlayerInfo.ZIndex = BASE_ZINDEX + 3
+
+local function UpdatePlayerInfo()
+	local character = LocalPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+	local lines = {}
+
+	table.insert(lines, "Name: " .. LocalPlayer.Name)
+	table.insert(lines, "UserId: " .. tostring(LocalPlayer.UserId))
+	table.insert(lines, "Character: " .. (character and character.Name or "None"))
+
+	if humanoid then
+		table.insert(lines, "")
+		table.insert(lines, "Health: " .. tostring(humanoid.Health))
+		table.insert(lines, "MaxHealth: " .. tostring(humanoid.MaxHealth))
+		table.insert(lines, "WalkSpeed: " .. tostring(humanoid.WalkSpeed))
+		table.insert(lines, "JumpPower: " .. tostring(humanoid.JumpPower))
 	end
 
-	label.Text = status
-
-	if status == "COMPLETE" then
-		label.TextColor3 = COLORS.Green
-	elseif status == "RUNNING" or status == "PROCESSING" then
-		label.TextColor3 = COLORS.Blue
-	elseif status == "ERROR" then
-		label.TextColor3 = COLORS.Red
-	elseif status == "PAUSED" then
-		label.TextColor3 = COLORS.Yellow
-	else
-		label.TextColor3 = COLORS.Yellow
-	end
+	PlayerInfo.Text = table.concat(lines, "\n")
 end
 
-local function UpdateOverallStatus()
-	if State.Paused then
-		OverallStatus.Text = "PAUSED"
-		StatusDot.TextColor3 = COLORS.Yellow
-		return
-	end
-
-	if State.Scanning then
-		OverallStatus.Text = "ANALYZING"
-		StatusDot.TextColor3 = COLORS.Blue
-		return
-	end
-
-	if State.ScanComplete then
-		OverallStatus.Text = "COMPLETE"
-		StatusDot.TextColor3 = COLORS.Green
-		return
-	end
-
-	OverallStatus.Text = "WAITING"
-	StatusDot.TextColor3 = COLORS.Yellow
-end
-
---========================================================
--- STATISTICS
---========================================================
-
-local function UpdateStats()
-	StatsLabel.Text =
-		"Objects       " .. tostring(State.ObjectCount) ..
-		"\nAttributes    " .. tostring(State.AttributeCount) ..
-		"\nTags          " .. tostring(State.TagCount) ..
-		"\nValues        " .. tostring(State.ValueCount)
-
-	PlayerInfo.Text =
-		"PLAYER\n\n" ..
-		"Name: " .. LocalPlayer.Name ..
-		"\nDisplay Name: " .. LocalPlayer.DisplayName ..
-		"\nUserId: " .. tostring(LocalPlayer.UserId) ..
-		"\nCharacter: " ..
-		(LocalPlayer.Character and LocalPlayer.Character.Name or "None")
-
-	OverviewInfo.Text =
-		"Phase 1 scanner • " ..
-		tostring(State.ObjectCount) ..
-		" objects discovered"
-end
-
---========================================================
--- PROPERTY COLLECTION
---========================================================
-
-local function CollectProperties(instance)
-	local properties = {}
-
-	pcall(function()
-		if instance:IsA("BasePart") then
-			properties.Size = tostring(instance.Size)
-			properties.Position = tostring(instance.Position)
-			properties.Anchored = instance.Anchored
-			properties.CanCollide = instance.CanCollide
-			properties.Transparency = instance.Transparency
-		end
-	end)
-
-	pcall(function()
-		if instance:IsA("Humanoid") then
-			properties.Health = instance.Health
-			properties.MaxHealth = instance.MaxHealth
-			properties.WalkSpeed = instance.WalkSpeed
-			properties.JumpPower = instance.JumpPower
-			properties.HipHeight = instance.HipHeight
-		end
-	end)
-
-	pcall(function()
-		if instance:IsA("Tool") then
-			properties.Enabled = instance.Enabled
-			properties.ToolTip = instance.ToolTip
-		end
-	end)
-
-	pcall(function()
-		if instance:IsA("TextLabel")
-			or instance:IsA("TextButton")
-			or instance:IsA("TextBox") then
-
-			properties.Text = instance.Text
-			properties.Visible = instance.Visible
-		end
-	end)
-
-	pcall(function()
-		if instance:IsA("ImageLabel")
-			or instance:IsA("ImageButton") then
-
-			properties.Image = instance.Image
-			properties.Visible = instance.Visible
-		end
-	end)
-
-	pcall(function()
-		if instance:IsA("ProximityPrompt") then
-			properties.ActionText = instance.ActionText
-			properties.ObjectText = instance.ObjectText
-			properties.HoldDuration = instance.HoldDuration
-			properties.MaxActivationDistance = instance.MaxActivationDistance
-			properties.Enabled = instance.Enabled
-		end
-	end)
-
-	return properties
-end
-
---========================================================
--- SEARCH
---========================================================
-
-local function StringContains(text, search)
-	text = string.lower(tostring(text or ""))
-	search = string.lower(tostring(search or ""))
-
-	return string.find(text, search, 1, true) ~= nil
-end
-
-local function ObjectMatchesSearch(data, search)
-	if search == "" then
-		return true
-	end
-
-	if StringContains(data.Name, search) then
-		return true
-	end
-
-	if StringContains(data.ClassName, search) then
-		return true
-	end
-
-	if StringContains(data.FullName, search) then
-		return true
-	end
-
-	for key, value in pairs(data.Attributes or {}) do
-		if StringContains(key, search)
-			or StringContains(value, search) then
-
-			return true
-		end
-	end
-
-	for _, tag in ipairs(data.Tags or {}) do
-		if StringContains(tag, search) then
-			return true
-		end
-	end
-
-	for key, value in pairs(data.Properties or {}) do
-		if StringContains(key, search)
-			or StringContains(value, search) then
-
-			return true
-		end
-	end
-
-	if data.Value ~= nil then
-		if StringContains(data.Value, search) then
-			return true
-		end
-	end
-
-	return false
-end
-
---========================================================
--- RENDER RESULTS
---========================================================
-
-local function ClearResults()
-	for _, child in ipairs(ResultsFrame:GetChildren()) do
-		if child:IsA("TextButton")
-			or child:IsA("TextLabel") then
-
-			child:Destroy()
-		end
-	end
-end
-
-local function RenderResults()
-	ClearResults()
-
-	local search = State.SearchText
-	local shown = 0
-
-	for _, data in ipairs(State.Objects) do
-		if shown >= CONFIG.MAX_VISIBLE_RESULTS then
-			break
-		end
-
-		if ObjectMatchesSearch(data, search) then
-			shown += 1
-
-			local Result = Instance.new("TextButton")
-			Result.Name = "Result"
-			Result.Size = UDim2.new(1, -4, 0, 22)
-			Result.BackgroundColor3 = COLORS.Panel2
-			Result.BorderSizePixel = 0
-
-			Result.Text =
-				data.Name ..
-				"  [" ..
-				data.ClassName ..
-				"]"
-
-			Result.TextColor3 = COLORS.Text
-			Result.TextSize = 9
-			Result.Font = Enum.Font.Gotham
-			Result.TextXAlignment = Enum.TextXAlignment.Left
-			Result.TextTruncate = Enum.TextTruncate.AtEnd
-			Result.Parent = ResultsFrame
-
-			local Padding = Instance.new("UIPadding")
-			Padding.PaddingLeft = UDim.new(0, 6)
-			Padding.PaddingRight = UDim.new(0, 4)
-			Padding.Parent = Result
-
-			local Corner = Instance.new("UICorner")
-			Corner.CornerRadius = UDim.new(0, 4)
-			Corner.Parent = Result
-		end
-	end
-
-	task.defer(function()
-		ResultsFrame.CanvasSize = UDim2.new(
-			0,
-			0,
-			0,
-			ResultsLayout.AbsoluteContentSize.Y + 5
-		)
-	end)
-end
-
-SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-	State.SearchText = SearchBox.Text
-	RenderResults()
-end)
-
---========================================================
--- RESET SCAN DATA
---========================================================
-
-local function ResetScanData()
-	State.Objects = {}
-
-	State.ObjectCount = 0
-	State.AttributeCount = 0
-	State.TagCount = 0
-	State.ValueCount = 0
-
-	State.CurrentIndex = 0
-	State.TotalInstances = 0
-
-	State.ScanComplete = false
-
-	SetStatus("Structure", "WAITING")
-	SetStatus("Attributes", "WAITING")
-	SetStatus("Tags", "WAITING")
-	SetStatus("Values", "WAITING")
-
-	ProgressLabel.Text = "0%"
-
-	UpdateStats()
-	ClearResults()
-end
-
---========================================================
--- SCAN ONE INSTANCE
---========================================================
-
-local function ScanInstance(instance)
-	if State.ObjectCount >= CONFIG.MAX_RESULTS then
-		return
-	end
-
-	local data = {
-		Instance = instance,
-		Name = instance.Name,
-		ClassName = instance.ClassName,
-		FullName = "",
-		Attributes = {},
-		Tags = {},
-		Properties = {},
-		Value = nil,
-	}
-
-	pcall(function()
-		data.FullName = instance:GetFullName()
-	end)
-
-	-- ATTRIBUTES
-
-	SetStatus("Attributes", "RUNNING")
-
-	local attributeCount = 0
-
-	local success, attributes = pcall(function()
-		return instance:GetAttributes()
-	end)
-
-	if success and attributes then
-		for key, value in pairs(attributes) do
-			if attributeCount >= CONFIG.MAX_ATTRIBUTES_PER_OBJECT then
-				break
-			end
-
-			data.Attributes[key] = value
-
-			attributeCount += 1
-			State.AttributeCount += 1
-		end
-	end
-
-	-- TAGS
-
-	SetStatus("Tags", "RUNNING")
-
-	local successTags, tags = pcall(function()
-		return CollectionService:GetTags(instance)
-	end)
-
-	if successTags and tags then
-		for index, tag in ipairs(tags) do
-			if index > CONFIG.MAX_TAGS_PER_OBJECT then
-				break
-			end
-
-			table.insert(data.Tags, tag)
-			State.TagCount += 1
-		end
-	end
-
-	-- VALUES
-
-	SetStatus("Values", "RUNNING")
-
-	if instance:IsA("ValueBase") then
-		local successValue, value = pcall(function()
-			return instance.Value
-		end)
-
-		if successValue then
-			data.Value = value
-			State.ValueCount += 1
-		end
-	end
-
-	-- USEFUL PROPERTIES
-
-	data.Properties = CollectProperties(instance)
-
-	table.insert(State.Objects, data)
-
-	State.ObjectCount += 1
-end
-
---========================================================
--- START SCAN
---========================================================
-
-local function StartScan()
-	if State.Scanning then
-		return
-	end
-
-	State.ScanToken += 1
-
-	local scanToken = State.ScanToken
-
-	ResetScanData()
-
-	State.Scanning = true
-	State.Paused = false
-
-	PauseButton.Text = "Pause"
-
-	UpdateOverallStatus()
-
-	SetStatus("Structure", "RUNNING")
-
-	local instances = workspace:GetDescendants()
-
-	State.TotalInstances = #instances
-
-	for index, instance in ipairs(instances) do
-
-		if scanToken ~= State.ScanToken then
-			return
-		end
-
-		while State.Paused do
-
-			SetStatus("Structure", "PAUSED")
-			SetStatus("Attributes", "PAUSED")
-			SetStatus("Tags", "PAUSED")
-			SetStatus("Values", "PAUSED")
-
-			UpdateOverallStatus()
-
-			task.wait(0.1)
-
-			if scanToken ~= State.ScanToken then
-				return
-			end
-		end
-
-		SetStatus("Structure", "RUNNING")
-		SetStatus("Attributes", "PROCESSING")
-		SetStatus("Tags", "PROCESSING")
-		SetStatus("Values", "PROCESSING")
-
-		State.CurrentIndex = index
-
-		ScanInstance(instance)
-
-		local progress = 0
-
-		if State.TotalInstances > 0 then
-			progress = math.floor(
-				(index / State.TotalInstances) * 100
-			)
-		end
-
-		ProgressLabel.Text = tostring(progress) .. "%"
-
-		UpdateOverallStatus()
-		UpdateStats()
-
-		if index % CONFIG.BATCH_SIZE == 0 then
-			RenderResults()
-			task.wait(CONFIG.YIELD_TIME)
-		end
-	end
-
-	if scanToken ~= State.ScanToken then
-		return
-	end
-
-	State.Scanning = false
-	State.Paused = false
-	State.ScanComplete = true
-
-	ProgressLabel.Text = "100%"
-
-	SetStatus("Structure", "COMPLETE")
-	SetStatus("Attributes", "COMPLETE")
-	SetStatus("Tags", "COMPLETE")
-	SetStatus("Values", "COMPLETE")
-
-	PauseButton.Text = "Pause"
-
-	UpdateOverallStatus()
-	UpdateStats()
-	RenderResults()
-end
-
---========================================================
--- PAUSE / RESUME
---========================================================
-
-PauseButton.MouseButton1Click:Connect(function()
-
-	if not State.Scanning then
-		return
-	end
-
-	State.Paused = not State.Paused
-
-	if State.Paused then
-		PauseButton.Text = "Resume"
-	else
-		PauseButton.Text = "Pause"
-	end
-
-	UpdateOverallStatus()
-end)
-
---========================================================
--- RESCAN
---========================================================
-
-ScanButton.MouseButton1Click:Connect(function()
-
-	if State.Scanning then
-		State.ScanToken += 1
-
-		task.wait()
-	end
-
-	task.spawn(function()
-		StartScan()
-	end)
-end)
-
---========================================================
--- STATUS EXPAND / COLLAPSE
---========================================================
-
-local StatusExpanded = false
-
-local function UpdateStatusLayout()
-
-	if StatusExpanded then
-
-		StatusDetails.Visible = true
-
-		TabBar.Position = UDim2.new(
-			0,
-			6,
-			0,
-			153
-		)
-
-		Content.Position = UDim2.new(
-			0,
-			6,
-			0,
-			188
-		)
-
-		Content.Size = UDim2.new(
-			1,
-			-12,
-			0,
-			105
-		)
-
-		StatusExpandButton.Text = "▲"
-
-	else
-
-		StatusDetails.Visible = false
-
-		TabBar.Position = UDim2.new(
-			0,
-			6,
-			0,
-			73
-		)
-
-		Content.Position = UDim2.new(
-			0,
-			6,
-			0,
-			108
-		)
-
-		Content.Size = UDim2.new(
-			1,
-			-12,
-			0,
-			105
-		)
-
-		StatusExpandButton.Text = "▼"
-	end
-end
-
-StatusExpandButton.MouseButton1Click:Connect(function()
-
-	StatusExpanded = not StatusExpanded
-
-	UpdateStatusLayout()
-end)
-
---========================================================
--- HIDE / SHOW
---========================================================
-
-local function HideAnalyzer()
-	Main.Visible = false
-	OpenButton.Visible = true
-end
-
-local function ShowAnalyzer()
-	Main.Visible = true
-	OpenButton.Visible = false
-end
-
-MinimizeButton.MouseButton1Click:Connect(HideAnalyzer)
-
-CloseButton.MouseButton1Click:Connect(HideAnalyzer)
-
-HideButton.MouseButton1Click:Connect(HideAnalyzer)
-
-OpenButton.MouseButton1Click:Connect(ShowAnalyzer)
-
---========================================================
+UpdatePlayerInfo()
+
+--------------------------------------------------
+-- RELATIONS PAGE
+--------------------------------------------------
+
+local RelationsPage = Pages.Relations
+
+local RelationsTitle = MakeText(
+	RelationsPage,
+	"Relations",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+RelationsTitle.Size = UDim2.new(1, 0, 0, 24)
+RelationsTitle.ZIndex = BASE_ZINDEX + 3
+
+local RelationsInfo = MakeText(
+	RelationsPage,
+	"Relationship detection will be added in a later phase.",
+	10,
+	COLORS.Muted
+)
+
+RelationsInfo.Position = UDim2.fromOffset(0, 28)
+RelationsInfo.Size = UDim2.new(1, 0, 0, 40)
+RelationsInfo.TextWrapped = true
+RelationsInfo.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- BEHAVIOR PAGE
+--------------------------------------------------
+
+local BehaviorPage = Pages.Behavior
+
+local BehaviorTitle = MakeText(
+	BehaviorPage,
+	"Behavior",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+BehaviorTitle.Size = UDim2.new(1, 0, 0, 24)
+BehaviorTitle.ZIndex = BASE_ZINDEX + 3
+
+local BehaviorInfo = MakeText(
+	BehaviorPage,
+	"Dynamic state monitoring will be added in a later phase.",
+	10,
+	COLORS.Muted
+)
+
+BehaviorInfo.Position = UDim2.fromOffset(0, 28)
+BehaviorInfo.Size = UDim2.new(1, 0, 0, 40)
+BehaviorInfo.TextWrapped = true
+BehaviorInfo.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- REMOTES PAGE
+--------------------------------------------------
+
+local RemotesPage = Pages.Remotes
+
+local RemotesTitle = MakeText(
+	RemotesPage,
+	"Remotes",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+RemotesTitle.Size = UDim2.new(1, 0, 0, 24)
+RemotesTitle.ZIndex = BASE_ZINDEX + 3
+
+local RemotesInfo = MakeText(
+	RemotesPage,
+	"Remote observation will be added in a later phase.",
+	10,
+	COLORS.Muted
+)
+
+RemotesInfo.Position = UDim2.fromOffset(0, 28)
+RemotesInfo.Size = UDim2.new(1, 0, 0, 40)
+RemotesInfo.TextWrapped = true
+RemotesInfo.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- DATA PAGE
+--------------------------------------------------
+
+local DataPage = Pages.Data
+
+local DataTitle = MakeText(
+	DataPage,
+	"Stored Data",
+	13,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+DataTitle.Size = UDim2.new(1, 0, 0, 24)
+DataTitle.ZIndex = BASE_ZINDEX + 3
+
+local DataInfo = MakeText(
+	DataPage,
+	"",
+	10,
+	COLORS.Muted
+)
+
+DataInfo.Position = UDim2.fromOffset(0, 28)
+DataInfo.Size = UDim2.new(1, 0, 1, -28)
+DataInfo.TextYAlignment = Enum.TextYAlignment.Top
+DataInfo.TextWrapped = true
+DataInfo.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- BOTTOM BUTTONS
+--------------------------------------------------
+
+local PauseButton = MakeButton(
+	BottomBar,
+	"Pause",
+	10
+)
+
+PauseButton.Size = UDim2.fromOffset(65, 27)
+PauseButton.Position = UDim2.fromOffset(0, 2)
+PauseButton.ZIndex = BASE_ZINDEX + 4
+
+local RescanButton = MakeButton(
+	BottomBar,
+	"Rescan",
+	10
+)
+
+RescanButton.Size = UDim2.fromOffset(65, 27)
+RescanButton.Position = UDim2.fromOffset(70, 2)
+RescanButton.ZIndex = BASE_ZINDEX + 4
+
+local HideButton = MakeButton(
+	BottomBar,
+	"Hide",
+	10
+)
+
+HideButton.Size = UDim2.fromOffset(65, 27)
+HideButton.Position = UDim2.fromOffset(140, 2)
+HideButton.ZIndex = BASE_ZINDEX + 4
+
+--------------------------------------------------
+-- FLOATING BUTTON
+--------------------------------------------------
+
+local OpenButton = MakeButton(
+	Gui,
+	"AI",
+	12
+)
+
+OpenButton.Name = "AnalyzerOpenButton"
+OpenButton.Size = UDim2.fromOffset(46, 46)
+OpenButton.Position = UDim2.new(1, -65, 0.5, -23)
+OpenButton.AnchorPoint = Vector2.new(0, 0)
+OpenButton.BackgroundColor3 = COLORS.Accent
+OpenButton.TextColor3 = Color3.new(1, 1, 1)
+OpenButton.Font = Enum.Font.GothamBold
+OpenButton.ZIndex = BASE_ZINDEX + 50
+OpenButton.Parent = Gui
+
+Corner(OpenButton, 23)
+
+--------------------------------------------------
 -- DRAGGING
---========================================================
+--------------------------------------------------
 
-local function MakeDraggable(frame, dragHandle)
-
+local function MakeDraggable(object, handle)
 	local dragging = false
 	local dragStart
 	local startPosition
 
-	local function Update(input)
+	handle = handle or object
 
-		local delta = input.Position - dragStart
-
-		frame.Position = UDim2.new(
-			startPosition.X.Scale,
-			startPosition.X.Offset + delta.X,
-
-			startPosition.Y.Scale,
-			startPosition.Y.Offset + delta.Y
-		)
-	end
-
-	dragHandle.InputBegan:Connect(function(input)
-
+	handle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 
 			dragging = true
 			dragStart = input.Position
-			startPosition = frame.Position
+			startPosition = object.Position
 
 			input.Changed:Connect(function()
-
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 				end
-
 			end)
 		end
 	end)
 
-	UserInputService.InputChanged:Connect(function(input)
-
+	handle.InputChanged:Connect(function(input)
 		if not dragging then
 			return
 		end
 
-		if input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch then
-
-			Update(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement
+			and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
 		end
+
+		local delta = input.Position - dragStart
+
+		object.Position = UDim2.new(
+			startPosition.X.Scale,
+			startPosition.X.Offset + delta.X,
+			startPosition.Y.Scale,
+			startPosition.Y.Offset + delta.Y
+		)
 	end)
 end
 
 MakeDraggable(Main, TitleBar)
 MakeDraggable(OpenButton, OpenButton)
 
---========================================================
--- APPLY ZINDEX CORRECTLY
---========================================================
+--------------------------------------------------
+-- STATUS EXPANSION
+--------------------------------------------------
 
--- Backgrounds get lower ZIndex.
--- Children/text/buttons get progressively higher ZIndex.
+local StatusExpanded = false
 
-ApplyZIndex(Main, CONFIG.BASE_ZINDEX)
+local function UpdateStatusLayout()
+	if StatusExpanded then
 
--- Floating button must stay above the main window.
+		StatusDetails.Visible = true
+		StatusDetails.Size = UDim2.new(1, -16, 0, 92)
 
-OpenButton.ZIndex = CONFIG.BASE_ZINDEX + 50
+		TabBar.Position = UDim2.fromOffset(8, 177)
+		Content.Position = UDim2.fromOffset(8, 210)
+		Content.Size = UDim2.new(1, -16, 1, -246)
 
-for _, child in ipairs(OpenButton:GetDescendants()) do
-	if child:IsA("GuiObject") then
-		child.ZIndex = CONFIG.BASE_ZINDEX + 51
+		StatusExpand.Text = "▲"
+
+	else
+
+		StatusDetails.Visible = false
+		StatusDetails.Size = UDim2.new(1, -16, 0, 0)
+
+		TabBar.Position = UDim2.fromOffset(8, 79)
+		Content.Position = UDim2.fromOffset(8, 112)
+		Content.Size = UDim2.new(1, -16, 1, -148)
+
+		StatusExpand.Text = "▼"
 	end
 end
 
---========================================================
--- KEEP CRITICAL ELEMENTS ABOVE THEIR CONTAINERS
---========================================================
-
-TitleBar.ZIndex = CONFIG.BASE_ZINDEX + 1
-Title.ZIndex = CONFIG.BASE_ZINDEX + 2
-MinimizeButton.ZIndex = CONFIG.BASE_ZINDEX + 2
-CloseButton.ZIndex = CONFIG.BASE_ZINDEX + 2
-
-StatusHeader.ZIndex = CONFIG.BASE_ZINDEX + 1
-StatusDot.ZIndex = CONFIG.BASE_ZINDEX + 2
-OverallStatus.ZIndex = CONFIG.BASE_ZINDEX + 2
-ProgressLabel.ZIndex = CONFIG.BASE_ZINDEX + 2
-StatusExpandButton.ZIndex = CONFIG.BASE_ZINDEX + 2
-
-StatusDetails.ZIndex = CONFIG.BASE_ZINDEX + 1
-
-for _, row in pairs(StatusRows) do
-	row.ZIndex = CONFIG.BASE_ZINDEX + 3
-end
-
-TabBar.ZIndex = CONFIG.BASE_ZINDEX + 1
-
-for _, button in pairs(TabButtons) do
-	button.ZIndex = CONFIG.BASE_ZINDEX + 2
-end
-
-Content.ZIndex = CONFIG.BASE_ZINDEX + 1
-
-StatsLabel.ZIndex = CONFIG.BASE_ZINDEX + 3
-OverviewInfo.ZIndex = CONFIG.BASE_ZINDEX + 3
-
-SearchBox.ZIndex = CONFIG.BASE_ZINDEX + 3
-ResultsFrame.ZIndex = CONFIG.BASE_ZINDEX + 2
-
-PlayerInfo.ZIndex = CONFIG.BASE_ZINDEX + 3
-
-BottomBar.ZIndex = CONFIG.BASE_ZINDEX + 2
-PauseButton.ZIndex = CONFIG.BASE_ZINDEX + 3
-ScanButton.ZIndex = CONFIG.BASE_ZINDEX + 3
-HideButton.ZIndex = CONFIG.BASE_ZINDEX + 3
-
---========================================================
--- RESPAWN SAFETY
---========================================================
-
-LocalPlayer.CharacterAdded:Connect(function()
-
-	task.wait(1)
-
-	if not ScreenGui.Parent then
-		ScreenGui.Parent = PlayerGui
-	end
-
-	ScreenGui.DisplayOrder = CONFIG.DISPLAY_ORDER
-	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+StatusExpand.MouseButton1Click:Connect(function()
+	StatusExpanded = not StatusExpanded
+	UpdateStatusLayout()
 end)
 
---========================================================
--- INITIALIZE
---========================================================
+--------------------------------------------------
+-- SCAN STATUS
+--------------------------------------------------
 
-UpdateStats()
-UpdateOverallStatus()
+local function UpdateOverallStatus(status, progress)
+	OverallStatus.Text = "● " .. status
+	ProgressLabel.Text = tostring(math.floor(progress)) .. "%"
+
+	if status == "COMPLETE" then
+		OverallStatus.TextColor3 = COLORS.Success
+	elseif status == "ANALYZING"
+		or status == "PROCESSING" then
+		OverallStatus.TextColor3 = COLORS.Accent
+	elseif status == "PAUSED" then
+		OverallStatus.TextColor3 = COLORS.Warning
+	elseif status == "ERROR" then
+		OverallStatus.TextColor3 = COLORS.Error
+	else
+		OverallStatus.TextColor3 = COLORS.Muted
+	end
+end
+
+--------------------------------------------------
+-- UPDATE COUNTERS
+--------------------------------------------------
+
+local function UpdateCounters()
+	StatLabels.Objects.Text = tostring(ObjectCount)
+	StatLabels.Attributes.Text = tostring(AttributeCount)
+	StatLabels.Tags.Text = tostring(TagCount)
+	StatLabels.Values.Text = tostring(ValueCount)
+
+	StructureInfo.Text =
+		"Objects: " .. tostring(ObjectCount) .. "\n" ..
+		"Attributes: " .. tostring(AttributeCount) .. "\n" ..
+		"Tags: " .. tostring(TagCount) .. "\n" ..
+		"Value objects: " .. tostring(ValueCount)
+
+	DataInfo.Text =
+		"Objects stored: " .. tostring(ObjectCount) .. "\n" ..
+		"Attributes stored: " .. tostring(AttributeCount) .. "\n" ..
+		"Tags stored: " .. tostring(TagCount) .. "\n" ..
+		"Values stored: " .. tostring(ValueCount) .. "\n\n" ..
+		"Maximum stored objects: " .. tostring(MAX_RESULTS)
+end
+
+--------------------------------------------------
+-- SCAN ONE INSTANCE
+--------------------------------------------------
+
+local function ScanInstance(instance)
+	if #ScanData >= MAX_RESULTS then
+		return
+	end
+
+	local attributes = SafeAttributes(instance)
+	local tags = SafeTags(instance)
+	local properties = GetRelevantProperties(instance)
+	local value = GetValue(instance)
+
+	local attributeCountForObject = 0
+	local tagCountForObject = 0
+
+	local limitedAttributes = {}
+
+	for name, attributeValue in pairs(attributes) do
+		attributeCountForObject += 1
+
+		if attributeCountForObject <= MAX_ATTRIBUTES_PER_OBJECT then
+			limitedAttributes[name] = attributeValue
+		end
+	end
+
+	local limitedTags = {}
+
+	for _, tag in ipairs(tags) do
+		tagCountForObject += 1
+
+		if tagCountForObject <= MAX_TAGS_PER_OBJECT then
+			table.insert(limitedTags, tag)
+		end
+	end
+
+	local record = {
+		Instance = instance,
+		Name = instance.Name,
+		ClassName = instance.ClassName,
+		FullName = SafeFullName(instance),
+
+		Parent = instance.Parent,
+		ParentName = instance.Parent and instance.Parent.Name or nil,
+
+		Attributes = limitedAttributes,
+		Tags = limitedTags,
+		Properties = properties,
+		Value = value
+	}
+
+	table.insert(ScanData, record)
+
+	ObjectCount += 1
+	AttributeCount += attributeCountForObject
+	TagCount += tagCountForObject
+
+	if instance:IsA("ValueBase") then
+		ValueCount += 1
+	end
+end
+
+--------------------------------------------------
+-- SCAN
+--------------------------------------------------
+
+local function RunScan()
+	if ScanRunning then
+		return
+	end
+
+	ScanRunning = true
+	ScanPaused = false
+	CurrentScan += 1
+
+	local thisScan = CurrentScan
+
+	ClearScanData()
+
+	UpdateCounters()
+
+	SetStatus("Structure", "RUNNING")
+	SetStatus("Attributes", "RUNNING")
+	SetStatus("Tags", "RUNNING")
+	SetStatus("Values", "RUNNING")
+
+	UpdateOverallStatus("ANALYZING", 0)
+
+	PauseButton.Text = "Pause"
+
+	local descendants = workspace:GetDescendants()
+	local total = #descendants
+
+	for index, instance in ipairs(descendants) do
+
+		if thisScan ~= CurrentScan then
+			break
+		end
+
+		while ScanPaused and thisScan == CurrentScan do
+			UpdateOverallStatus("PAUSED", total > 0 and (index / total) * 100 or 0)
+
+			SetStatus("Structure", "PAUSED")
+			SetStatus("Attributes", "PAUSED")
+			SetStatus("Tags", "PAUSED")
+			SetStatus("Values", "PAUSED")
+
+			task.wait(0.1)
+		end
+
+		if thisScan ~= CurrentScan then
+			break
+		end
+
+		ScanInstance(instance)
+
+		if index % BATCH_SIZE == 0 then
+
+			local progress = 0
+
+			if total > 0 then
+				progress = (index / total) * 100
+			end
+
+			UpdateOverallStatus("ANALYZING", progress)
+
+			UpdateCounters()
+
+			SetStatus("Structure", "PROCESSING")
+			SetStatus("Attributes", "PROCESSING")
+			SetStatus("Tags", "PROCESSING")
+			SetStatus("Values", "PROCESSING")
+
+			task.wait(YIELD_TIME)
+		end
+
+		if #ScanData >= MAX_RESULTS then
+			break
+		end
+	end
+
+	if thisScan == CurrentScan then
+
+		UpdateCounters()
+
+		SetStatus("Structure", "COMPLETE")
+		SetStatus("Attributes", "COMPLETE")
+		SetStatus("Tags", "COMPLETE")
+		SetStatus("Values", "COMPLETE")
+
+		UpdateOverallStatus("COMPLETE", 100)
+
+		ScanRunning = false
+	end
+end
+
+--------------------------------------------------
+-- PAUSE
+--------------------------------------------------
+
+PauseButton.MouseButton1Click:Connect(function()
+
+	if not ScanRunning then
+		return
+	end
+
+	ScanPaused = not ScanPaused
+
+	if ScanPaused then
+		PauseButton.Text = "Resume"
+		UpdateOverallStatus("PAUSED", tonumber(ProgressLabel.Text:match("%d+")) or 0)
+	else
+		PauseButton.Text = "Pause"
+		UpdateOverallStatus("ANALYZING", tonumber(ProgressLabel.Text:match("%d+")) or 0)
+	end
+end)
+
+--------------------------------------------------
+-- RESCAN
+--------------------------------------------------
+
+RescanButton.MouseButton1Click:Connect(function()
+
+	CurrentScan += 1
+	ScanRunning = false
+	ScanPaused = false
+
+	PauseButton.Text = "Pause"
+
+	task.wait()
+
+	RunScan()
+end)
+
+--------------------------------------------------
+-- HIDE
+--------------------------------------------------
+
+HideButton.MouseButton1Click:Connect(function()
+	Main.Visible = false
+	OpenButton.Visible = true
+end)
+
+OpenButton.MouseButton1Click:Connect(function()
+	Main.Visible = true
+	OpenButton.Visible = false
+end)
+
+--------------------------------------------------
+-- MINIMIZE
+--------------------------------------------------
+
+local Minimized = false
+
+MinimizeButton.MouseButton1Click:Connect(function()
+
+	Minimized = not Minimized
+
+	if Minimized then
+		Main.Size = UDim2.fromOffset(345, 38)
+
+		StatusHeader.Visible = false
+		StatusDetails.Visible = false
+		TabBar.Visible = false
+		Content.Visible = false
+		BottomBar.Visible = false
+
+		MinimizeButton.Text = "+"
+	else
+		Main.Size = UDim2.fromOffset(345, 293)
+
+		StatusHeader.Visible = true
+		TabBar.Visible = true
+		Content.Visible = true
+		BottomBar.Visible = true
+
+		if StatusExpanded then
+			StatusDetails.Visible = true
+		end
+
+		MinimizeButton.Text = "−"
+	end
+end)
+
+--------------------------------------------------
+-- CLOSE
+--------------------------------------------------
+
+CloseButton.MouseButton1Click:Connect(function()
+	Main.Visible = false
+	OpenButton.Visible = true
+end)
+
+--------------------------------------------------
+-- LIVE DESCENDANT DETECTION
+--------------------------------------------------
+
+workspace.DescendantAdded:Connect(function(instance)
+
+	if not ScanRunning and #ScanData < MAX_RESULTS then
+		task.defer(function()
+
+			if not instance.Parent then
+				return
+			end
+
+			ScanInstance(instance)
+			UpdateCounters()
+
+		end)
+	end
+end)
+
+--------------------------------------------------
+-- PLAYER UPDATES
+--------------------------------------------------
+
+LocalPlayer.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	UpdatePlayerInfo()
+end)
+
+task.spawn(function()
+
+	while Gui.Parent do
+
+		if LocalPlayer.Character then
+			UpdatePlayerInfo()
+		end
+
+		task.wait(1)
+	end
+end)
+
+--------------------------------------------------
+-- INITIAL STATE
+--------------------------------------------------
+
+ShowPage("Overview")
 UpdateStatusLayout()
-UpdateTabCanvas()
+UpdateCounters()
 
---========================================================
+Main.Visible = true
+OpenButton.Visible = false
+
+--------------------------------------------------
 -- AUTO SCAN
---========================================================
+--------------------------------------------------
 
-if CONFIG.AUTO_SCAN then
-
+if AUTO_SCAN then
 	task.spawn(function()
-
 		task.wait(0.5)
-
-		StartScan()
-
+		RunScan()
 	end)
-
 end
