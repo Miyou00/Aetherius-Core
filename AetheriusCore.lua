@@ -21,21 +21,19 @@
     • Draggable window
     • Floating open button
     • High DisplayOrder / Global ZIndex
-    • Live statistics
 
-    PHASE 1 DOES NOT:
+    Phase 1 does not:
     • Access server-only data
     • Bypass Roblox security
+    • Fire unknown remotes
     • Perform arbitrary remote probing
-    • Automatically fire unknown remotes
     • Extract protected code
-    • Attempt anti-detection behavior
-
-    Intended for client-visible analysis in experiences
-    you own or are authorized to test.
 ]]
 
---// SERVICES
+--========================================================
+-- SERVICES
+--========================================================
+
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local UserInputService = game:GetService("UserInputService")
@@ -43,7 +41,10 @@ local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
---// CONFIGURATION
+--========================================================
+-- CONFIG
+--========================================================
+
 local CONFIG = {
 	BATCH_SIZE = 100,
 	YIELD_TIME = 0.03,
@@ -56,13 +57,14 @@ local CONFIG = {
 
 	AUTO_SCAN = true,
 
-	SCREEN_GUI_NAME = "ClientGameAnalyzer",
-
 	DISPLAY_ORDER = 2147483647,
 	BASE_ZINDEX = 100000,
 }
 
---// STATE
+--========================================================
+-- STATE
+--========================================================
+
 local State = {
 	Scanning = false,
 	Paused = false,
@@ -71,11 +73,12 @@ local State = {
 	CurrentIndex = 0,
 	TotalInstances = 0,
 
-	Objects = {},
 	ObjectCount = 0,
 	AttributeCount = 0,
 	TagCount = 0,
 	ValueCount = 0,
+
+	Objects = {},
 
 	CurrentTab = "Overview",
 	SearchText = "",
@@ -90,39 +93,20 @@ local State = {
 	ScanToken = 0,
 }
 
---// CLEAN UP OLD GUI
-local OldGui = PlayerGui:FindFirstChild(CONFIG.SCREEN_GUI_NAME)
+--========================================================
+-- REMOVE OLD GUI
+--========================================================
+
+local OldGui = PlayerGui:FindFirstChild("ClientGameAnalyzer")
 
 if OldGui then
 	OldGui:Destroy()
 end
 
---//========================================================
---// GUI CREATION
---//========================================================
+--========================================================
+-- COLORS
+--========================================================
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = CONFIG.SCREEN_GUI_NAME
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-ScreenGui.DisplayOrder = CONFIG.DISPLAY_ORDER
-ScreenGui.Parent = PlayerGui
-
---// ZINDEX HELPER
-local function SetZIndexRecursive(object, zIndex)
-	for _, child in ipairs(object:GetDescendants()) do
-		if child:IsA("GuiObject") then
-			child.ZIndex = zIndex
-		end
-	end
-
-	if object:IsA("GuiObject") then
-		object.ZIndex = zIndex
-	end
-end
-
---// COLORS
 local COLORS = {
 	Background = Color3.fromRGB(18, 20, 24),
 	Panel = Color3.fromRGB(25, 28, 34),
@@ -142,9 +126,44 @@ local COLORS = {
 	TabActive = Color3.fromRGB(45, 125, 255),
 }
 
---//========================================================
---// MAIN WINDOW
---//========================================================
+--========================================================
+-- SCREEN GUI
+--========================================================
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ClientGameAnalyzer"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.DisplayOrder = CONFIG.DISPLAY_ORDER
+ScreenGui.Parent = PlayerGui
+
+--========================================================
+-- ZINDEX SYSTEM
+--========================================================
+
+-- IMPORTANT:
+-- Parents/backgrounds receive a lower ZIndex.
+-- Their children receive progressively higher ZIndexes.
+-- This prevents panels from covering their own text.
+
+local function ApplyZIndex(object, startingZ)
+	if not object:IsA("GuiObject") then
+		return
+	end
+
+	object.ZIndex = startingZ
+
+	for _, child in ipairs(object:GetChildren()) do
+		if child:IsA("GuiObject") then
+			ApplyZIndex(child, startingZ + 1)
+		end
+	end
+end
+
+--========================================================
+-- MAIN WINDOW
+--========================================================
 
 local Main = Instance.new("Frame")
 Main.Name = "Main"
@@ -152,7 +171,6 @@ Main.Size = UDim2.new(0, 300, 0, 255)
 Main.Position = UDim2.new(0.5, -150, 0.5, -127)
 Main.BackgroundColor3 = COLORS.Background
 Main.BorderSizePixel = 0
-Main.ZIndex = CONFIG.BASE_ZINDEX
 Main.Parent = ScreenGui
 
 local MainCorner = Instance.new("UICorner")
@@ -164,16 +182,15 @@ MainStroke.Color = COLORS.Border
 MainStroke.Thickness = 1
 MainStroke.Parent = Main
 
---//========================================================
---// TITLE BAR
---//========================================================
+--========================================================
+-- TITLE BAR
+--========================================================
 
 local TitleBar = Instance.new("Frame")
 TitleBar.Name = "TitleBar"
 TitleBar.Size = UDim2.new(1, 0, 0, 34)
 TitleBar.BackgroundColor3 = COLORS.Panel
 TitleBar.BorderSizePixel = 0
-TitleBar.ZIndex = CONFIG.BASE_ZINDEX + 1
 TitleBar.Parent = Main
 
 local Title = Instance.new("TextLabel")
@@ -186,7 +203,6 @@ Title.TextColor3 = COLORS.Text
 Title.TextSize = 14
 Title.Font = Enum.Font.GothamBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.ZIndex = CONFIG.BASE_ZINDEX + 2
 Title.Parent = TitleBar
 
 local MinimizeButton = Instance.new("TextButton")
@@ -199,7 +215,6 @@ MinimizeButton.Text = "—"
 MinimizeButton.TextColor3 = COLORS.Text
 MinimizeButton.TextSize = 15
 MinimizeButton.Font = Enum.Font.GothamBold
-MinimizeButton.ZIndex = CONFIG.BASE_ZINDEX + 2
 MinimizeButton.Parent = TitleBar
 
 local MinCorner = Instance.new("UICorner")
@@ -216,16 +231,15 @@ CloseButton.Text = "×"
 CloseButton.TextColor3 = COLORS.Text
 CloseButton.TextSize = 17
 CloseButton.Font = Enum.Font.GothamBold
-CloseButton.ZIndex = CONFIG.BASE_ZINDEX + 2
 CloseButton.Parent = TitleBar
 
 local CloseCorner = Instance.new("UICorner")
 CloseCorner.CornerRadius = UDim.new(0, 5)
 CloseCorner.Parent = CloseButton
 
---//========================================================
---// STATUS HEADER
---//========================================================
+--========================================================
+-- STATUS HEADER
+--========================================================
 
 local StatusHeader = Instance.new("Frame")
 StatusHeader.Name = "StatusHeader"
@@ -233,7 +247,6 @@ StatusHeader.Size = UDim2.new(1, -12, 0, 30)
 StatusHeader.Position = UDim2.new(0, 6, 0, 39)
 StatusHeader.BackgroundColor3 = COLORS.Panel2
 StatusHeader.BorderSizePixel = 0
-StatusHeader.ZIndex = CONFIG.BASE_ZINDEX + 1
 StatusHeader.Parent = Main
 
 local StatusHeaderCorner = Instance.new("UICorner")
@@ -249,7 +262,6 @@ StatusDot.Text = "●"
 StatusDot.TextColor3 = COLORS.Yellow
 StatusDot.TextSize = 12
 StatusDot.Font = Enum.Font.GothamBold
-StatusDot.ZIndex = CONFIG.BASE_ZINDEX + 2
 StatusDot.Parent = StatusHeader
 
 local OverallStatus = Instance.new("TextLabel")
@@ -262,7 +274,6 @@ OverallStatus.TextColor3 = COLORS.Text
 OverallStatus.TextSize = 11
 OverallStatus.Font = Enum.Font.GothamBold
 OverallStatus.TextXAlignment = Enum.TextXAlignment.Left
-OverallStatus.ZIndex = CONFIG.BASE_ZINDEX + 2
 OverallStatus.Parent = StatusHeader
 
 local ProgressLabel = Instance.new("TextLabel")
@@ -275,7 +286,6 @@ ProgressLabel.TextColor3 = COLORS.SubText
 ProgressLabel.TextSize = 10
 ProgressLabel.Font = Enum.Font.GothamBold
 ProgressLabel.TextXAlignment = Enum.TextXAlignment.Right
-ProgressLabel.ZIndex = CONFIG.BASE_ZINDEX + 2
 ProgressLabel.Parent = StatusHeader
 
 local StatusExpandButton = Instance.new("TextButton")
@@ -287,12 +297,11 @@ StatusExpandButton.Text = "▼"
 StatusExpandButton.TextColor3 = COLORS.SubText
 StatusExpandButton.TextSize = 10
 StatusExpandButton.Font = Enum.Font.GothamBold
-StatusExpandButton.ZIndex = CONFIG.BASE_ZINDEX + 2
 StatusExpandButton.Parent = StatusHeader
 
---//========================================================
---// STATUS DETAILS
---//========================================================
+--========================================================
+-- STATUS DETAILS
+--========================================================
 
 local StatusDetails = Instance.new("Frame")
 StatusDetails.Name = "StatusDetails"
@@ -301,7 +310,6 @@ StatusDetails.Position = UDim2.new(0, 6, 0, 73)
 StatusDetails.BackgroundColor3 = COLORS.Panel
 StatusDetails.BorderSizePixel = 0
 StatusDetails.Visible = false
-StatusDetails.ZIndex = CONFIG.BASE_ZINDEX + 1
 StatusDetails.Parent = Main
 
 local StatusDetailsCorner = Instance.new("UICorner")
@@ -316,7 +324,6 @@ local function CreateStatusRow(name, y)
 	Row.Size = UDim2.new(1, -8, 0, 17)
 	Row.Position = UDim2.new(0, 4, 0, y)
 	Row.BackgroundTransparency = 1
-	Row.ZIndex = CONFIG.BASE_ZINDEX + 2
 	Row.Parent = StatusDetails
 
 	local NameLabel = Instance.new("TextLabel")
@@ -327,7 +334,6 @@ local function CreateStatusRow(name, y)
 	NameLabel.TextSize = 10
 	NameLabel.Font = Enum.Font.Gotham
 	NameLabel.TextXAlignment = Enum.TextXAlignment.Left
-	NameLabel.ZIndex = CONFIG.BASE_ZINDEX + 3
 	NameLabel.Parent = Row
 
 	local ValueLabel = Instance.new("TextLabel")
@@ -339,7 +345,6 @@ local function CreateStatusRow(name, y)
 	ValueLabel.TextSize = 10
 	ValueLabel.Font = Enum.Font.GothamBold
 	ValueLabel.TextXAlignment = Enum.TextXAlignment.Right
-	ValueLabel.ZIndex = CONFIG.BASE_ZINDEX + 3
 	ValueLabel.Parent = Row
 
 	StatusRows[name] = ValueLabel
@@ -350,9 +355,9 @@ CreateStatusRow("Attributes", 21)
 CreateStatusRow("Tags", 38)
 CreateStatusRow("Values", 55)
 
---//========================================================
---// TABS
---//========================================================
+--========================================================
+-- TAB BAR
+--========================================================
 
 local TabBar = Instance.new("ScrollingFrame")
 TabBar.Name = "TabBar"
@@ -363,7 +368,6 @@ TabBar.BorderSizePixel = 0
 TabBar.ScrollBarThickness = 0
 TabBar.ScrollingDirection = Enum.ScrollingDirection.X
 TabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-TabBar.ZIndex = CONFIG.BASE_ZINDEX + 1
 TabBar.Parent = Main
 
 local TabLayout = Instance.new("UIListLayout")
@@ -384,9 +388,9 @@ local TabNames = {
 
 local TabButtons = {}
 
---//========================================================
---// CONTENT AREA
---//========================================================
+--========================================================
+-- CONTENT
+--========================================================
 
 local Content = Instance.new("Frame")
 Content.Name = "Content"
@@ -394,27 +398,25 @@ Content.Size = UDim2.new(1, -12, 0, 105)
 Content.Position = UDim2.new(0, 6, 0, 108)
 Content.BackgroundColor3 = COLORS.Panel
 Content.BorderSizePixel = 0
-Content.ZIndex = CONFIG.BASE_ZINDEX + 1
 Content.Parent = Main
 
 local ContentCorner = Instance.new("UICorner")
 ContentCorner.CornerRadius = UDim.new(0, 6)
 ContentCorner.Parent = Content
 
---//========================================================
---// OVERVIEW TAB
---//========================================================
+--========================================================
+-- OVERVIEW
+--========================================================
 
 local OverviewFrame = Instance.new("Frame")
 OverviewFrame.Name = "Overview"
 OverviewFrame.Size = UDim2.new(1, 0, 1, 0)
 OverviewFrame.BackgroundTransparency = 1
-OverviewFrame.ZIndex = CONFIG.BASE_ZINDEX + 2
 OverviewFrame.Parent = Content
 
 local StatsLabel = Instance.new("TextLabel")
 StatsLabel.Name = "Stats"
-StatsLabel.Size = UDim2.new(1, -16, 0, 60)
+StatsLabel.Size = UDim2.new(1, -16, 0, 62)
 StatsLabel.Position = UDim2.new(0, 8, 0, 7)
 StatsLabel.BackgroundTransparency = 1
 StatsLabel.Text = "Objects       0\nAttributes    0\nTags          0\nValues        0"
@@ -423,12 +425,11 @@ StatsLabel.TextSize = 11
 StatsLabel.Font = Enum.Font.Gotham
 StatsLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatsLabel.TextYAlignment = Enum.TextYAlignment.Top
-StatsLabel.ZIndex = CONFIG.BASE_ZINDEX + 3
 StatsLabel.Parent = OverviewFrame
 
 local OverviewInfo = Instance.new("TextLabel")
 OverviewInfo.Name = "Info"
-OverviewInfo.Size = UDim2.new(1, -16, 0, 30)
+OverviewInfo.Size = UDim2.new(1, -16, 0, 28)
 OverviewInfo.Position = UDim2.new(0, 8, 0, 70)
 OverviewInfo.BackgroundTransparency = 1
 OverviewInfo.Text = "Phase 1: client-visible structure scanner"
@@ -436,19 +437,17 @@ OverviewInfo.TextColor3 = COLORS.SubText
 OverviewInfo.TextSize = 10
 OverviewInfo.Font = Enum.Font.Gotham
 OverviewInfo.TextXAlignment = Enum.TextXAlignment.Left
-OverviewInfo.ZIndex = CONFIG.BASE_ZINDEX + 3
 OverviewInfo.Parent = OverviewFrame
 
---//========================================================
---// OBJECTS TAB
---//========================================================
+--========================================================
+-- OBJECTS
+--========================================================
 
 local ObjectsFrame = Instance.new("Frame")
 ObjectsFrame.Name = "Objects"
 ObjectsFrame.Size = UDim2.new(1, 0, 1, 0)
 ObjectsFrame.BackgroundTransparency = 1
 ObjectsFrame.Visible = false
-ObjectsFrame.ZIndex = CONFIG.BASE_ZINDEX + 2
 ObjectsFrame.Parent = Content
 
 local SearchBox = Instance.new("TextBox")
@@ -464,7 +463,6 @@ SearchBox.TextColor3 = COLORS.Text
 SearchBox.TextSize = 10
 SearchBox.Font = Enum.Font.Gotham
 SearchBox.ClearTextOnFocus = false
-SearchBox.ZIndex = CONFIG.BASE_ZINDEX + 3
 SearchBox.Parent = ObjectsFrame
 
 local SearchCorner = Instance.new("UICorner")
@@ -480,7 +478,6 @@ ResultsFrame.BorderSizePixel = 0
 ResultsFrame.ScrollBarThickness = 3
 ResultsFrame.ScrollBarImageColor3 = COLORS.Border
 ResultsFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-ResultsFrame.ZIndex = CONFIG.BASE_ZINDEX + 3
 ResultsFrame.Parent = ObjectsFrame
 
 local ResultsLayout = Instance.new("UIListLayout")
@@ -488,20 +485,15 @@ ResultsLayout.Padding = UDim.new(0, 2)
 ResultsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 ResultsLayout.Parent = ResultsFrame
 
-local ResultPadding = Instance.new("UIPadding")
-ResultPadding.PaddingRight = UDim.new(0, 3)
-ResultPadding.Parent = ResultsFrame
-
---//========================================================
---// PLAYER TAB
---//========================================================
+--========================================================
+-- PLAYER
+--========================================================
 
 local PlayerFrame = Instance.new("Frame")
 PlayerFrame.Name = "Player"
 PlayerFrame.Size = UDim2.new(1, 0, 1, 0)
 PlayerFrame.BackgroundTransparency = 1
 PlayerFrame.Visible = false
-PlayerFrame.ZIndex = CONFIG.BASE_ZINDEX + 2
 PlayerFrame.Parent = Content
 
 local PlayerInfo = Instance.new("TextLabel")
@@ -515,12 +507,11 @@ PlayerInfo.TextSize = 11
 PlayerInfo.Font = Enum.Font.Gotham
 PlayerInfo.TextXAlignment = Enum.TextXAlignment.Left
 PlayerInfo.TextYAlignment = Enum.TextYAlignment.Top
-PlayerInfo.ZIndex = CONFIG.BASE_ZINDEX + 3
 PlayerInfo.Parent = PlayerFrame
 
---//========================================================
---// PLACEHOLDER TAB CREATOR
---//========================================================
+--========================================================
+-- PLACEHOLDER TABS
+--========================================================
 
 local function CreatePlaceholderTab(name, message)
 	local Frame = Instance.new("Frame")
@@ -528,7 +519,6 @@ local function CreatePlaceholderTab(name, message)
 	Frame.Size = UDim2.new(1, 0, 1, 0)
 	Frame.BackgroundTransparency = 1
 	Frame.Visible = false
-	Frame.ZIndex = CONFIG.BASE_ZINDEX + 2
 	Frame.Parent = Content
 
 	local Label = Instance.new("TextLabel")
@@ -542,7 +532,6 @@ local function CreatePlaceholderTab(name, message)
 	Label.TextWrapped = true
 	Label.TextXAlignment = Enum.TextXAlignment.Left
 	Label.TextYAlignment = Enum.TextYAlignment.Top
-	Label.ZIndex = CONFIG.BASE_ZINDEX + 3
 	Label.Parent = Frame
 
 	return Frame
@@ -550,34 +539,33 @@ end
 
 local RelationsFrame = CreatePlaceholderTab(
 	"Relations",
-	"RELATIONS\n\nPhase 1 foundation ready.\nRelationship mapping will be populated by a later analyzer phase."
+	"RELATIONS\n\nPhase 1 foundation ready.\nRelationship mapping will be added in a later phase."
 )
 
 local BehaviorFrame = CreatePlaceholderTab(
 	"Behavior",
-	"BEHAVIOR\n\nPhase 1 currently performs static scanning.\nDynamic state and player-action monitoring will be added later."
+	"BEHAVIOR\n\nPhase 1 performs static scanning.\nDynamic state monitoring will be added in a later phase."
 )
 
 local RemotesFrame = CreatePlaceholderTab(
 	"Remotes",
-	"REMOTES\n\nPhase 1 does not actively test or fire remotes.\nAuthorized remote observation/testing will be added in a later phase."
+	"REMOTES\n\nPhase 1 does not actively fire or test remotes.\nAuthorized remote observation/testing will be added later."
 )
 
 local DataFrame = CreatePlaceholderTab(
 	"Data",
-	"DATA\n\nPhase 1 stores the discovered scan data in memory.\nStructured export and session data tools will be added later."
+	"DATA\n\nPhase 1 keeps discovered scan data in memory.\nStructured export will be added in a later phase."
 )
 
---//========================================================
---// BOTTOM CONTROLS
---//========================================================
+--========================================================
+-- BOTTOM BAR
+--========================================================
 
 local BottomBar = Instance.new("Frame")
 BottomBar.Name = "BottomBar"
 BottomBar.Size = UDim2.new(1, -12, 0, 34)
 BottomBar.Position = UDim2.new(0, 6, 1, -40)
 BottomBar.BackgroundTransparency = 1
-BottomBar.ZIndex = CONFIG.BASE_ZINDEX + 2
 BottomBar.Parent = Main
 
 local PauseButton = Instance.new("TextButton")
@@ -590,7 +578,6 @@ PauseButton.Text = "Pause"
 PauseButton.TextColor3 = COLORS.Text
 PauseButton.TextSize = 10
 PauseButton.Font = Enum.Font.GothamBold
-PauseButton.ZIndex = CONFIG.BASE_ZINDEX + 3
 PauseButton.Parent = BottomBar
 
 local PauseCorner = Instance.new("UICorner")
@@ -607,7 +594,6 @@ ScanButton.Text = "Rescan"
 ScanButton.TextColor3 = Color3.new(1, 1, 1)
 ScanButton.TextSize = 10
 ScanButton.Font = Enum.Font.GothamBold
-ScanButton.ZIndex = CONFIG.BASE_ZINDEX + 3
 ScanButton.Parent = BottomBar
 
 local ScanCorner = Instance.new("UICorner")
@@ -624,16 +610,15 @@ HideButton.Text = "Hide"
 HideButton.TextColor3 = COLORS.Text
 HideButton.TextSize = 10
 HideButton.Font = Enum.Font.GothamBold
-HideButton.ZIndex = CONFIG.BASE_ZINDEX + 3
 HideButton.Parent = BottomBar
 
 local HideCorner = Instance.new("UICorner")
 HideCorner.CornerRadius = UDim.new(0, 5)
 HideCorner.Parent = HideButton
 
---//========================================================
---// FLOATING OPEN BUTTON
---//========================================================
+--========================================================
+-- FLOATING OPEN BUTTON
+--========================================================
 
 local OpenButton = Instance.new("TextButton")
 OpenButton.Name = "OpenButton"
@@ -646,7 +631,7 @@ OpenButton.TextColor3 = Color3.new(1, 1, 1)
 OpenButton.TextSize = 13
 OpenButton.Font = Enum.Font.GothamBold
 OpenButton.Visible = false
-OpenButton.ZIndex = CONFIG.BASE_ZINDEX + 20
+OpenButton.ZIndex = CONFIG.BASE_ZINDEX + 50
 OpenButton.Parent = ScreenGui
 
 local OpenCorner = Instance.new("UICorner")
@@ -658,9 +643,9 @@ OpenStroke.Color = Color3.fromRGB(100, 160, 255)
 OpenStroke.Thickness = 1
 OpenStroke.Parent = OpenButton
 
---//========================================================
---// TAB MANAGEMENT
---//========================================================
+--========================================================
+-- TAB MANAGEMENT
+--========================================================
 
 local TabFrames = {
 	Overview = OverviewFrame,
@@ -709,7 +694,6 @@ for index, name in ipairs(TabNames) do
 	Button.TextSize = 9
 	Button.Font = Enum.Font.GothamBold
 	Button.LayoutOrder = index
-	Button.ZIndex = CONFIG.BASE_ZINDEX + 3
 	Button.Parent = TabBar
 
 	local Corner = Instance.new("UICorner")
@@ -723,7 +707,6 @@ for index, name in ipairs(TabNames) do
 	end)
 end
 
--- Update scrolling canvas
 local function UpdateTabCanvas()
 	task.defer(function()
 		TabBar.CanvasSize = UDim2.new(
@@ -739,27 +722,31 @@ TabLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateTabCanva
 
 ShowTab("Overview")
 
---//========================================================
---// STATUS MANAGEMENT
---//========================================================
+--========================================================
+-- STATUS FUNCTIONS
+--========================================================
 
 local function SetStatus(name, status)
 	State.Status[name] = status
 
-	if StatusRows[name] then
-		StatusRows[name].Text = status
+	local label = StatusRows[name]
 
-		if status == "COMPLETE" then
-			StatusRows[name].TextColor3 = COLORS.Green
-		elseif status == "RUNNING" or status == "PROCESSING" then
-			StatusRows[name].TextColor3 = COLORS.Blue
-		elseif status == "ERROR" then
-			StatusRows[name].TextColor3 = COLORS.Red
-		elseif status == "PAUSED" then
-			StatusRows[name].TextColor3 = COLORS.Yellow
-		else
-			StatusRows[name].TextColor3 = COLORS.Yellow
-		end
+	if not label then
+		return
+	end
+
+	label.Text = status
+
+	if status == "COMPLETE" then
+		label.TextColor3 = COLORS.Green
+	elseif status == "RUNNING" or status == "PROCESSING" then
+		label.TextColor3 = COLORS.Blue
+	elseif status == "ERROR" then
+		label.TextColor3 = COLORS.Red
+	elseif status == "PAUSED" then
+		label.TextColor3 = COLORS.Yellow
+	else
+		label.TextColor3 = COLORS.Yellow
 	end
 end
 
@@ -786,9 +773,9 @@ local function UpdateOverallStatus()
 	StatusDot.TextColor3 = COLORS.Yellow
 end
 
---//========================================================
---// STATS
---//========================================================
+--========================================================
+-- STATISTICS
+--========================================================
 
 local function UpdateStats()
 	StatsLabel.Text =
@@ -798,11 +785,12 @@ local function UpdateStats()
 		"\nValues        " .. tostring(State.ValueCount)
 
 	PlayerInfo.Text =
-		"Player information\n\n" ..
+		"PLAYER\n\n" ..
 		"Name: " .. LocalPlayer.Name ..
 		"\nDisplay Name: " .. LocalPlayer.DisplayName ..
 		"\nUserId: " .. tostring(LocalPlayer.UserId) ..
-		"\nCharacter: " .. (LocalPlayer.Character and LocalPlayer.Character.Name or "None")
+		"\nCharacter: " ..
+		(LocalPlayer.Character and LocalPlayer.Character.Name or "None")
 
 	OverviewInfo.Text =
 		"Phase 1 scanner • " ..
@@ -810,9 +798,9 @@ local function UpdateStats()
 		" objects discovered"
 end
 
---//========================================================
---// PROPERTY COLLECTION
---//========================================================
+--========================================================
+-- PROPERTY COLLECTION
+--========================================================
 
 local function CollectProperties(instance)
 	local properties = {}
@@ -876,9 +864,9 @@ local function CollectProperties(instance)
 	return properties
 end
 
---//========================================================
---// SEARCH
---//========================================================
+--========================================================
+-- SEARCH
+--========================================================
 
 local function StringContains(text, search)
 	text = string.lower(tostring(text or ""))
@@ -905,7 +893,9 @@ local function ObjectMatchesSearch(data, search)
 	end
 
 	for key, value in pairs(data.Attributes or {}) do
-		if StringContains(key, search) or StringContains(value, search) then
+		if StringContains(key, search)
+			or StringContains(value, search) then
+
 			return true
 		end
 	end
@@ -917,7 +907,9 @@ local function ObjectMatchesSearch(data, search)
 	end
 
 	for key, value in pairs(data.Properties or {}) do
-		if StringContains(key, search) or StringContains(value, search) then
+		if StringContains(key, search)
+			or StringContains(value, search) then
+
 			return true
 		end
 	end
@@ -931,13 +923,15 @@ local function ObjectMatchesSearch(data, search)
 	return false
 end
 
---//========================================================
---// RENDER SEARCH RESULTS
---//========================================================
+--========================================================
+-- RENDER RESULTS
+--========================================================
 
 local function ClearResults()
 	for _, child in ipairs(ResultsFrame:GetChildren()) do
-		if child:IsA("TextButton") or child:IsA("TextLabel") then
+		if child:IsA("TextButton")
+			or child:IsA("TextLabel") then
+
 			child:Destroy()
 		end
 	end
@@ -962,6 +956,7 @@ local function RenderResults()
 			Result.Size = UDim2.new(1, -4, 0, 22)
 			Result.BackgroundColor3 = COLORS.Panel2
 			Result.BorderSizePixel = 0
+
 			Result.Text =
 				data.Name ..
 				"  [" ..
@@ -973,7 +968,6 @@ local function RenderResults()
 			Result.Font = Enum.Font.Gotham
 			Result.TextXAlignment = Enum.TextXAlignment.Left
 			Result.TextTruncate = Enum.TextTruncate.AtEnd
-			Result.ZIndex = CONFIG.BASE_ZINDEX + 4
 			Result.Parent = ResultsFrame
 
 			local Padding = Instance.new("UIPadding")
@@ -984,25 +978,6 @@ local function RenderResults()
 			local Corner = Instance.new("UICorner")
 			Corner.CornerRadius = UDim.new(0, 4)
 			Corner.Parent = Result
-
-			Result.MouseButton1Click:Connect(function()
-				local detail =
-					"Name: " .. data.Name ..
-					"\nClass: " .. data.ClassName ..
-					"\nPath: " .. data.FullName
-
-				if next(data.Attributes) then
-					detail = detail .. "\nAttributes: " .. tostring(#(function()
-						local t = {}
-						for key in pairs(data.Attributes) do
-							table.insert(t, key)
-						end
-						return t
-					end)())
-				end
-
-				Result.Text = data.Name .. "  [" .. data.ClassName .. "]"
-			end)
 		end
 	end
 
@@ -1021,9 +996,9 @@ SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
 	RenderResults()
 end)
 
---//========================================================
---// SCANNER
---//========================================================
+--========================================================
+-- RESET SCAN DATA
+--========================================================
 
 local function ResetScanData()
 	State.Objects = {}
@@ -1043,9 +1018,15 @@ local function ResetScanData()
 	SetStatus("Tags", "WAITING")
 	SetStatus("Values", "WAITING")
 
+	ProgressLabel.Text = "0%"
+
 	UpdateStats()
 	ClearResults()
 end
+
+--========================================================
+-- SCAN ONE INSTANCE
+--========================================================
 
 local function ScanInstance(instance)
 	if State.ObjectCount >= CONFIG.MAX_RESULTS then
@@ -1067,7 +1048,8 @@ local function ScanInstance(instance)
 		data.FullName = instance:GetFullName()
 	end)
 
-	--// ATTRIBUTES
+	-- ATTRIBUTES
+
 	SetStatus("Attributes", "RUNNING")
 
 	local attributeCount = 0
@@ -1083,14 +1065,14 @@ local function ScanInstance(instance)
 			end
 
 			data.Attributes[key] = value
+
 			attributeCount += 1
 			State.AttributeCount += 1
 		end
 	end
 
-	SetStatus("Attributes", "PROCESSING")
+	-- TAGS
 
-	--// TAGS
 	SetStatus("Tags", "RUNNING")
 
 	local successTags, tags = pcall(function()
@@ -1108,9 +1090,8 @@ local function ScanInstance(instance)
 		end
 	end
 
-	SetStatus("Tags", "PROCESSING")
+	-- VALUES
 
-	--// VALUE OBJECTS
 	SetStatus("Values", "RUNNING")
 
 	if instance:IsA("ValueBase") then
@@ -1124,13 +1105,18 @@ local function ScanInstance(instance)
 		end
 	end
 
-	--// USEFUL PROPERTIES
+	-- USEFUL PROPERTIES
+
 	data.Properties = CollectProperties(instance)
 
 	table.insert(State.Objects, data)
 
 	State.ObjectCount += 1
 end
+
+--========================================================
+-- START SCAN
+--========================================================
 
 local function StartScan()
 	if State.Scanning then
@@ -1146,6 +1132,8 @@ local function StartScan()
 	State.Scanning = true
 	State.Paused = false
 
+	PauseButton.Text = "Pause"
+
 	UpdateOverallStatus()
 
 	SetStatus("Structure", "RUNNING")
@@ -1155,11 +1143,13 @@ local function StartScan()
 	State.TotalInstances = #instances
 
 	for index, instance in ipairs(instances) do
+
 		if scanToken ~= State.ScanToken then
 			return
 		end
 
 		while State.Paused do
+
 			SetStatus("Structure", "PAUSED")
 			SetStatus("Attributes", "PAUSED")
 			SetStatus("Tags", "PAUSED")
@@ -1174,12 +1164,10 @@ local function StartScan()
 			end
 		end
 
-		if not State.Paused then
-			SetStatus("Structure", "RUNNING")
-			SetStatus("Attributes", "PROCESSING")
-			SetStatus("Tags", "PROCESSING")
-			SetStatus("Values", "PROCESSING")
-		end
+		SetStatus("Structure", "RUNNING")
+		SetStatus("Attributes", "PROCESSING")
+		SetStatus("Tags", "PROCESSING")
+		SetStatus("Values", "PROCESSING")
 
 		State.CurrentIndex = index
 
@@ -1219,16 +1207,19 @@ local function StartScan()
 	SetStatus("Tags", "COMPLETE")
 	SetStatus("Values", "COMPLETE")
 
+	PauseButton.Text = "Pause"
+
 	UpdateOverallStatus()
 	UpdateStats()
 	RenderResults()
 end
 
---//========================================================
---// PAUSE / RESUME
---//========================================================
+--========================================================
+-- PAUSE / RESUME
+--========================================================
 
 PauseButton.MouseButton1Click:Connect(function()
+
 	if not State.Scanning then
 		return
 	end
@@ -1244,96 +1235,141 @@ PauseButton.MouseButton1Click:Connect(function()
 	UpdateOverallStatus()
 end)
 
---//========================================================
---// RESCAN
---//========================================================
+--========================================================
+-- RESCAN
+--========================================================
 
 ScanButton.MouseButton1Click:Connect(function()
-	State.ScanToken += 1
+
+	if State.Scanning then
+		State.ScanToken += 1
+
+		task.wait()
+	end
 
 	task.spawn(function()
 		StartScan()
 	end)
 end)
 
---//========================================================
---// STATUS EXPAND / COLLAPSE
---//========================================================
+--========================================================
+-- STATUS EXPAND / COLLAPSE
+--========================================================
 
 local StatusExpanded = false
 
 local function UpdateStatusLayout()
+
 	if StatusExpanded then
+
 		StatusDetails.Visible = true
 
-		TabBar.Position = UDim2.new(0, 6, 0, 153)
-		Content.Position = UDim2.new(0, 6, 0, 188)
-		Content.Size = UDim2.new(1, -12, 0, 105)
+		TabBar.Position = UDim2.new(
+			0,
+			6,
+			0,
+			153
+		)
+
+		Content.Position = UDim2.new(
+			0,
+			6,
+			0,
+			188
+		)
+
+		Content.Size = UDim2.new(
+			1,
+			-12,
+			0,
+			105
+		)
 
 		StatusExpandButton.Text = "▲"
+
 	else
+
 		StatusDetails.Visible = false
 
-		TabBar.Position = UDim2.new(0, 6, 0, 73)
-		Content.Position = UDim2.new(0, 6, 0, 108)
-		Content.Size = UDim2.new(1, -12, 0, 105)
+		TabBar.Position = UDim2.new(
+			0,
+			6,
+			0,
+			73
+		)
+
+		Content.Position = UDim2.new(
+			0,
+			6,
+			0,
+			108
+		)
+
+		Content.Size = UDim2.new(
+			1,
+			-12,
+			0,
+			105
+		)
 
 		StatusExpandButton.Text = "▼"
 	end
 end
 
 StatusExpandButton.MouseButton1Click:Connect(function()
+
 	StatusExpanded = not StatusExpanded
+
 	UpdateStatusLayout()
 end)
 
-UpdateStatusLayout()
+--========================================================
+-- HIDE / SHOW
+--========================================================
 
---//========================================================
---// MINIMIZE / HIDE
---//========================================================
-
-MinimizeButton.MouseButton1Click:Connect(function()
+local function HideAnalyzer()
 	Main.Visible = false
 	OpenButton.Visible = true
-end)
+end
 
-HideButton.MouseButton1Click:Connect(function()
-	Main.Visible = false
-	OpenButton.Visible = true
-end)
-
-CloseButton.MouseButton1Click:Connect(function()
-	Main.Visible = false
-	OpenButton.Visible = true
-end)
-
-OpenButton.MouseButton1Click:Connect(function()
+local function ShowAnalyzer()
 	Main.Visible = true
 	OpenButton.Visible = false
-end)
+end
 
---//========================================================
---// DRAGGING
---//========================================================
+MinimizeButton.MouseButton1Click:Connect(HideAnalyzer)
+
+CloseButton.MouseButton1Click:Connect(HideAnalyzer)
+
+HideButton.MouseButton1Click:Connect(HideAnalyzer)
+
+OpenButton.MouseButton1Click:Connect(ShowAnalyzer)
+
+--========================================================
+-- DRAGGING
+--========================================================
 
 local function MakeDraggable(frame, dragHandle)
+
 	local dragging = false
 	local dragStart
 	local startPosition
 
 	local function Update(input)
+
 		local delta = input.Position - dragStart
 
 		frame.Position = UDim2.new(
 			startPosition.X.Scale,
 			startPosition.X.Offset + delta.X,
+
 			startPosition.Y.Scale,
 			startPosition.Y.Offset + delta.Y
 		)
 	end
 
 	dragHandle.InputBegan:Connect(function(input)
+
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 
@@ -1342,22 +1378,25 @@ local function MakeDraggable(frame, dragHandle)
 			startPosition = frame.Position
 
 			input.Changed:Connect(function()
+
 				if input.UserInputState == Enum.UserInputState.End then
 					dragging = false
 				end
+
 			end)
 		end
 	end)
 
-	dragHandle.InputChanged:Connect(function(input)
+	UserInputService.InputChanged:Connect(function(input)
+
+		if not dragging then
+			return
+		end
+
 		if input.UserInputType == Enum.UserInputType.MouseMovement
 			or input.UserInputType == Enum.UserInputType.Touch then
 
-			UserInputService.InputChanged:Connect(function(changedInput)
-				if dragging and changedInput == input then
-					Update(changedInput)
-				end
-			end)
+			Update(input)
 		end
 	end)
 end
@@ -1365,11 +1404,73 @@ end
 MakeDraggable(Main, TitleBar)
 MakeDraggable(OpenButton, OpenButton)
 
---//========================================================
---// RESPAWN HANDLING
---//========================================================
+--========================================================
+-- APPLY ZINDEX CORRECTLY
+--========================================================
+
+-- Backgrounds get lower ZIndex.
+-- Children/text/buttons get progressively higher ZIndex.
+
+ApplyZIndex(Main, CONFIG.BASE_ZINDEX)
+
+-- Floating button must stay above the main window.
+
+OpenButton.ZIndex = CONFIG.BASE_ZINDEX + 50
+
+for _, child in ipairs(OpenButton:GetDescendants()) do
+	if child:IsA("GuiObject") then
+		child.ZIndex = CONFIG.BASE_ZINDEX + 51
+	end
+end
+
+--========================================================
+-- KEEP CRITICAL ELEMENTS ABOVE THEIR CONTAINERS
+--========================================================
+
+TitleBar.ZIndex = CONFIG.BASE_ZINDEX + 1
+Title.ZIndex = CONFIG.BASE_ZINDEX + 2
+MinimizeButton.ZIndex = CONFIG.BASE_ZINDEX + 2
+CloseButton.ZIndex = CONFIG.BASE_ZINDEX + 2
+
+StatusHeader.ZIndex = CONFIG.BASE_ZINDEX + 1
+StatusDot.ZIndex = CONFIG.BASE_ZINDEX + 2
+OverallStatus.ZIndex = CONFIG.BASE_ZINDEX + 2
+ProgressLabel.ZIndex = CONFIG.BASE_ZINDEX + 2
+StatusExpandButton.ZIndex = CONFIG.BASE_ZINDEX + 2
+
+StatusDetails.ZIndex = CONFIG.BASE_ZINDEX + 1
+
+for _, row in pairs(StatusRows) do
+	row.ZIndex = CONFIG.BASE_ZINDEX + 3
+end
+
+TabBar.ZIndex = CONFIG.BASE_ZINDEX + 1
+
+for _, button in pairs(TabButtons) do
+	button.ZIndex = CONFIG.BASE_ZINDEX + 2
+end
+
+Content.ZIndex = CONFIG.BASE_ZINDEX + 1
+
+StatsLabel.ZIndex = CONFIG.BASE_ZINDEX + 3
+OverviewInfo.ZIndex = CONFIG.BASE_ZINDEX + 3
+
+SearchBox.ZIndex = CONFIG.BASE_ZINDEX + 3
+ResultsFrame.ZIndex = CONFIG.BASE_ZINDEX + 2
+
+PlayerInfo.ZIndex = CONFIG.BASE_ZINDEX + 3
+
+BottomBar.ZIndex = CONFIG.BASE_ZINDEX + 2
+PauseButton.ZIndex = CONFIG.BASE_ZINDEX + 3
+ScanButton.ZIndex = CONFIG.BASE_ZINDEX + 3
+HideButton.ZIndex = CONFIG.BASE_ZINDEX + 3
+
+--========================================================
+-- RESPAWN SAFETY
+--========================================================
 
 LocalPlayer.CharacterAdded:Connect(function()
+
 	task.wait(1)
 
 	if not ScreenGui.Parent then
@@ -1380,37 +1481,27 @@ LocalPlayer.CharacterAdded:Connect(function()
 	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 end)
 
---//========================================================
---// ENSURE HIGH ZINDEX
---//========================================================
-
-SetZIndexRecursive(Main, CONFIG.BASE_ZINDEX)
-SetZIndexRecursive(OpenButton, CONFIG.BASE_ZINDEX + 20)
-
--- Restore specific higher-level layering
-TitleBar.ZIndex = CONFIG.BASE_ZINDEX + 1
-StatusHeader.ZIndex = CONFIG.BASE_ZINDEX + 1
-StatusDetails.ZIndex = CONFIG.BASE_ZINDEX + 1
-TabBar.ZIndex = CONFIG.BASE_ZINDEX + 1
-Content.ZIndex = CONFIG.BASE_ZINDEX + 1
-BottomBar.ZIndex = CONFIG.BASE_ZINDEX + 2
-OpenButton.ZIndex = CONFIG.BASE_ZINDEX + 20
-
---//========================================================
---// INITIAL STATE
---//========================================================
+--========================================================
+-- INITIALIZE
+--========================================================
 
 UpdateStats()
 UpdateOverallStatus()
+UpdateStatusLayout()
 UpdateTabCanvas()
 
---//========================================================
---// AUTO SCAN
---//========================================================
+--========================================================
+-- AUTO SCAN
+--========================================================
 
 if CONFIG.AUTO_SCAN then
+
 	task.spawn(function()
+
 		task.wait(0.5)
+
 		StartScan()
+
 	end)
+
 end
