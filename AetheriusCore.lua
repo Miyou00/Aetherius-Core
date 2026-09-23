@@ -2105,19 +2105,14 @@ local function RunClassification(scanGeneration)
 			end
 		end
 
-		-- Include objects added while classification was running. Process these
-		-- in batches so a large burst of live objects cannot block the UI.
-		local pendingSnapshot = table.clone(PendingClassification)
-		local pendingTotal = 0
-		for _ in pairs(pendingSnapshot) do
-			pendingTotal += 1
-		end
-
+		-- Include objects added while classification was running. The pending
+		-- table can change while this task is processing it, so take a fresh
+		-- snapshot repeatedly until there is no pending work left. This closes
+		-- the race where an object is added after the first pending snapshot.
 		local pendingProcessed = 0
 		local pendingStartProgress = total > 0 and 90 or 0
-		local pendingProgressRange = 100 - pendingStartProgress
 
-		for instance, record in pairs(pendingSnapshot) do
+		while next(PendingClassification) do
 			if scanGeneration ~= CurrentScan then
 				return
 			end
@@ -2131,41 +2126,74 @@ local function RunClassification(scanGeneration)
 				return
 			end
 
-			if not classifiedInstances[instance]
-				and record
-				and record.Instance == instance
-				and instance.Parent
-				and instance:IsDescendantOf(workspace) then
-				local category, signals = ClassifyObject(record)
-				localData[#localData + 1] = {
-					Instance = record.Instance,
-					Name = record.Name,
-					ClassName = record.ClassName,
-					FullName = record.FullName,
-					Category = category,
-					Signals = signals
-				}
-				classifiedInstances[instance] = true
-				localCounts[category] = (localCounts[category] or 0) + 1
+			local pendingSnapshot = table.clone(PendingClassification)
+			local pendingTotal = 0
+			for _ in pairs(pendingSnapshot) do
+				pendingTotal += 1
 			end
 
-			PendingClassification[instance] = nil
-			pendingProcessed += 1
+			local pendingBatchProcessed = 0
 
-			if pendingTotal > 0 and (pendingProcessed % PENDING_CLASSIFICATION_BATCH_SIZE == 0 or pendingProcessed == pendingTotal) then
-				ClassificationProgress = pendingStartProgress
-					+ (pendingProcessed / pendingTotal) * pendingProgressRange
-				UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
-				RequestClassificationUIUpdate()
-				task.wait(CLASSIFICATION_YIELD_TIME)
+			for instance, record in pairs(pendingSnapshot) do
+				if scanGeneration ~= CurrentScan then
+					return
+				end
+
+				while ScanPaused and scanGeneration == CurrentScan do
+					UpdateOverallStatus("PAUSED", ClassificationProgress)
+					task.wait(0.1)
+				end
+
+				if scanGeneration ~= CurrentScan then
+					return
+				end
+
+				if not classifiedInstances[instance]
+					and record
+					and record.Instance == instance
+					and instance.Parent
+					and instance:IsDescendantOf(workspace) then
+					local category, signals = ClassifyObject(record)
+					localData[#localData + 1] = {
+						Instance = record.Instance,
+						Name = record.Name,
+						ClassName = record.ClassName,
+						FullName = record.FullName,
+						Category = category,
+						Signals = signals
+					}
+					classifiedInstances[instance] = true
+					localCounts[category] = (localCounts[category] or 0) + 1
+				end
+
+				PendingClassification[instance] = nil
+				pendingProcessed += 1
+				pendingBatchProcessed += 1
+
+				if pendingBatchProcessed % PENDING_CLASSIFICATION_BATCH_SIZE == 0 then
+					-- Reserve the final 10% for draining newly-arriving pending work.
+					-- The progress can reach 100% only after PendingClassification is empty.
+					local progress = pendingStartProgress
+					if pendingTotal > 0 then
+						progress += math.min(9, (pendingBatchProcessed / pendingTotal) * 9)
+					end
+					ClassificationProgress = math.min(99, progress)
+					UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+					RequestClassificationUIUpdate()
+					task.wait(CLASSIFICATION_YIELD_TIME)
+				end
 			end
+
+			-- If new objects arrived while this snapshot was being processed,
+			-- the outer while loop takes another snapshot and drains them too.
+			ClassificationProgress = math.min(99, math.max(ClassificationProgress, pendingStartProgress))
+			UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+			RequestClassificationUIUpdate()
+			task.wait(CLASSIFICATION_YIELD_TIME)
 		end
 
-		if pendingTotal == 0 then
-			ClassificationProgress = 100
-		else
-			ClassificationProgress = 100
-		end
+		-- Only report 100% after the pending table has actually drained.
+		ClassificationProgress = 100
 		UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
 	end)
 
