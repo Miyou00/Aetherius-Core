@@ -26,8 +26,11 @@
 
     Features:
     • Object classification
+    • Object family / group detection
+    • Object relevance detection
+    • Object relationship detection
     • Classification signal tracking
-    • Classification summary
+    • Intelligence summary
     • Classification-based object organization
     • Object intelligence UI
     • Stored classification data
@@ -219,9 +222,6 @@ local ClassificationCounts = {
 
 local ClassificationRunning = false
 local ClassificationComplete = false
-local ClassificationGeneration = 0
-local ClassificationJobId = 0
-local ClassificationNeedsRefresh = false
 
 local ClassificationOrder = {
 	"Character",
@@ -244,23 +244,12 @@ local ClassificationOrder = {
 --------------------------------------------------
 
 local function ClearScanData()
-	-- A new Phase 1 scan invalidates any older Phase 2 classification job.
-	ClassificationGeneration += 1
-
 	table.clear(ScanData)
-	table.clear(ClassificationData)
 
 	ObjectCount = 0
 	AttributeCount = 0
 	TagCount = 0
 	ValueCount = 0
-
-	for category in pairs(ClassificationCounts) do
-		ClassificationCounts[category] = 0
-	end
-
-	ClassificationComplete = false
-	ClassificationNeedsRefresh = false
 end
 
 local function SafeFullName(instance)
@@ -1471,7 +1460,8 @@ local function UpdateOverallStatus(
 			COLORS.Success
 
 	elseif status == "ANALYZING"
-		or status == "PROCESSING" then
+		or status == "PROCESSING"
+		or status == "CLASSIFYING" then
 
 		OverallStatus.TextColor3 =
 			COLORS.Accent
@@ -1769,6 +1759,7 @@ local function ClassifyObject(record)
 	-- Interactive objects.
 	if instance:IsA("ProximityPrompt")
 		or instance:IsA("ClickDetector")
+		or instance:IsA("TouchTransmitter")
 		or instance:IsA("Seat")
 		or instance:IsA("VehicleSeat") then
 
@@ -1948,40 +1939,23 @@ local function UpdateClassificationUI()
 	)
 end
 
-
-local function RunClassification(scanId, generation)
-	if #ScanData == 0 then
-		ClassificationRunning = false
-		ClassificationComplete = false
+local function RunClassification()
+	if ClassificationRunning or #ScanData == 0 then
 		return
 	end
-
-	if scanId ~= CurrentScan or generation ~= ClassificationGeneration then
-		return
-	end
-
-	ClassificationJobId += 1
-	local jobId = ClassificationJobId
 
 	ClassificationRunning = true
 	ClassificationComplete = false
-	ClassificationNeedsRefresh = false
 
 	ResetClassification()
 
 	local total = #ScanData
 
-	for index, record in ipairs(ScanData) do
-		-- A newer scan or classification job invalidates this worker.
-		if jobId ~= ClassificationJobId
-			or scanId ~= CurrentScan
-			or generation ~= ClassificationGeneration then
-			if jobId == ClassificationJobId then
-				ClassificationRunning = false
-			end
-			return
-		end
+	-- Phase 1 scanning has already reached 100%. Keep that progress visible
+	-- while Phase 2 classification runs instead of restarting the bar at 0%.
+	UpdateOverallStatus("CLASSIFYING", 100)
 
+	for index, record in ipairs(ScanData) do
 		local category, signals = ClassifyObject(record)
 
 		ClassificationData[index] = {
@@ -1997,38 +1971,12 @@ local function RunClassification(scanId, generation)
 			(ClassificationCounts[category] or 0) + 1
 
 		if index % CLASSIFICATION_BATCH_SIZE == 0 then
-			local progress = 0
-
-			if total > 0 then
-				progress = (index / total) * 100
-			end
-
-			UpdateOverallStatus("PROCESSING", progress)
 			UpdateClassificationUI()
-
 			task.wait(CLASSIFICATION_YIELD_TIME)
 		end
 	end
 
-	if jobId ~= ClassificationJobId
-		or scanId ~= CurrentScan
-		or generation ~= ClassificationGeneration then
-		if jobId == ClassificationJobId then
-			ClassificationRunning = false
-		end
-		return
-	end
-
 	ClassificationRunning = false
-
-	if ClassificationNeedsRefresh then
-		ClassificationNeedsRefresh = false
-		task.spawn(function()
-			RunClassification(scanId, generation)
-		end)
-		return
-	end
-
 	ClassificationComplete = true
 
 	UpdateClassificationUI()
@@ -2227,16 +2175,8 @@ local function RunScan()
 
 		ScanRunning = false
 
-		-- Phase 2.1 processes this exact Phase 1 ScanData set.
-		local classificationScan = thisScan
-		local classificationGeneration = ClassificationGeneration
-
-		task.spawn(function()
-			RunClassification(
-				classificationScan,
-				classificationGeneration
-			)
-		end)
+		-- Phase 2.1 processes the completed Phase 1 ScanData.
+		task.spawn(RunClassification)
 	end
 end
 
@@ -2385,36 +2325,11 @@ workspace.DescendantAdded:Connect(function(instance)
 				return
 			end
 
-			local beforeCount = #ScanData
 			ScanInstance(instance)
 
-			if #ScanData > beforeCount then
-				local newIndex = #ScanData
-				local record = ScanData[newIndex]
-
-				if record and ClassificationComplete and not ClassificationRunning then
-					local category, signals = ClassifyObject(record)
-
-					ClassificationData[newIndex] = {
-						Instance = record.Instance,
-						Name = record.Name,
-						ClassName = record.ClassName,
-						FullName = record.FullName,
-						Category = category,
-						Signals = signals
-					}
-
-					ClassificationCounts[category] =
-						(ClassificationCounts[category] or 0) + 1
-				elseif record and ClassificationRunning then
-					ClassificationNeedsRefresh = true
-				elseif record then
-					ClassificationComplete = false
-				end
-
-				UpdateClassificationUI()
-				UpdateCounters()
-			end
+			ClassificationComplete = false
+			UpdateClassificationUI()
+			UpdateCounters()
 
 		end)
 	end
