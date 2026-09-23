@@ -186,6 +186,9 @@ local ValueCount = 0
 local ScanPaused = false
 local ScanRunning = false
 local CurrentScan = 0
+local ScanProgress = 0
+local ClassificationProgress = 0
+local ClassificationScheduled = false
 
 local Statuses = {
 	Structure = "WAITING",
@@ -413,6 +416,9 @@ local function SetStatus(name, status)
 	elseif status == "ERROR" then
 		label.TextColor3 = COLORS.Error
 
+	elseif status == "LIMIT" then
+		label.TextColor3 = COLORS.Warning
+
 	elseif status == "PAUSED" then
 		label.TextColor3 = COLORS.Warning
 
@@ -513,7 +519,7 @@ local OverallStatus = MakeText(
 )
 
 OverallStatus.Position = UDim2.fromOffset(9, 0)
-OverallStatus.Size = UDim2.new(1, -75, 1, 0)
+OverallStatus.Size = UDim2.new(1, -100, 1, 0)
 OverallStatus.ZIndex = BASE_ZINDEX + 3
 
 local ProgressLabel = MakeText(
@@ -524,8 +530,8 @@ local ProgressLabel = MakeText(
 	Enum.Font.GothamMedium
 )
 
-ProgressLabel.Size = UDim2.fromOffset(35, 27)
-ProgressLabel.Position = UDim2.new(1, -64, 0, 0)
+ProgressLabel.Size = UDim2.fromOffset(58, 27)
+ProgressLabel.Position = UDim2.new(1, -86, 0, 0)
 ProgressLabel.TextXAlignment = Enum.TextXAlignment.Right
 ProgressLabel.ZIndex = BASE_ZINDEX + 3
 
@@ -1368,6 +1374,7 @@ MakeDraggable(OpenButton, OpenButton)
 --------------------------------------------------
 
 local StatusExpanded = false
+local UpdateMainWidth
 
 local function UpdateStatusLayout()
 
@@ -1380,20 +1387,21 @@ local function UpdateStatusLayout()
 				1,
 				-16,
 				0,
-				92
+				84
 			)
 
 		TabBar.Position =
 			UDim2.fromOffset(
 				8,
-				160
+				165
 			)
 
-		-- Keep the content and bottom controls separated.
+		-- Expanded status details use extra vertical space instead of
+		-- squeezing the Objects page into an unusable 52-pixel area.
 		Content.Position =
 			UDim2.fromOffset(
 				8,
-				190
+				195
 			)
 
 		Content.Size =
@@ -1401,10 +1409,16 @@ local function UpdateStatusLayout()
 				1,
 				-16,
 				0,
-				57
+				158
 			)
 
+		BottomBar.Position = UDim2.new(0, 8, 1, -34)
+
 		StatusExpand.Text = "▲"
+
+		if UpdateMainWidth then
+			UpdateMainWidth()
+		end
 
 	else
 
@@ -1439,6 +1453,10 @@ local function UpdateStatusLayout()
 			)
 
 		StatusExpand.Text = "▼"
+
+		if UpdateMainWidth then
+			UpdateMainWidth()
+		end
 	end
 end
 
@@ -1455,48 +1473,63 @@ end)
 -- OVERALL STATUS
 --------------------------------------------------
 
-local function UpdateOverallStatus(
-	status,
-	progress
-)
+local function UpdateOverallStatus(status, progress)
+	progress = math.clamp(tonumber(progress) or 0, 0, 100)
 
-	OverallStatus.Text =
-		"● " .. status
+	if status == "ANALYZING" or status == "PROCESSING" then
+		ScanProgress = progress
+	elseif status == "CLASSIFYING" then
+		ClassificationProgress = progress
+	elseif status == "PAUSED" then
+		-- The caller provides the active phase progress when pausing.
+		if ClassificationRunning or ClassificationScheduled then
+			ClassificationProgress = progress
+		else
+			ScanProgress = progress
+		end
+	end
 
-	ProgressLabel.Text =
-		tostring(math.floor(progress))
-		.. "%"
+	OverallStatus.Text = "● " .. status
+
+	local displayProgress = progress
+	if status == "ANALYZING" or status == "PROCESSING" then
+		displayProgress = ScanProgress
+	elseif status == "CLASSIFYING" then
+		displayProgress = ClassificationProgress
+	elseif status == "PAUSED" then
+		displayProgress = (ClassificationRunning or ClassificationScheduled) and ClassificationProgress or ScanProgress
+	end
+
+	local progressText = tostring(math.floor(displayProgress)) .. "%"
+
+	if status == "ANALYZING" or status == "PROCESSING" then
+		progressText = "SCAN " .. progressText
+	elseif status == "CLASSIFYING" then
+		progressText = "CLASS " .. progressText
+	elseif status == "COMPLETE" then
+		progressText = "DONE"
+	elseif status == "PAUSED" then
+		progressText = "PAUSED " .. progressText
+	end
+
+	ProgressLabel.Text = progressText
 
 	if status == "COMPLETE" then
-
-		OverallStatus.TextColor3 =
-			COLORS.Success
-
+		OverallStatus.TextColor3 = COLORS.Success
 	elseif status == "ANALYZING"
 		or status == "PROCESSING"
 		or status == "CLASSIFYING" then
-
-		OverallStatus.TextColor3 =
-			COLORS.Accent
-
+		OverallStatus.TextColor3 = COLORS.Accent
 	elseif status == "PAUSED" then
-
-		OverallStatus.TextColor3 =
-			COLORS.Warning
-
+		OverallStatus.TextColor3 = COLORS.Warning
 	elseif status == "ERROR" then
-
-		OverallStatus.TextColor3 =
-			COLORS.Error
-
+		OverallStatus.TextColor3 = COLORS.Error
+	elseif status == "LIMIT" then
+		OverallStatus.TextColor3 = COLORS.Warning
 	else
-
-		OverallStatus.TextColor3 =
-			COLORS.Muted
-
+		OverallStatus.TextColor3 = COLORS.Muted
 	end
 end
-
 --------------------------------------------------
 -- UPDATE COUNTERS
 --------------------------------------------------
@@ -1812,7 +1845,6 @@ local function ClassifyObject(record)
 	-- Interactive objects.
 	if instance:IsA("ProximityPrompt")
 		or instance:IsA("ClickDetector")
-		or instance:IsA("TouchTransmitter")
 		or instance:IsA("Seat")
 		or instance:IsA("VehicleSeat") then
 
@@ -1993,70 +2025,54 @@ local function UpdateClassificationUI()
 end
 
 local function RunClassification(scanGeneration)
-	if scanGeneration ~= CurrentScan or ClassificationRunning then
+	-- Only the task that owns this generation may change classification state.
+	if scanGeneration ~= CurrentScan then
 		return
 	end
 
-	if #ScanData == 0 then
-		ClassificationRunning = false
-		ClassificationComplete = true
-		UpdateClassificationUI()
+	ClassificationScheduled = false
+
+	if ClassificationRunning then
 		return
 	end
 
 	ClassificationRunning = true
 	ClassificationComplete = false
-	ResetClassification()
+	ClassificationProgress = 0
 
-	local snapshot = table.clone(ScanData)
-	local total = #snapshot
-
-	for index, record in ipairs(snapshot) do
-		if scanGeneration ~= CurrentScan then
-			ClassificationRunning = false
-			return
-		end
-
-		while ScanPaused and scanGeneration == CurrentScan do
-			UpdateOverallStatus("PAUSED", total > 0 and ((index - 1) / total) * 100 or 0)
-			task.wait(0.1)
-		end
-
-		if scanGeneration ~= CurrentScan then
-			ClassificationRunning = false
-			return
-		end
-
-		local category, signals = ClassifyObject(record)
-		ClassificationData[index] = {
-			Instance = record.Instance,
-			Name = record.Name,
-			ClassName = record.ClassName,
-			FullName = record.FullName,
-			Category = category,
-			Signals = signals
-		}
-		ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
-
-		if index % CLASSIFICATION_BATCH_SIZE == 0 or index == total then
-			local progress = total > 0 and (index / total) * 100 or 100
-			UpdateClassificationUI()
-			UpdateOverallStatus("CLASSIFYING", progress)
-			task.wait(CLASSIFICATION_YIELD_TIME)
-		end
+	-- Build into generation-local tables. An old task can therefore never
+	-- write partial classification data into a newer scan's tables.
+	local localData = {}
+	local classifiedInstances = {}
+	local localCounts = {}
+	for _, category in ipairs(ClassificationOrder) do
+		localCounts[category] = 0
 	end
 
-	-- Classify records that were added while this classification pass was running.
-	for _, record in pairs(PendingClassification) do
-		if scanGeneration ~= CurrentScan then
-			ClassificationRunning = false
+	local success, err = pcall(function()
+		local snapshot = table.clone(ScanData)
+		local total = #snapshot
+
+		if total == 0 then
 			return
 		end
 
-		if record and record.Instance and record.Instance.Parent then
+		for index, record in ipairs(snapshot) do
+			if scanGeneration ~= CurrentScan then
+				return
+			end
+
+			while ScanPaused and scanGeneration == CurrentScan do
+				UpdateOverallStatus("PAUSED", ClassificationProgress)
+				task.wait(0.1)
+			end
+
+			if scanGeneration ~= CurrentScan then
+				return
+			end
+
 			local category, signals = ClassifyObject(record)
-			local classificationIndex = #ClassificationData + 1
-			ClassificationData[classificationIndex] = {
+			localData[index] = {
 				Instance = record.Instance,
 				Name = record.Name,
 				ClassName = record.ClassName,
@@ -2064,18 +2080,86 @@ local function RunClassification(scanGeneration)
 				Category = category,
 				Signals = signals
 			}
-			ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
-		end
-	end
-	table.clear(PendingClassification)
+			classifiedInstances[record.Instance] = true
+			localCounts[category] = (localCounts[category] or 0) + 1
 
+			if index % CLASSIFICATION_BATCH_SIZE == 0 or index == total then
+				ClassificationProgress = total > 0 and (index / total) * 100 or 100
+				UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+				task.wait(CLASSIFICATION_YIELD_TIME)
+			end
+		end
+
+		-- Include objects added while classification was running or while it
+		-- was scheduled. The pending table is copied so the task owns its work.
+		local pendingSnapshot = table.clone(PendingClassification)
+
+		for instance, record in pairs(pendingSnapshot) do
+			if scanGeneration ~= CurrentScan then
+				return
+			end
+
+			while ScanPaused and scanGeneration == CurrentScan do
+				UpdateOverallStatus("PAUSED", ClassificationProgress)
+				task.wait(0.1)
+			end
+
+			if scanGeneration ~= CurrentScan then
+				return
+			end
+
+			if not classifiedInstances[instance]
+				and record
+				and record.Instance == instance
+				and instance.Parent
+				and instance:IsDescendantOf(workspace) then
+				local category, signals = ClassifyObject(record)
+				localData[#localData + 1] = {
+					Instance = record.Instance,
+					Name = record.Name,
+					ClassName = record.ClassName,
+					FullName = record.FullName,
+					Category = category,
+					Signals = signals
+				}
+				classifiedInstances[instance] = true
+				localCounts[category] = (localCounts[category] or 0) + 1
+			end
+
+			PendingClassification[instance] = nil
+		end
+	end)
+
+	-- A cancelled generation must not touch state belonging to the new one.
 	if scanGeneration ~= CurrentScan then
-		ClassificationRunning = false
 		return
 	end
 
+	if not success then
+		ClassificationRunning = false
+		ClassificationScheduled = false
+		ClassificationComplete = false
+		ClassificationProgress = 0
+		UpdateClassificationUI()
+		UpdateOverallStatus("ERROR", 0)
+		warn("[Client Game Intelligence Analyzer] Classification error:", err)
+		return
+	end
+
+	-- Commit only after the entire generation completed successfully.
+	table.clear(ClassificationData)
+	for index, data in pairs(localData) do
+		ClassificationData[index] = data
+	end
+
+	for category in pairs(ClassificationCounts) do
+		ClassificationCounts[category] = localCounts[category] or 0
+	end
+
 	ClassificationRunning = false
+	ClassificationScheduled = false
 	ClassificationComplete = true
+	ClassificationProgress = 100
 	UpdateClassificationUI()
 	UpdateOverallStatus("COMPLETE", 100)
 end
@@ -2093,6 +2177,11 @@ local function RunScan()
 	ScanPaused = false
 	CurrentScan += 1
 	local thisScan = CurrentScan
+	ScanProgress = 0
+	ClassificationProgress = 0
+	ClassificationScheduled = false
+	ClassificationRunning = false
+	ClassificationComplete = false
 	ClearScanData()
 
 	UpdateCounters()
@@ -2110,7 +2199,7 @@ local function RunScan()
 		for index, instance in ipairs(descendants) do
 			if thisScan ~= CurrentScan then return end
 			while ScanPaused and thisScan == CurrentScan do
-				UpdateOverallStatus("PAUSED", total > 0 and ((index - 1) / total) * 100 or 0)
+				UpdateOverallStatus("PAUSED", ScanProgress)
 				task.wait(0.1)
 			end
 			if thisScan ~= CurrentScan then return end
@@ -2119,8 +2208,9 @@ local function RunScan()
 				ScanInstance(instance)
 			end
 
-			if index % BATCH_SIZE == 0 then
-				UpdateOverallStatus("ANALYZING", total > 0 and (index / total) * 100 or 100)
+			if index % BATCH_SIZE == 0 or index == total then
+				ScanProgress = total > 0 and (index / total) * 100 or 100
+				UpdateOverallStatus("ANALYZING", ScanProgress)
 				UpdateCounters()
 				SetStatus("Structure", "PROCESSING")
 				SetStatus("Attributes", "PROCESSING")
@@ -2137,6 +2227,11 @@ local function RunScan()
 
 		for instance in pairs(PendingInstances) do
 			if thisScan ~= CurrentScan then return end
+			while ScanPaused and thisScan == CurrentScan do
+				UpdateOverallStatus("PAUSED", ScanProgress)
+				task.wait(0.1)
+			end
+			if thisScan ~= CurrentScan then return end
 			if instance.Parent and instance:IsDescendantOf(workspace) then
 				ScanInstance(instance)
 			end
@@ -2149,7 +2244,8 @@ local function RunScan()
 	end)
 
 	if thisScan ~= CurrentScan then
-		ScanRunning = false
+		-- This task was cancelled by a newer generation. It must never touch
+		-- ScanRunning or classification flags owned by that newer generation.
 		return
 	end
 
@@ -2164,6 +2260,7 @@ local function RunScan()
 		return
 	end
 
+	ScanProgress = 100
 	UpdateCounters()
 	SetStatus("Structure", ScanTruncated and "LIMIT" or "COMPLETE")
 	SetStatus("Attributes", "COMPLETE")
@@ -2171,7 +2268,13 @@ local function RunScan()
 	SetStatus("Values", "COMPLETE")
 	UpdateOverallStatus("COMPLETE", 100)
 
-	task.spawn(function() RunClassification(thisScan) end)
+	-- Mark classification as scheduled before yielding to task.spawn so a
+	-- DescendantAdded event cannot fall into the gap between scan and start.
+	ClassificationScheduled = true
+	ClassificationProgress = 0
+	task.spawn(function()
+		RunClassification(thisScan)
+	end)
 end
 
 --------------------------------------------------
@@ -2179,37 +2282,26 @@ end
 --------------------------------------------------
 
 PauseButton.MouseButton1Click:Connect(function()
-
-	if not ScanRunning and not ClassificationRunning then
+	if not ScanRunning and not ClassificationRunning and not ClassificationScheduled then
 		return
 	end
 
-	ScanPaused =
-		not ScanPaused
+	ScanPaused = not ScanPaused
 
 	if ScanPaused then
-
-		PauseButton.Text =
-			"Resume"
-
-		UpdateOverallStatus(
-			"PAUSED",
-			tonumber(
-				ProgressLabel.Text:match("%d+")
-			) or 0
-		)
-
+		PauseButton.Text = "Resume"
+		if ClassificationRunning or ClassificationScheduled then
+			UpdateOverallStatus("PAUSED", ClassificationProgress)
+		else
+			UpdateOverallStatus("PAUSED", ScanProgress)
+		end
 	else
-
-		PauseButton.Text =
-			"Pause"
-
-		UpdateOverallStatus(
-			"ANALYZING",
-			tonumber(
-				ProgressLabel.Text:match("%d+")
-			) or 0
-		)
+		PauseButton.Text = "Pause"
+		if ClassificationRunning or ClassificationScheduled then
+			UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+		else
+			UpdateOverallStatus("ANALYZING", ScanProgress)
+		end
 	end
 end)
 
@@ -2218,20 +2310,25 @@ end)
 --------------------------------------------------
 
 RescanButton.MouseButton1Click:Connect(function()
-
+	-- Invalidate every task currently running. Old tasks may remain alive until
+	-- their next yield, but their generation no longer matches CurrentScan and
+	-- therefore they cannot modify current-operation flags or data.
 	CurrentScan += 1
-
 	ScanRunning = false
 	ClassificationRunning = false
+	ClassificationScheduled = false
 	ClassificationComplete = false
 	ScanPaused = false
+	ScanProgress = 0
+	ClassificationProgress = 0
 
-	PauseButton.Text =
-		"Pause"
+	table.clear(PendingInstances)
+	table.clear(PendingClassification)
 
-	task.wait()
+	PauseButton.Text = "Pause"
+	UpdateOverallStatus("ANALYZING", 0)
 
-	RunScan()
+	task.defer(RunScan)
 end)
 
 --------------------------------------------------
@@ -2305,15 +2402,25 @@ end)
 workspace.DescendantAdded:Connect(function(instance)
 	local eventScan = CurrentScan
 	task.defer(function()
-		if not instance or not instance.Parent or not instance:IsDescendantOf(workspace) then return end
-		if eventScan ~= CurrentScan then eventScan = CurrentScan end
+		-- A delayed event belongs to the generation that existed when the
+		-- event was received. It must not modify a newer scan.
+		if eventScan ~= CurrentScan then
+			return
+		end
+
+		if not instance or not instance.Parent or not instance:IsDescendantOf(workspace) then
+			return
+		end
 
 		if ScanRunning then
 			PendingInstances[instance] = true
 			return
 		end
 
-		if ScannedInstances[instance] then return end
+		if ScannedInstances[instance] then
+			return
+		end
+
 		if #ScanData >= MAX_RESULTS then
 			ScanTruncated = true
 			UpdateCounters()
@@ -2321,11 +2428,16 @@ workspace.DescendantAdded:Connect(function(instance)
 		end
 
 		local record = ScanInstance(instance)
-		if not record then return end
+		if not record then
+			return
+		end
 		UpdateCounters()
 
-		if ClassificationRunning then
+		-- Classification is considered active from the moment it is scheduled,
+		-- eliminating the scan-to-classification startup race.
+		if ClassificationRunning or ClassificationScheduled then
 			PendingClassification[instance] = record
+			ClassificationComplete = false
 			UpdateClassificationUI()
 		elseif ClassificationComplete then
 			local category, signals = ClassifyObject(record)
@@ -2381,21 +2493,37 @@ local function GetMainWidth()
 	return math.max(280, math.min(345, viewportWidth - 20))
 end
 
-local function UpdateMainWidth()
-	local height = Minimized and 38 or 293
+UpdateMainWidth = function()
+	local height
+	if Minimized then
+		height = 38
+	elseif StatusExpanded then
+		height = 377
+	else
+		height = 293
+	end
 	Main.Size = UDim2.fromOffset(GetMainWidth(), height)
 end
 
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-	if workspace.CurrentCamera then
-		workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateMainWidth)
-	end
-	UpdateMainWidth()
-end)
+local ViewportConnection
+local CameraConnection
 
-if workspace.CurrentCamera then
-	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateMainWidth)
+local function ConnectViewportSize()
+	if ViewportConnection then
+		ViewportConnection:Disconnect()
+		ViewportConnection = nil
+	end
+
+	local camera = workspace.CurrentCamera
+	if camera then
+		ViewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateMainWidth)
+	end
+
+	UpdateMainWidth()
 end
+
+CameraConnection = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(ConnectViewportSize)
+ConnectViewportSize()
 
 --------------------------------------------------
 -- INITIAL STATE
