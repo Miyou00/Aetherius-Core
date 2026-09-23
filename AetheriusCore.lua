@@ -178,6 +178,51 @@ local Statuses = {
 	Values = "WAITING"
 }
 
+
+--------------------------------------------------
+-- PHASE 2.1 -- OBJECT CLASSIFICATION
+--------------------------------------------------
+
+local CLASSIFICATION_BATCH_SIZE = 150
+local CLASSIFICATION_YIELD_TIME = 0.02
+
+local ClassificationData = {}
+
+local ClassificationCounts = {
+	Character = 0,
+	NPC = 0,
+	Player = 0,
+	Tool = 0,
+	UI = 0,
+	Interactive = 0,
+	Item = 0,
+	Container = 0,
+	World = 0,
+	Effect = 0,
+	ValueData = 0,
+	System = 0,
+	Unknown = 0
+}
+
+local ClassificationRunning = false
+local ClassificationComplete = false
+
+local ClassificationOrder = {
+	"Character",
+	"NPC",
+	"Player",
+	"Tool",
+	"UI",
+	"Interactive",
+	"Item",
+	"Container",
+	"World",
+	"Effect",
+	"ValueData",
+	"System",
+	"Unknown"
+}
+
 --------------------------------------------------
 -- SCAN DATA
 --------------------------------------------------
@@ -840,6 +885,41 @@ StructureInfo.TextYAlignment = Enum.TextYAlignment.Top
 StructureInfo.TextWrapped = true
 StructureInfo.ZIndex = BASE_ZINDEX + 3
 
+
+--------------------------------------------------
+-- PHASE 2.1 -- CLASSIFICATION UI
+--------------------------------------------------
+
+local ClassificationTitle = MakeText(
+	ObjectsPage,
+	"Object Classification",
+	10,
+	COLORS.Text,
+	Enum.Font.GothamBold
+)
+
+ClassificationTitle.Position = UDim2.fromOffset(0, 50)
+ClassificationTitle.Size = UDim2.new(1, 0, 0, 18)
+ClassificationTitle.ZIndex = BASE_ZINDEX + 3
+
+local ClassificationScroll = Instance.new("ScrollingFrame")
+ClassificationScroll.Name = "ClassificationScroll"
+ClassificationScroll.Size = UDim2.new(1, 0, 1, -72)
+ClassificationScroll.Position = UDim2.fromOffset(0, 70)
+ClassificationScroll.BackgroundColor3 = COLORS.Panel2
+ClassificationScroll.BorderSizePixel = 0
+ClassificationScroll.ScrollBarThickness = 3
+ClassificationScroll.CanvasSize = UDim2.fromOffset(0, 0)
+ClassificationScroll.ZIndex = BASE_ZINDEX + 2
+ClassificationScroll.Parent = ObjectsPage
+
+Corner(ClassificationScroll, 5)
+
+local ClassificationLayout = Instance.new("UIListLayout")
+ClassificationLayout.Padding = UDim.new(0, 3)
+ClassificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ClassificationLayout.Parent = ClassificationScroll
+
 --------------------------------------------------
 -- PLAYER PAGE
 --------------------------------------------------
@@ -1369,6 +1449,9 @@ local function UpdateCounters()
 		.. "Values stored: "
 		.. tostring(ValueCount)
 		.. "\n\n"
+		.. "Classification: "
+		.. (ClassificationComplete and "COMPLETE" or "WAITING")
+		.. "\n"
 		.. "Maximum stored objects: "
 		.. tostring(MAX_RESULTS)
 end
@@ -1477,6 +1560,333 @@ local function ScanInstance(instance)
 	if instance:IsA("ValueBase") then
 		ValueCount += 1
 	end
+end
+
+--------------------------------------------------
+-- PHASE 2.1 -- CLASSIFICATION HELPERS
+--------------------------------------------------
+
+local function ResetClassification()
+	table.clear(ClassificationData)
+
+	for category in pairs(ClassificationCounts) do
+		ClassificationCounts[category] = 0
+	end
+
+	ClassificationComplete = false
+end
+
+local function AddClassificationSignal(signals, text)
+	if not table.find(signals, text) then
+		table.insert(signals, text)
+	end
+end
+
+local function IsLocalPlayerCharacter(instance)
+	local character = LocalPlayer.Character
+
+	if not character then
+		return false
+	end
+
+	return instance == character or instance:IsDescendantOf(character)
+end
+
+local function HasHumanoidAncestor(instance)
+	local current = instance
+
+	while current and current ~= workspace do
+		if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+			return true
+		end
+
+		current = current.Parent
+	end
+
+	return false
+end
+
+local function NameContainsAny(instance, words)
+	local name = string.lower(instance.Name)
+
+	for _, word in ipairs(words) do
+		if string.find(name, word, 1, true) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function ClassifyObject(record)
+	local instance = record.Instance
+	local signals = {}
+
+	if not instance or not instance.Parent then
+		return "Unknown", {"Instance unavailable"}
+	end
+
+	-- Player character has priority over general character detection.
+	if IsLocalPlayerCharacter(instance) then
+		AddClassificationSignal(signals, "LocalPlayer character hierarchy")
+		return "Player", signals
+	end
+
+	-- Humanoid itself.
+	if instance:IsA("Humanoid") then
+		AddClassificationSignal(signals, "Humanoid")
+		return "Character", signals
+	end
+
+	-- Character/NPC models.
+	if instance:IsA("Model") then
+		local humanoid = instance:FindFirstChildOfClass("Humanoid")
+
+		if humanoid then
+			AddClassificationSignal(signals, "Model contains Humanoid")
+			AddClassificationSignal(signals, "Character-like model")
+			return "NPC", signals
+		end
+	end
+
+	if HasHumanoidAncestor(instance) then
+		AddClassificationSignal(signals, "Inside character hierarchy")
+		return "Character", signals
+	end
+
+	-- Tools.
+	if instance:IsA("Tool") then
+		AddClassificationSignal(signals, "Tool instance")
+		return "Tool", signals
+	end
+
+	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+
+	if backpack and instance:IsDescendantOf(backpack) then
+		AddClassificationSignal(signals, "Inside local Backpack")
+		return "Tool", signals
+	end
+
+	-- UI.
+	if instance:IsA("GuiObject")
+		or instance:IsA("ScreenGui")
+		or instance:IsA("BillboardGui")
+		or instance:IsA("SurfaceGui") then
+
+		AddClassificationSignal(signals, "GUI object")
+		return "UI", signals
+	end
+
+	-- Interactive objects.
+	if instance:IsA("ProximityPrompt")
+		or instance:IsA("ClickDetector")
+		or instance:IsA("TouchTransmitter")
+		or instance:IsA("Seat")
+		or instance:IsA("VehicleSeat") then
+
+		AddClassificationSignal(signals, "Interaction-capable instance")
+		return "Interactive", signals
+	end
+
+	-- Effects.
+	if instance:IsA("ParticleEmitter")
+		or instance:IsA("Trail")
+		or instance:IsA("Beam")
+		or instance:IsA("Smoke")
+		or instance:IsA("Fire")
+		or instance:IsA("Sparkles")
+		or instance:IsA("PointLight")
+		or instance:IsA("SpotLight")
+		or instance:IsA("SurfaceLight")
+		or instance:IsA("Sound") then
+
+		AddClassificationSignal(signals, "Visual/audio effect")
+		return "Effect", signals
+	end
+
+	-- Value/data objects.
+	if instance:IsA("ValueBase") then
+		AddClassificationSignal(signals, "ValueBase")
+		return "ValueData", signals
+	end
+
+	if next(record.Attributes or {}) then
+		AddClassificationSignal(signals, "Has attributes")
+	end
+
+	-- Item-like objects.
+	if NameContainsAny(instance, {
+		"item",
+		"weapon",
+		"sword",
+		"gun",
+		"armor",
+		"gear",
+		"pet",
+		"egg",
+		"coin",
+		"gem",
+		"drop",
+		"loot"
+	}) then
+		AddClassificationSignal(signals, "Item-like name")
+
+		if instance:IsA("Model") or instance:IsA("BasePart") then
+			return "Item", signals
+		end
+	end
+
+	-- System-like objects.
+	if NameContainsAny(instance, {
+		"system",
+		"manager",
+		"controller",
+		"service",
+		"module",
+		"handler",
+		"config",
+		"settings"
+	}) then
+		AddClassificationSignal(signals, "System-like name")
+
+		if instance:IsA("Folder")
+			or instance:IsA("ModuleScript")
+			or instance:IsA("Configuration") then
+
+			return "System", signals
+		end
+	end
+
+	-- Containers.
+	if instance:IsA("Folder")
+		or instance:IsA("Configuration")
+		or instance:IsA("Model") then
+
+		AddClassificationSignal(signals, "Container-like instance")
+		return "Container", signals
+	end
+
+	-- World geometry.
+	if instance:IsA("BasePart")
+		or instance:IsA("Terrain") then
+
+		AddClassificationSignal(signals, "World geometry")
+		return "World", signals
+	end
+
+	AddClassificationSignal(signals, "No strong classification signal")
+
+	return "Unknown", signals
+end
+
+local function CreateClassificationRow(category, count, order)
+	local row = Instance.new("Frame")
+
+	row.Name = category .. "Row"
+	row.Size = UDim2.new(1, -6, 0, 22)
+	row.BackgroundColor3 = COLORS.Panel3
+	row.BorderSizePixel = 0
+	row.LayoutOrder = order
+	row.ZIndex = BASE_ZINDEX + 3
+	row.Parent = ClassificationScroll
+
+	Corner(row, 4)
+
+	local categoryLabel = MakeText(
+		row,
+		category,
+		9,
+		COLORS.Text,
+		Enum.Font.GothamMedium
+	)
+
+	categoryLabel.Position = UDim2.fromOffset(8, 0)
+	categoryLabel.Size = UDim2.new(1, -55, 1, 0)
+	categoryLabel.ZIndex = BASE_ZINDEX + 4
+
+	local countLabel = MakeText(
+		row,
+		tostring(count),
+		9,
+		COLORS.Muted,
+		Enum.Font.GothamBold
+	)
+
+	countLabel.Position = UDim2.new(1, -45, 0, 0)
+	countLabel.Size = UDim2.fromOffset(37, 22)
+	countLabel.TextXAlignment = Enum.TextXAlignment.Right
+	countLabel.ZIndex = BASE_ZINDEX + 4
+end
+
+local function UpdateClassificationUI()
+	for _, child in ipairs(ClassificationScroll:GetChildren()) do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+
+	for order, category in ipairs(ClassificationOrder) do
+		CreateClassificationRow(
+			category,
+			ClassificationCounts[category] or 0,
+			order
+		)
+	end
+
+	task.defer(function()
+		ClassificationScroll.CanvasSize = UDim2.fromOffset(
+			0,
+			ClassificationLayout.AbsoluteContentSize.Y + 6
+		)
+	end)
+end
+
+local function RunClassification()
+	if ClassificationRunning or #ScanData == 0 then
+		return
+	end
+
+	ClassificationRunning = true
+	ClassificationComplete = false
+
+	ResetClassification()
+
+	local total = #ScanData
+
+	for index, record in ipairs(ScanData) do
+		local category, signals = ClassifyObject(record)
+
+		ClassificationData[index] = {
+			Instance = record.Instance,
+			Name = record.Name,
+			ClassName = record.ClassName,
+			FullName = record.FullName,
+			Category = category,
+			Signals = signals
+		}
+
+		ClassificationCounts[category] =
+			(ClassificationCounts[category] or 0) + 1
+
+		if index % CLASSIFICATION_BATCH_SIZE == 0 then
+			local progress = 0
+
+			if total > 0 then
+				progress = (index / total) * 100
+			end
+
+			UpdateOverallStatus("PROCESSING", progress)
+			UpdateClassificationUI()
+
+			task.wait(CLASSIFICATION_YIELD_TIME)
+		end
+	end
+
+	ClassificationRunning = false
+	ClassificationComplete = true
+
+	UpdateClassificationUI()
+	UpdateOverallStatus("COMPLETE", 100)
 end
 
 --------------------------------------------------
@@ -1670,6 +2080,9 @@ local function RunScan()
 		)
 
 		ScanRunning = false
+
+		-- Phase 2.1 processes the completed Phase 1 ScanData.
+		task.spawn(RunClassification)
 	end
 end
 
@@ -1820,6 +2233,7 @@ workspace.DescendantAdded:Connect(function(instance)
 
 			ScanInstance(instance)
 
+			ClassificationComplete = false
 			UpdateCounters()
 
 		end)
@@ -1859,6 +2273,7 @@ ShowPage("Overview")
 UpdateStatusLayout()
 
 UpdateCounters()
+UpdateClassificationUI()
 
 Main.Visible = true
 OpenButton.Visible = false
