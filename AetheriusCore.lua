@@ -433,7 +433,7 @@ Stroke(Main, COLORS.Border, 1)
 local TitleBar = Instance.new("Frame")
 
 TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1, 0, 0, 38)
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
 TitleBar.BackgroundColor3 = COLORS.Panel
 TitleBar.BorderSizePixel = 0
 TitleBar.ZIndex = BASE_ZINDEX + 1
@@ -444,7 +444,7 @@ Corner(TitleBar, 9)
 local Title = MakeText(
 	TitleBar,
 	"Client Game Analyzer",
-	14,
+	12,
 	COLORS.Text,
 	Enum.Font.GothamBold
 )
@@ -482,8 +482,8 @@ CloseButton.ZIndex = BASE_ZINDEX + 2
 StatusHeader = Instance.new("Frame")
 
 StatusHeader.Name = "StatusHeader"
-StatusHeader.Size = UDim2.new(1, -16, 0, 32)
-StatusHeader.Position = UDim2.fromOffset(8, 43)
+StatusHeader.Size = UDim2.new(1, -16, 0, 27)
+StatusHeader.Position = UDim2.fromOffset(8, 36)
 StatusHeader.BackgroundColor3 = COLORS.Panel2
 StatusHeader.BorderSizePixel = 0
 StatusHeader.ZIndex = BASE_ZINDEX + 1
@@ -494,7 +494,7 @@ Corner(StatusHeader, 6)
 local OverallStatus = MakeText(
 	StatusHeader,
 	"● READY",
-	11,
+	9,
 	COLORS.Success,
 	Enum.Font.GothamBold
 )
@@ -511,7 +511,7 @@ local ProgressLabel = MakeText(
 	Enum.Font.GothamMedium
 )
 
-ProgressLabel.Size = UDim2.fromOffset(35, 32)
+ProgressLabel.Size = UDim2.fromOffset(35, 27)
 ProgressLabel.Position = UDim2.new(1, -64, 0, 0)
 ProgressLabel.TextXAlignment = Enum.TextXAlignment.Right
 ProgressLabel.ZIndex = BASE_ZINDEX + 3
@@ -522,8 +522,8 @@ local StatusExpand = MakeButton(
 	9
 )
 
-StatusExpand.Size = UDim2.fromOffset(22, 22)
-StatusExpand.Position = UDim2.new(1, -28, 0.5, -11)
+StatusExpand.Size = UDim2.fromOffset(20, 20)
+StatusExpand.Position = UDim2.new(1, -26, 0.5, -10)
 StatusExpand.BackgroundTransparency = 1
 StatusExpand.ZIndex = BASE_ZINDEX + 3
 
@@ -580,8 +580,8 @@ end
 local TabBar = Instance.new("Frame")
 
 TabBar.Name = "TabBar"
-TabBar.Size = UDim2.new(1, -16, 0, 28)
-TabBar.Position = UDim2.fromOffset(8, 79)
+TabBar.Size = UDim2.new(1, -16, 0, 22)
+TabBar.Position = UDim2.fromOffset(8, 65)
 TabBar.BackgroundTransparency = 1
 TabBar.ZIndex = BASE_ZINDEX + 2
 TabBar.Parent = Main
@@ -591,7 +591,7 @@ local TabLayout = Instance.new("UIListLayout")
 TabLayout.FillDirection = Enum.FillDirection.Horizontal
 TabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 TabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-TabLayout.Padding = UDim.new(0, 3)
+TabLayout.Padding = UDim.new(0, 2)
 TabLayout.Parent = TabBar
 
 --------------------------------------------------
@@ -603,8 +603,8 @@ local Content = Instance.new("Frame")
 Content.Name = "Content"
 
 -- Bottom of Content is deliberately kept above BottomBar.
-Content.Size = UDim2.new(1, -16, 0, 137)
-Content.Position = UDim2.fromOffset(8, 112)
+Content.Size = UDim2.new(1, -16, 0, 158)
+Content.Position = UDim2.fromOffset(8, 91)
 
 Content.BackgroundColor3 = COLORS.Panel
 Content.BorderSizePixel = 0
@@ -622,8 +622,8 @@ local BottomBar = Instance.new("Frame")
 BottomBar.Name = "BottomBar"
 
 -- Dedicated area for the controls.
-BottomBar.Size = UDim2.new(1, -16, 0, 31)
-BottomBar.Position = UDim2.new(0, 8, 1, -39)
+BottomBar.Size = UDim2.new(1, -16, 0, 27)
+BottomBar.Position = UDim2.new(0, 8, 1, -34)
 
 BottomBar.BackgroundTransparency = 1
 BottomBar.ZIndex = BASE_ZINDEX + 5
@@ -670,14 +670,14 @@ for _, name in ipairs(TabNames) do
 	local button = MakeButton(
 		TabBar,
 		name,
-		8
+		7
 	)
 
 	button.Size = UDim2.new(
 		1 / #TabNames,
-		-3,
+		-2,
 		0,
-		26
+		20
 	)
 
 	button.BackgroundColor3 = COLORS.Panel3
@@ -846,23 +846,23 @@ local ObjectsPage = Pages.Objects
 local ObjectsTitle = MakeText(
 	ObjectsPage,
 	"Object Intelligence",
-	13,
+	10,
 	COLORS.Text,
 	Enum.Font.GothamBold
 )
 
-ObjectsTitle.Size = UDim2.new(1, 0, 0, 24)
+ObjectsTitle.Size = UDim2.new(1, 0, 0, 17)
 ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
 local ObjectsSummary = MakeText(
 	ObjectsPage,
-	"Phase 1 structure + Phase 2 classification. Scroll for all categories.",
-	10,
+	"Phase 1 + Phase 2 classification. Scroll for all categories.",
+	8,
 	COLORS.Muted
 )
 
-ObjectsSummary.Position = UDim2.fromOffset(0, 24)
-ObjectsSummary.Size = UDim2.new(1, 0, 0, 20)
+ObjectsSummary.Position = UDim2.fromOffset(0, 16)
+ObjectsSummary.Size = UDim2.new(1, 0, 0, 12)
 ObjectsSummary.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
@@ -876,8 +876,8 @@ local ClassificationModeButton = MakeButton(
 )
 
 ClassificationModeButton.Name = "ClassificationModeButton"
-ClassificationModeButton.Size = UDim2.new(0.5, -3, 0, 24)
-ClassificationModeButton.Position = UDim2.fromOffset(0, 48)
+ClassificationModeButton.Size = UDim2.new(0.5, -2, 0, 18)
+ClassificationModeButton.Position = UDim2.fromOffset(0, 30)
 ClassificationModeButton.ZIndex = BASE_ZINDEX + 10
 
 local StructureModeButton = MakeButton(
@@ -887,8 +887,8 @@ local StructureModeButton = MakeButton(
 )
 
 StructureModeButton.Name = "StructureModeButton"
-StructureModeButton.Size = UDim2.new(0.5, -3, 0, 24)
-StructureModeButton.Position = UDim2.new(0.5, 3, 0, 48)
+StructureModeButton.Size = UDim2.new(0.5, -2, 0, 18)
+StructureModeButton.Position = UDim2.new(0.5, 2, 0, 30)
 StructureModeButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
@@ -897,8 +897,8 @@ StructureModeButton.ZIndex = BASE_ZINDEX + 10
 
 local StructureFrame = Instance.new("Frame")
 StructureFrame.Name = "StructureFrame"
-StructureFrame.Size = UDim2.new(1, 0, 1, -78)
-StructureFrame.Position = UDim2.fromOffset(0, 78)
+StructureFrame.Size = UDim2.new(1, 0, 1, -52)
+StructureFrame.Position = UDim2.fromOffset(0, 52)
 StructureFrame.BackgroundColor3 = COLORS.Panel2
 StructureFrame.BorderSizePixel = 0
 StructureFrame.ZIndex = BASE_ZINDEX + 2
@@ -908,7 +908,7 @@ Corner(StructureFrame, 5)
 local StructureLabel = MakeText(
 	StructureFrame,
 	"Structure summary",
-	10,
+	9,
 	COLORS.Text,
 	Enum.Font.GothamBold
 )
@@ -920,7 +920,7 @@ StructureLabel.ZIndex = BASE_ZINDEX + 3
 local StructureInfo = MakeText(
 	StructureFrame,
 	"Waiting for scan...",
-	10,
+	8,
 	COLORS.Muted
 )
 
@@ -937,8 +937,8 @@ StructureInfo.ZIndex = BASE_ZINDEX + 3
 local ClassificationFrame = Instance.new("Frame")
 
 ClassificationFrame.Name = "ClassificationFrame"
-ClassificationFrame.Size = UDim2.new(1, 0, 1, -78)
-ClassificationFrame.Position = UDim2.fromOffset(0, 78)
+ClassificationFrame.Size = UDim2.new(1, 0, 1, -52)
+ClassificationFrame.Position = UDim2.fromOffset(0, 52)
 ClassificationFrame.BackgroundColor3 = COLORS.Panel2
 ClassificationFrame.BorderSizePixel = 0
 ClassificationFrame.ZIndex = BASE_ZINDEX + 2
@@ -949,8 +949,8 @@ Corner(ClassificationFrame, 5)
 -- Use the full available area for the classification list.
 local ClassificationScroll = Instance.new("ScrollingFrame")
 ClassificationScroll.Name = "ClassificationScroll"
-ClassificationScroll.Size = UDim2.new(1, -10, 1, -8)
-ClassificationScroll.Position = UDim2.fromOffset(5, 4)
+ClassificationScroll.Size = UDim2.new(1, -8, 1, -8)
+ClassificationScroll.Position = UDim2.fromOffset(4, 4)
 ClassificationScroll.BackgroundTransparency = 1
 ClassificationScroll.BorderSizePixel = 0
 ClassificationScroll.ScrollBarThickness = 3
@@ -960,8 +960,8 @@ ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
 local ClassificationLayout = Instance.new("UIGridLayout")
-ClassificationLayout.CellPadding = UDim2.fromOffset(4, 3)
-ClassificationLayout.CellSize = UDim2.new(0.5, -2, 0, 18)
+ClassificationLayout.CellPadding = UDim2.fromOffset(3, 1)
+ClassificationLayout.CellSize = UDim2.new(0.5, -2, 0, 14)
 ClassificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
 ClassificationLayout.Parent = ClassificationScroll
 
@@ -1373,14 +1373,14 @@ local function UpdateStatusLayout()
 		TabBar.Position =
 			UDim2.fromOffset(
 				8,
-				177
+				160
 			)
 
 		-- Keep the content and bottom controls separated.
 		Content.Position =
 			UDim2.fromOffset(
 				8,
-				210
+				190
 			)
 
 		Content.Size =
@@ -1388,7 +1388,7 @@ local function UpdateStatusLayout()
 				1,
 				-16,
 				0,
-				37
+				57
 			)
 
 		StatusExpand.Text = "▲"
@@ -1408,13 +1408,13 @@ local function UpdateStatusLayout()
 		TabBar.Position =
 			UDim2.fromOffset(
 				8,
-				79
+				65
 			)
 
 		Content.Position =
 			UDim2.fromOffset(
 				8,
-				112
+				91
 			)
 
 		Content.Size =
@@ -1422,7 +1422,7 @@ local function UpdateStatusLayout()
 				1,
 				-16,
 				0,
-				137
+				158
 			)
 
 		StatusExpand.Text = "▼"
@@ -1873,7 +1873,7 @@ local function CreateClassificationRow(category, count, order)
 	local categoryLabel = MakeText(
 		row,
 		category,
-		9,
+		8,
 		COLORS.Text,
 		Enum.Font.GothamMedium
 	)
@@ -1885,12 +1885,12 @@ local function CreateClassificationRow(category, count, order)
 	local countLabel = MakeText(
 		row,
 		tostring(count),
-		9,
+		8,
 		COLORS.Muted,
 		Enum.Font.GothamBold
 	)
 	countLabel.Position = UDim2.new(1, -34, 0, 0)
-	countLabel.Size = UDim2.fromOffset(29, 18)
+	countLabel.Size = UDim2.fromOffset(29, 14)
 	countLabel.TextXAlignment = Enum.TextXAlignment.Right
 	countLabel.ZIndex = BASE_ZINDEX + 4
 end
