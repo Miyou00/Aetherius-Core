@@ -845,7 +845,7 @@ local ObjectsPage = Pages.Objects
 
 local ObjectsTitle = MakeText(
 	ObjectsPage,
-	"Object Structure",
+	"Object Intelligence",
 	13,
 	COLORS.Text,
 	Enum.Font.GothamBold
@@ -856,7 +856,7 @@ ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
 local ObjectsSummary = MakeText(
 	ObjectsPage,
-	"Collected objects are stored internally for later analysis.",
+	"Phase 1 structure + Phase 2 classification.",
 	10,
 	COLORS.Muted
 )
@@ -865,15 +865,44 @@ ObjectsSummary.Position = UDim2.fromOffset(0, 24)
 ObjectsSummary.Size = UDim2.new(1, 0, 0, 20)
 ObjectsSummary.ZIndex = BASE_ZINDEX + 3
 
-local StructureFrame = Instance.new("Frame")
+--------------------------------------------------
+-- OBJECT VIEW SWITCH
+--------------------------------------------------
 
-StructureFrame.Size = UDim2.new(1, 0, 1, -50)
-StructureFrame.Position = UDim2.fromOffset(0, 50)
+local ClassificationModeButton = MakeButton(
+	ObjectsPage,
+	"Classification",
+	9
+)
+
+ClassificationModeButton.Name = "ClassificationModeButton"
+ClassificationModeButton.Size = UDim2.new(0.5, -3, 0, 24)
+ClassificationModeButton.Position = UDim2.fromOffset(0, 48)
+ClassificationModeButton.ZIndex = BASE_ZINDEX + 10
+
+local StructureModeButton = MakeButton(
+	ObjectsPage,
+	"Structure",
+	9
+)
+
+StructureModeButton.Name = "StructureModeButton"
+StructureModeButton.Size = UDim2.new(0.5, -3, 0, 24)
+StructureModeButton.Position = UDim2.new(0.5, 3, 0, 48)
+StructureModeButton.ZIndex = BASE_ZINDEX + 10
+
+--------------------------------------------------
+-- STRUCTURE VIEW
+--------------------------------------------------
+
+local StructureFrame = Instance.new("Frame")
+StructureFrame.Name = "StructureFrame"
+StructureFrame.Size = UDim2.new(1, 0, 1, -78)
+StructureFrame.Position = UDim2.fromOffset(0, 78)
 StructureFrame.BackgroundColor3 = COLORS.Panel2
 StructureFrame.BorderSizePixel = 0
 StructureFrame.ZIndex = BASE_ZINDEX + 2
 StructureFrame.Parent = ObjectsPage
-
 Corner(StructureFrame, 5)
 
 local StructureLabel = MakeText(
@@ -901,40 +930,92 @@ StructureInfo.TextYAlignment = Enum.TextYAlignment.Top
 StructureInfo.TextWrapped = true
 StructureInfo.ZIndex = BASE_ZINDEX + 3
 
+--------------------------------------------------
+-- CLASSIFICATION VIEW
+--------------------------------------------------
 
---------------------------------------------------
--- PHASE 2.1 -- CLASSIFICATION UI
---------------------------------------------------
+local ClassificationFrame = Instance.new("Frame")
+ClassificationFrame.Name = "ClassificationFrame"
+ClassificationFrame.Size = UDim2.new(1, 0, 1, -78)
+ClassificationFrame.Position = UDim2.fromOffset(0, 78)
+ClassificationFrame.BackgroundColor3 = COLORS.Panel2
+ClassificationFrame.BorderSizePixel = 0
+ClassificationFrame.ZIndex = BASE_ZINDEX + 2
+ClassificationFrame.Parent = ObjectsPage
+Corner(ClassificationFrame, 5)
 
 local ClassificationTitle = MakeText(
-	ObjectsPage,
+	ClassificationFrame,
 	"Object Classification",
 	10,
 	COLORS.Text,
 	Enum.Font.GothamBold
 )
 
-ClassificationTitle.Position = UDim2.fromOffset(0, 50)
-ClassificationTitle.Size = UDim2.new(1, 0, 0, 18)
+ClassificationTitle.Position = UDim2.fromOffset(9, 6)
+ClassificationTitle.Size = UDim2.new(0.55, 0, 0, 20)
 ClassificationTitle.ZIndex = BASE_ZINDEX + 3
+
+local ClassificationStatus = MakeText(
+	ClassificationFrame,
+	"Waiting for classification...",
+	9,
+	COLORS.Muted
+)
+
+ClassificationStatus.Position = UDim2.new(0.55, 0, 0, 6)
+ClassificationStatus.Size = UDim2.new(0.45, -9, 0, 20)
+ClassificationStatus.TextXAlignment = Enum.TextXAlignment.Right
+ClassificationStatus.ZIndex = BASE_ZINDEX + 3
 
 local ClassificationScroll = Instance.new("ScrollingFrame")
 ClassificationScroll.Name = "ClassificationScroll"
-ClassificationScroll.Size = UDim2.new(1, 0, 1, -72)
-ClassificationScroll.Position = UDim2.fromOffset(0, 70)
-ClassificationScroll.BackgroundColor3 = COLORS.Panel2
+ClassificationScroll.Size = UDim2.new(1, -12, 1, -34)
+ClassificationScroll.Position = UDim2.fromOffset(6, 30)
+ClassificationScroll.BackgroundTransparency = 1
 ClassificationScroll.BorderSizePixel = 0
 ClassificationScroll.ScrollBarThickness = 3
 ClassificationScroll.CanvasSize = UDim2.fromOffset(0, 0)
 ClassificationScroll.ZIndex = BASE_ZINDEX + 2
-ClassificationScroll.Parent = ObjectsPage
-
-Corner(ClassificationScroll, 5)
+ClassificationScroll.Parent = ClassificationFrame
 
 local ClassificationLayout = Instance.new("UIListLayout")
 ClassificationLayout.Padding = UDim.new(0, 3)
 ClassificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
 ClassificationLayout.Parent = ClassificationScroll
+
+local ObjectsPageMode = "Classification"
+
+local function UpdateObjectsPageMode()
+	local showingClassification = ObjectsPageMode == "Classification"
+
+	ClassificationFrame.Visible = showingClassification
+	StructureFrame.Visible = not showingClassification
+
+	if showingClassification then
+		ClassificationModeButton.BackgroundColor3 = COLORS.Accent
+		ClassificationModeButton.TextColor3 = Color3.new(1, 1, 1)
+		StructureModeButton.BackgroundColor3 = COLORS.Panel3
+		StructureModeButton.TextColor3 = COLORS.Text
+	else
+		StructureModeButton.BackgroundColor3 = COLORS.Accent
+		StructureModeButton.TextColor3 = Color3.new(1, 1, 1)
+		ClassificationModeButton.BackgroundColor3 = COLORS.Panel3
+		ClassificationModeButton.TextColor3 = COLORS.Text
+	end
+end
+
+ClassificationModeButton.MouseButton1Click:Connect(function()
+	ObjectsPageMode = "Classification"
+	UpdateObjectsPageMode()
+end)
+
+StructureModeButton.MouseButton1Click:Connect(function()
+	ObjectsPageMode = "Structure"
+	UpdateObjectsPageMode()
+end)
+
+UpdateObjectsPageMode()
 
 --------------------------------------------------
 -- PLAYER PAGE
@@ -1835,6 +1916,14 @@ local function CreateClassificationRow(category, count, order)
 end
 
 local function UpdateClassificationUI()
+	if ClassificationComplete then
+		ClassificationStatus.Text = "COMPLETE"
+	elseif ClassificationRunning then
+		ClassificationStatus.Text = "CLASSIFYING..."
+	else
+		ClassificationStatus.Text = "WAITING"
+	end
+
 	for _, child in ipairs(ClassificationScroll:GetChildren()) do
 		if not child:IsA("UIListLayout") then
 			child:Destroy()
@@ -2250,6 +2339,7 @@ workspace.DescendantAdded:Connect(function(instance)
 			ScanInstance(instance)
 
 			ClassificationComplete = false
+			UpdateClassificationUI()
 			UpdateCounters()
 
 		end)
