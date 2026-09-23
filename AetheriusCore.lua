@@ -2069,7 +2069,10 @@ local function RunClassification(scanGeneration)
 		local total = #snapshot
 
 		if total == 0 then
-			return
+			-- There may still be live objects waiting in PendingClassification.
+			-- Do not exit early; allow the pending-drain loop below to run.
+			ClassificationProgress = 90
+			UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
 		end
 
 		for index, record in ipairs(snapshot) do
@@ -2110,7 +2113,7 @@ local function RunClassification(scanGeneration)
 		-- snapshot repeatedly until there is no pending work left. This closes
 		-- the race where an object is added after the first pending snapshot.
 		local pendingProcessed = 0
-		local pendingStartProgress = total > 0 and 90 or 0
+		local pendingStartProgress = 90
 
 		while next(PendingClassification) do
 			if scanGeneration ~= CurrentScan then
