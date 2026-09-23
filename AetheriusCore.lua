@@ -223,6 +223,13 @@ local ClassificationCounts = {
 local ClassificationRunning = false
 local ClassificationComplete = false
 
+local PendingInstances = {}
+local PendingClassification = {}
+local ScannedInstances = {}
+local ScanTruncated = false
+
+local ResetClassification
+
 local ClassificationOrder = {
 	"Character",
 	"NPC",
@@ -245,11 +252,17 @@ local ClassificationOrder = {
 
 local function ClearScanData()
 	table.clear(ScanData)
+	table.clear(PendingInstances)
+	table.clear(PendingClassification)
+	table.clear(ScannedInstances)
 
 	ObjectCount = 0
 	AttributeCount = 0
 	TagCount = 0
 	ValueCount = 0
+	ScanTruncated = false
+
+	ResetClassification()
 end
 
 local function SafeFullName(instance)
@@ -1519,20 +1532,23 @@ local function UpdateCounters()
 		"Objects stored: "
 		.. tostring(ObjectCount)
 		.. "\n"
-		.. "Attributes stored: "
+		.. "Attributes scanned: "
 		.. tostring(AttributeCount)
 		.. "\n"
-		.. "Tags stored: "
+		.. "Tags scanned: "
 		.. tostring(TagCount)
 		.. "\n"
-		.. "Values stored: "
+		.. "Values detected: "
 		.. tostring(ValueCount)
 		.. "\n\n"
 		.. "Classification: "
 		.. (ClassificationComplete and "COMPLETE" or "WAITING")
 		.. "\n"
-		.. "Maximum stored objects: "
+		.. "Stored object limit: "
 		.. tostring(MAX_RESULTS)
+		.. "\n"
+		.. "Scan limit status: "
+		.. (ScanTruncated and "TRUNCATED" or "FULL")
 end
 
 --------------------------------------------------
@@ -1541,8 +1557,21 @@ end
 
 local function ScanInstance(instance)
 
+	if not instance or not instance.Parent then
+		return nil
+	end
+
+	if not instance:IsDescendantOf(workspace) then
+		return nil
+	end
+
+	if ScannedInstances[instance] then
+		return ScannedInstances[instance]
+	end
+
 	if #ScanData >= MAX_RESULTS then
-		return
+		ScanTruncated = true
+		return nil
 	end
 
 	local attributes =
@@ -1639,13 +1668,16 @@ local function ScanInstance(instance)
 	if instance:IsA("ValueBase") then
 		ValueCount += 1
 	end
+
+	ScannedInstances[instance] = record
+	return record
 end
 
 --------------------------------------------------
 -- PHASE 2.1 -- CLASSIFICATION HELPERS
 --------------------------------------------------
 
-local function ResetClassification()
+ResetClassification = function()
 	table.clear(ClassificationData)
 
 	for category in pairs(ClassificationCounts) do
@@ -1705,10 +1737,31 @@ local function ClassifyObject(record)
 		return "Unknown", {"Instance unavailable"}
 	end
 
-	-- Player character has priority over general character detection.
+	-- Keep Player for the character model itself. Specific descendants retain
+	-- their more useful categories.
 	if IsLocalPlayerCharacter(instance) then
-		AddClassificationSignal(signals, "LocalPlayer character hierarchy")
-		return "Player", signals
+		local character = LocalPlayer.Character
+		if instance == character then
+			AddClassificationSignal(signals, "LocalPlayer character")
+			return "Player", signals
+		end
+		if instance:IsA("Tool") then
+			AddClassificationSignal(signals, "Tool inside local character")
+			return "Tool", signals
+		end
+		if instance:IsA("GuiObject") or instance:IsA("BillboardGui") or instance:IsA("SurfaceGui") then
+			AddClassificationSignal(signals, "UI inside local character")
+			return "UI", signals
+		end
+		if instance:IsA("ParticleEmitter") or instance:IsA("Trail") or instance:IsA("Beam")
+			or instance:IsA("Smoke") or instance:IsA("Fire") or instance:IsA("Sparkles")
+			or instance:IsA("PointLight") or instance:IsA("SpotLight") or instance:IsA("SurfaceLight")
+			or instance:IsA("Sound") then
+			AddClassificationSignal(signals, "Effect inside local character")
+			return "Effect", signals
+		end
+		AddClassificationSignal(signals, "Inside local player character")
+		return "Character", signals
 	end
 
 	-- Humanoid itself.
@@ -1939,25 +1992,42 @@ local function UpdateClassificationUI()
 	)
 end
 
-local function RunClassification()
-	if ClassificationRunning or #ScanData == 0 then
+local function RunClassification(scanGeneration)
+	if scanGeneration ~= CurrentScan or ClassificationRunning then
+		return
+	end
+
+	if #ScanData == 0 then
+		ClassificationRunning = false
+		ClassificationComplete = true
+		UpdateClassificationUI()
 		return
 	end
 
 	ClassificationRunning = true
 	ClassificationComplete = false
-
 	ResetClassification()
 
-	local total = #ScanData
+	local snapshot = table.clone(ScanData)
+	local total = #snapshot
 
-	-- Phase 1 scanning has already reached 100%. Keep that progress visible
-	-- while Phase 2 classification runs instead of restarting the bar at 0%.
-	UpdateOverallStatus("CLASSIFYING", 100)
+	for index, record in ipairs(snapshot) do
+		if scanGeneration ~= CurrentScan then
+			ClassificationRunning = false
+			return
+		end
 
-	for index, record in ipairs(ScanData) do
+		while ScanPaused and scanGeneration == CurrentScan do
+			UpdateOverallStatus("PAUSED", total > 0 and ((index - 1) / total) * 100 or 0)
+			task.wait(0.1)
+		end
+
+		if scanGeneration ~= CurrentScan then
+			ClassificationRunning = false
+			return
+		end
+
 		local category, signals = ClassifyObject(record)
-
 		ClassificationData[index] = {
 			Instance = record.Instance,
 			Name = record.Name,
@@ -1966,19 +2036,46 @@ local function RunClassification()
 			Category = category,
 			Signals = signals
 		}
+		ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
 
-		ClassificationCounts[category] =
-			(ClassificationCounts[category] or 0) + 1
-
-		if index % CLASSIFICATION_BATCH_SIZE == 0 then
+		if index % CLASSIFICATION_BATCH_SIZE == 0 or index == total then
+			local progress = total > 0 and (index / total) * 100 or 100
 			UpdateClassificationUI()
+			UpdateOverallStatus("CLASSIFYING", progress)
 			task.wait(CLASSIFICATION_YIELD_TIME)
 		end
 	end
 
+	-- Classify records that were added while this classification pass was running.
+	for _, record in pairs(PendingClassification) do
+		if scanGeneration ~= CurrentScan then
+			ClassificationRunning = false
+			return
+		end
+
+		if record and record.Instance and record.Instance.Parent then
+			local category, signals = ClassifyObject(record)
+			local classificationIndex = #ClassificationData + 1
+			ClassificationData[classificationIndex] = {
+				Instance = record.Instance,
+				Name = record.Name,
+				ClassName = record.ClassName,
+				FullName = record.FullName,
+				Category = category,
+				Signals = signals
+			}
+			ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
+		end
+	end
+	table.clear(PendingClassification)
+
+	if scanGeneration ~= CurrentScan then
+		ClassificationRunning = false
+		return
+	end
+
 	ClassificationRunning = false
 	ClassificationComplete = true
-
 	UpdateClassificationUI()
 	UpdateOverallStatus("COMPLETE", 100)
 end
@@ -1988,196 +2085,93 @@ end
 --------------------------------------------------
 
 local function RunScan()
-
 	if ScanRunning then
 		return
 	end
 
 	ScanRunning = true
 	ScanPaused = false
-
 	CurrentScan += 1
-
-	local thisScan =
-		CurrentScan
-
+	local thisScan = CurrentScan
 	ClearScanData()
 
 	UpdateCounters()
+	SetStatus("Structure", "RUNNING")
+	SetStatus("Attributes", "RUNNING")
+	SetStatus("Tags", "RUNNING")
+	SetStatus("Values", "RUNNING")
+	UpdateOverallStatus("ANALYZING", 0)
+	PauseButton.Text = "Pause"
 
-	SetStatus(
-		"Structure",
-		"RUNNING"
-	)
+	local success, err = pcall(function()
+		local descendants = workspace:GetDescendants()
+		local total = #descendants
 
-	SetStatus(
-		"Attributes",
-		"RUNNING"
-	)
+		for index, instance in ipairs(descendants) do
+			if thisScan ~= CurrentScan then return end
+			while ScanPaused and thisScan == CurrentScan do
+				UpdateOverallStatus("PAUSED", total > 0 and ((index - 1) / total) * 100 or 0)
+				task.wait(0.1)
+			end
+			if thisScan ~= CurrentScan then return end
 
-	SetStatus(
-		"Tags",
-		"RUNNING"
-	)
-
-	SetStatus(
-		"Values",
-		"RUNNING"
-	)
-
-	UpdateOverallStatus(
-		"ANALYZING",
-		0
-	)
-
-	PauseButton.Text =
-		"Pause"
-
-	local descendants =
-		workspace:GetDescendants()
-
-	local total =
-		#descendants
-
-	for index, instance
-		in ipairs(descendants) do
-
-		if thisScan ~= CurrentScan then
-			break
-		end
-
-		while ScanPaused
-			and thisScan == CurrentScan do
-
-			local progress = 0
-
-			if total > 0 then
-
-				progress =
-					(index / total)
-					* 100
-
+			if instance.Parent and instance:IsDescendantOf(workspace) then
+				ScanInstance(instance)
 			end
 
-			UpdateOverallStatus(
-				"PAUSED",
-				progress
-			)
-
-			SetStatus(
-				"Structure",
-				"PAUSED"
-			)
-
-			SetStatus(
-				"Attributes",
-				"PAUSED"
-			)
-
-			SetStatus(
-				"Tags",
-				"PAUSED"
-			)
-
-			SetStatus(
-				"Values",
-				"PAUSED"
-			)
-
-			task.wait(0.1)
-		end
-
-		if thisScan ~= CurrentScan then
-			break
-		end
-
-		ScanInstance(instance)
-
-		if index % BATCH_SIZE == 0 then
-
-			local progress = 0
-
-			if total > 0 then
-
-				progress =
-					(index / total)
-					* 100
-
+			if index % BATCH_SIZE == 0 then
+				UpdateOverallStatus("ANALYZING", total > 0 and (index / total) * 100 or 100)
+				UpdateCounters()
+				SetStatus("Structure", "PROCESSING")
+				SetStatus("Attributes", "PROCESSING")
+				SetStatus("Tags", "PROCESSING")
+				SetStatus("Values", "PROCESSING")
+				task.wait(YIELD_TIME)
 			end
 
-			UpdateOverallStatus(
-				"ANALYZING",
-				progress
-			)
-
-			UpdateCounters()
-
-			SetStatus(
-				"Structure",
-				"PROCESSING"
-			)
-
-			SetStatus(
-				"Attributes",
-				"PROCESSING"
-			)
-
-			SetStatus(
-				"Tags",
-				"PROCESSING"
-			)
-
-			SetStatus(
-				"Values",
-				"PROCESSING"
-			)
-
-			task.wait(
-				YIELD_TIME
-			)
+			if #ScanData >= MAX_RESULTS then
+				ScanTruncated = index < total or #descendants > MAX_RESULTS
+				break
+			end
 		end
 
-		if #ScanData >=
-			MAX_RESULTS then
-
-			break
+		for instance in pairs(PendingInstances) do
+			if thisScan ~= CurrentScan then return end
+			if instance.Parent and instance:IsDescendantOf(workspace) then
+				ScanInstance(instance)
+			end
+			PendingInstances[instance] = nil
+			if #ScanData >= MAX_RESULTS then
+				ScanTruncated = true
+				break
+			end
 		end
-	end
+	end)
 
-	if thisScan == CurrentScan then
-
-		UpdateCounters()
-
-		SetStatus(
-			"Structure",
-			"COMPLETE"
-		)
-
-		SetStatus(
-			"Attributes",
-			"COMPLETE"
-		)
-
-		SetStatus(
-			"Tags",
-			"COMPLETE"
-		)
-
-		SetStatus(
-			"Values",
-			"COMPLETE"
-		)
-
-		UpdateOverallStatus(
-			"COMPLETE",
-			100
-		)
-
+	if thisScan ~= CurrentScan then
 		ScanRunning = false
-
-		-- Phase 2.1 processes the completed Phase 1 ScanData.
-		task.spawn(RunClassification)
+		return
 	end
+
+	ScanRunning = false
+	if not success then
+		SetStatus("Structure", "ERROR")
+		SetStatus("Attributes", "ERROR")
+		SetStatus("Tags", "ERROR")
+		SetStatus("Values", "ERROR")
+		UpdateOverallStatus("ERROR", 0)
+		warn("[Client Game Intelligence Analyzer] Scan error:", err)
+		return
+	end
+
+	UpdateCounters()
+	SetStatus("Structure", ScanTruncated and "LIMIT" or "COMPLETE")
+	SetStatus("Attributes", "COMPLETE")
+	SetStatus("Tags", "COMPLETE")
+	SetStatus("Values", "COMPLETE")
+	UpdateOverallStatus("COMPLETE", 100)
+
+	task.spawn(function() RunClassification(thisScan) end)
 end
 
 --------------------------------------------------
@@ -2186,7 +2180,7 @@ end
 
 PauseButton.MouseButton1Click:Connect(function()
 
-	if not ScanRunning then
+	if not ScanRunning and not ClassificationRunning then
 		return
 	end
 
@@ -2228,6 +2222,8 @@ RescanButton.MouseButton1Click:Connect(function()
 	CurrentScan += 1
 
 	ScanRunning = false
+	ClassificationRunning = false
+	ClassificationComplete = false
 	ScanPaused = false
 
 	PauseButton.Text =
@@ -2251,11 +2247,7 @@ MinimizeButton.MouseButton1Click:Connect(function()
 
 	if Minimized then
 
-		Main.Size =
-			UDim2.fromOffset(
-				345,
-				38
-			)
+		UpdateMainWidth()
 
 		StatusHeader.Visible = false
 		StatusDetails.Visible = false
@@ -2268,11 +2260,7 @@ MinimizeButton.MouseButton1Click:Connect(function()
 
 	else
 
-		Main.Size =
-			UDim2.fromOffset(
-				345,
-				293
-			)
+		UpdateMainWidth()
 
 		StatusHeader.Visible = true
 		TabBar.Visible = true
@@ -2315,24 +2303,48 @@ end)
 --------------------------------------------------
 
 workspace.DescendantAdded:Connect(function(instance)
+	local eventScan = CurrentScan
+	task.defer(function()
+		if not instance or not instance.Parent or not instance:IsDescendantOf(workspace) then return end
+		if eventScan ~= CurrentScan then eventScan = CurrentScan end
 
-	if not ScanRunning
-		and #ScanData < MAX_RESULTS then
+		if ScanRunning then
+			PendingInstances[instance] = true
+			return
+		end
 
-		task.defer(function()
+		if ScannedInstances[instance] then return end
+		if #ScanData >= MAX_RESULTS then
+			ScanTruncated = true
+			UpdateCounters()
+			return
+		end
 
-			if not instance.Parent then
-				return
-			end
+		local record = ScanInstance(instance)
+		if not record then return end
+		UpdateCounters()
 
-			ScanInstance(instance)
-
+		if ClassificationRunning then
+			PendingClassification[instance] = record
+			UpdateClassificationUI()
+		elseif ClassificationComplete then
+			local category, signals = ClassifyObject(record)
+			local classificationIndex = #ClassificationData + 1
+			ClassificationData[classificationIndex] = {
+				Instance = record.Instance,
+				Name = record.Name,
+				ClassName = record.ClassName,
+				FullName = record.FullName,
+				Category = category,
+				Signals = signals
+			}
+			ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
+			UpdateClassificationUI()
+		else
 			ClassificationComplete = false
 			UpdateClassificationUI()
-			UpdateCounters()
-
-		end)
-	end
+		end
+	end)
 end)
 
 --------------------------------------------------
@@ -2360,12 +2372,39 @@ task.spawn(function()
 end)
 
 --------------------------------------------------
+-- RESPONSIVE MAIN WIDTH
+--------------------------------------------------
+
+local function GetMainWidth()
+	local camera = workspace.CurrentCamera
+	local viewportWidth = camera and camera.ViewportSize.X or 390
+	return math.max(280, math.min(345, viewportWidth - 20))
+end
+
+local function UpdateMainWidth()
+	local height = Minimized and 38 or 293
+	Main.Size = UDim2.fromOffset(GetMainWidth(), height)
+end
+
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	if workspace.CurrentCamera then
+		workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateMainWidth)
+	end
+	UpdateMainWidth()
+end)
+
+if workspace.CurrentCamera then
+	workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateMainWidth)
+end
+
+--------------------------------------------------
 -- INITIAL STATE
 --------------------------------------------------
 
 ShowPage("Overview")
 
 UpdateStatusLayout()
+UpdateMainWidth()
 
 UpdateCounters()
 UpdateClassificationUI()
