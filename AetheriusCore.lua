@@ -959,11 +959,11 @@ ClassificationScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
-local ClassificationLayout = Instance.new("UIGridLayout")
-ClassificationLayout.CellPadding = UDim2.fromOffset(3, 1)
-ClassificationLayout.CellSize = UDim2.new(0.5, -2, 0, 14)
-ClassificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ClassificationLayout.Parent = ClassificationScroll
+-- Rows are positioned manually so the compact mobile layout
+-- remains visible reliably on all screen sizes.
+local ClassificationRowHeight = 16
+local ClassificationRowGap = 2
+local ClassificationColumnGap = 4
 
 local ObjectsPageMode = "Classification"
 
@@ -1861,14 +1861,23 @@ local function CreateClassificationRow(category, count, order)
 	local row = Instance.new("Frame")
 
 	row.Name = category .. "Row"
-	row.Size = UDim2.new(0, 0, 0, 0)
+	row.Size = UDim2.new(0.5, -2, 0, ClassificationRowHeight)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
-	row.LayoutOrder = order
 	row.ZIndex = BASE_ZINDEX + 3
 	row.Parent = ClassificationScroll
 
-	Corner(row, 4)
+	local column = (order - 1) % 2
+	local rowIndex = math.floor((order - 1) / 2)
+
+	row.Position = UDim2.new(
+		column * 0.5,
+		column == 0 and 0 or ClassificationColumnGap / 2,
+		0,
+		rowIndex * (ClassificationRowHeight + ClassificationRowGap)
+	)
+
+	Corner(row, 3)
 
 	local categoryLabel = MakeText(
 		row,
@@ -1878,8 +1887,9 @@ local function CreateClassificationRow(category, count, order)
 		Enum.Font.GothamMedium
 	)
 
-	categoryLabel.Position = UDim2.fromOffset(8, 0)
-	categoryLabel.Size = UDim2.new(1, -38, 1, 0)
+	categoryLabel.Position = UDim2.fromOffset(6, 0)
+	categoryLabel.Size = UDim2.new(1, -34, 1, 0)
+	categoryLabel.TextYAlignment = Enum.TextYAlignment.Center
 	categoryLabel.ZIndex = BASE_ZINDEX + 4
 
 	local countLabel = MakeText(
@@ -1889,19 +1899,52 @@ local function CreateClassificationRow(category, count, order)
 		COLORS.Muted,
 		Enum.Font.GothamBold
 	)
-	countLabel.Position = UDim2.new(1, -34, 0, 0)
-	countLabel.Size = UDim2.fromOffset(29, 14)
+
+	countLabel.Position = UDim2.new(1, -29, 0, 0)
+	countLabel.Size = UDim2.fromOffset(25, ClassificationRowHeight)
 	countLabel.TextXAlignment = Enum.TextXAlignment.Right
+	countLabel.TextYAlignment = Enum.TextYAlignment.Center
 	countLabel.ZIndex = BASE_ZINDEX + 4
 end
 
 local function UpdateClassificationUI()
 	if ClassificationComplete then
-		ClassificationStatus.Text = "COMPLETE"
+		ObjectsSummary.Text = "Classification complete. Tap Structure to view Phase 1 data."
 	elseif ClassificationRunning then
-		ClassificationStatus.Text = "CLASSIFYING..."
+		ObjectsSummary.Text = "Classifying scanned objects..."
 	else
-		ClassificationStatus.Text = "WAITING"
+		ObjectsSummary.Text = "Phase 1 structure + Phase 2 classification."
+	end
+
+	for _, child in ipairs(ClassificationScroll:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	for order, category in ipairs(ClassificationOrder) do
+		CreateClassificationRow(
+			category,
+			ClassificationCounts[category] or 0,
+			order
+		)
+	end
+
+	local rows = math.ceil(#ClassificationOrder / 2)
+
+	ClassificationScroll.CanvasSize = UDim2.fromOffset(
+		0,
+		rows * (ClassificationRowHeight + ClassificationRowGap)
+	)
+end
+
+local function UpdateClassificationUI()
+	if ClassificationComplete then
+		ObjectsSummary.Text = "Classification complete. Tap Structure to view Phase 1 data."
+	elseif ClassificationRunning then
+		ObjectsSummary.Text = "Classifying scanned objects..."
+	else
+		ObjectsSummary.Text = "Phase 1 structure + Phase 2 classification."
 	end
 
 	for _, child in ipairs(ClassificationScroll:GetChildren()) do
