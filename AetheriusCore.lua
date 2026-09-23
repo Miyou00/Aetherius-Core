@@ -189,6 +189,7 @@ local CurrentScan = 0
 local ScanProgress = 0
 local ClassificationProgress = 0
 local ClassificationScheduled = false
+local ClassificationUIUpdateScheduled = false
 
 local Statuses = {
 	Structure = "WAITING",
@@ -203,6 +204,7 @@ local Statuses = {
 --------------------------------------------------
 
 local CLASSIFICATION_BATCH_SIZE = 150
+local PENDING_CLASSIFICATION_BATCH_SIZE = 50
 local CLASSIFICATION_YIELD_TIME = 0.02
 
 local ClassificationData = {}
@@ -1396,8 +1398,8 @@ local function UpdateStatusLayout()
 				165
 			)
 
-		-- Expanded status details use extra vertical space instead of
-		-- squeezing the Objects page into an unusable 52-pixel area.
+		-- Expanded status details use extra vertical space while leaving
+		-- a clear gap above the BottomBar controls.
 		Content.Position =
 			UDim2.fromOffset(
 				8,
@@ -1409,7 +1411,7 @@ local function UpdateStatusLayout()
 				1,
 				-16,
 				0,
-				158
+				138
 			)
 
 		BottomBar.Position = UDim2.new(0, 8, 1, -34)
@@ -2024,6 +2026,19 @@ local function UpdateClassificationUI()
 	)
 end
 
+local function RequestClassificationUIUpdate()
+	if ClassificationUIUpdateScheduled then
+		return
+	end
+
+	ClassificationUIUpdateScheduled = true
+
+	task.defer(function()
+		ClassificationUIUpdateScheduled = false
+		UpdateClassificationUI()
+	end)
+end
+
 local function RunClassification(scanGeneration)
 	-- Only the task that owns this generation may change classification state.
 	if scanGeneration ~= CurrentScan then
@@ -2084,15 +2099,23 @@ local function RunClassification(scanGeneration)
 			localCounts[category] = (localCounts[category] or 0) + 1
 
 			if index % CLASSIFICATION_BATCH_SIZE == 0 or index == total then
-				ClassificationProgress = total > 0 and (index / total) * 100 or 100
+				ClassificationProgress = total > 0 and (index / total) * 90 or 100
 				UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
 				task.wait(CLASSIFICATION_YIELD_TIME)
 			end
 		end
 
-		-- Include objects added while classification was running or while it
-		-- was scheduled. The pending table is copied so the task owns its work.
+		-- Include objects added while classification was running. Process these
+		-- in batches so a large burst of live objects cannot block the UI.
 		local pendingSnapshot = table.clone(PendingClassification)
+		local pendingTotal = 0
+		for _ in pairs(pendingSnapshot) do
+			pendingTotal += 1
+		end
+
+		local pendingProcessed = 0
+		local pendingStartProgress = total > 0 and 90 or 0
+		local pendingProgressRange = 100 - pendingStartProgress
 
 		for instance, record in pairs(pendingSnapshot) do
 			if scanGeneration ~= CurrentScan then
@@ -2127,7 +2150,23 @@ local function RunClassification(scanGeneration)
 			end
 
 			PendingClassification[instance] = nil
+			pendingProcessed += 1
+
+			if pendingTotal > 0 and (pendingProcessed % PENDING_CLASSIFICATION_BATCH_SIZE == 0 or pendingProcessed == pendingTotal) then
+				ClassificationProgress = pendingStartProgress
+					+ (pendingProcessed / pendingTotal) * pendingProgressRange
+				UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+				RequestClassificationUIUpdate()
+				task.wait(CLASSIFICATION_YIELD_TIME)
+			end
 		end
+
+		if pendingTotal == 0 then
+			ClassificationProgress = 100
+		else
+			ClassificationProgress = 100
+		end
+		UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
 	end)
 
 	-- A cancelled generation must not touch state belonging to the new one.
@@ -2438,7 +2477,7 @@ workspace.DescendantAdded:Connect(function(instance)
 		if ClassificationRunning or ClassificationScheduled then
 			PendingClassification[instance] = record
 			ClassificationComplete = false
-			UpdateClassificationUI()
+			RequestClassificationUIUpdate()
 		elseif ClassificationComplete then
 			local category, signals = ClassifyObject(record)
 			local classificationIndex = #ClassificationData + 1
@@ -2451,10 +2490,10 @@ workspace.DescendantAdded:Connect(function(instance)
 				Signals = signals
 			}
 			ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
-			UpdateClassificationUI()
+			RequestClassificationUIUpdate()
 		else
 			ClassificationComplete = false
-			UpdateClassificationUI()
+			RequestClassificationUIUpdate()
 		end
 	end)
 end)
