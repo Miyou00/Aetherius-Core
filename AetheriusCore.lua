@@ -856,7 +856,7 @@ ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
 local ObjectsSummary = MakeText(
 	ObjectsPage,
-	"Phase 1 structure + Phase 2 classification.",
+	"Phase 1 structure + Phase 2 classification. Scroll for all categories.",
 	10,
 	COLORS.Muted
 )
@@ -935,6 +935,7 @@ StructureInfo.ZIndex = BASE_ZINDEX + 3
 --------------------------------------------------
 
 local ClassificationFrame = Instance.new("Frame")
+
 ClassificationFrame.Name = "ClassificationFrame"
 ClassificationFrame.Size = UDim2.new(1, 0, 1, -78)
 ClassificationFrame.Position = UDim2.fromOffset(0, 78)
@@ -942,45 +943,25 @@ ClassificationFrame.BackgroundColor3 = COLORS.Panel2
 ClassificationFrame.BorderSizePixel = 0
 ClassificationFrame.ZIndex = BASE_ZINDEX + 2
 ClassificationFrame.Parent = ObjectsPage
+
 Corner(ClassificationFrame, 5)
 
-local ClassificationTitle = MakeText(
-	ClassificationFrame,
-	"Object Classification",
-	10,
-	COLORS.Text,
-	Enum.Font.GothamBold
-)
-
-ClassificationTitle.Position = UDim2.fromOffset(9, 6)
-ClassificationTitle.Size = UDim2.new(0.55, 0, 0, 20)
-ClassificationTitle.ZIndex = BASE_ZINDEX + 3
-
-local ClassificationStatus = MakeText(
-	ClassificationFrame,
-	"Waiting for classification...",
-	9,
-	COLORS.Muted
-)
-
-ClassificationStatus.Position = UDim2.new(0.55, 0, 0, 6)
-ClassificationStatus.Size = UDim2.new(0.45, -9, 0, 20)
-ClassificationStatus.TextXAlignment = Enum.TextXAlignment.Right
-ClassificationStatus.ZIndex = BASE_ZINDEX + 3
-
+-- Use the full available area for the classification list.
 local ClassificationScroll = Instance.new("ScrollingFrame")
 ClassificationScroll.Name = "ClassificationScroll"
-ClassificationScroll.Size = UDim2.new(1, -12, 1, -34)
-ClassificationScroll.Position = UDim2.fromOffset(6, 30)
+ClassificationScroll.Size = UDim2.new(1, -10, 1, -8)
+ClassificationScroll.Position = UDim2.fromOffset(5, 4)
 ClassificationScroll.BackgroundTransparency = 1
 ClassificationScroll.BorderSizePixel = 0
 ClassificationScroll.ScrollBarThickness = 3
 ClassificationScroll.CanvasSize = UDim2.fromOffset(0, 0)
+ClassificationScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
-local ClassificationLayout = Instance.new("UIListLayout")
-ClassificationLayout.Padding = UDim.new(0, 3)
+local ClassificationLayout = Instance.new("UIGridLayout")
+ClassificationLayout.CellPadding = UDim2.fromOffset(4, 3)
+ClassificationLayout.CellSize = UDim2.new(0.5, -2, 0, 18)
 ClassificationLayout.SortOrder = Enum.SortOrder.LayoutOrder
 ClassificationLayout.Parent = ClassificationScroll
 
@@ -1880,7 +1861,7 @@ local function CreateClassificationRow(category, count, order)
 	local row = Instance.new("Frame")
 
 	row.Name = category .. "Row"
-	row.Size = UDim2.new(1, -6, 0, 22)
+	row.Size = UDim2.new(0, 0, 0, 0)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
 	row.LayoutOrder = order
@@ -1898,7 +1879,7 @@ local function CreateClassificationRow(category, count, order)
 	)
 
 	categoryLabel.Position = UDim2.fromOffset(8, 0)
-	categoryLabel.Size = UDim2.new(1, -55, 1, 0)
+	categoryLabel.Size = UDim2.new(1, -38, 1, 0)
 	categoryLabel.ZIndex = BASE_ZINDEX + 4
 
 	local countLabel = MakeText(
@@ -1908,9 +1889,8 @@ local function CreateClassificationRow(category, count, order)
 		COLORS.Muted,
 		Enum.Font.GothamBold
 	)
-
-	countLabel.Position = UDim2.new(1, -45, 0, 0)
-	countLabel.Size = UDim2.fromOffset(37, 22)
+	countLabel.Position = UDim2.new(1, -34, 0, 0)
+	countLabel.Size = UDim2.fromOffset(29, 18)
 	countLabel.TextXAlignment = Enum.TextXAlignment.Right
 	countLabel.ZIndex = BASE_ZINDEX + 4
 end
@@ -1925,7 +1905,7 @@ local function UpdateClassificationUI()
 	end
 
 	for _, child in ipairs(ClassificationScroll:GetChildren()) do
-		if not child:IsA("UIListLayout") then
+		if not child:IsA("UIGridLayout") then
 			child:Destroy()
 		end
 	end
@@ -1939,10 +1919,7 @@ local function UpdateClassificationUI()
 	end
 
 	task.defer(function()
-		ClassificationScroll.CanvasSize = UDim2.fromOffset(
-			0,
-			ClassificationLayout.AbsoluteContentSize.Y + 6
-		)
+		ClassificationScroll.CanvasSize = UDim2.fromOffset(0, ClassificationLayout.AbsoluteContentSize.Y + 4)
 	end)
 end
 
