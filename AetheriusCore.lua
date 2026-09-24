@@ -22,21 +22,29 @@
     • Draggable floating button
     • High-priority UI layering
 
-    Phase 2
+    Phase 2.1
 
     Features:
     • Object classification
-    • Object family / group detection
-    • Object relevance detection
-    • Object relationship detection
     • Classification signal tracking
-    • Intelligence summary
     • Classification-based object organization
-    • Object intelligence UI
+    • Object classification UI
     • Stored classification data
     • Incremental classification for newly detected objects
     • Classification progress monitoring
     • Phase 1 scan data integration
+
+    Phase 2.2
+
+    Features:
+    • Object family / group detection
+    • Structural family grouping
+    • Name-pattern family grouping
+    • Family membership tracking
+    • Family count tracking
+    • Family summary UI
+    • Incremental family assignment for newly detected objects
+    • Phase 2.1 classification integration
 
     Intended for games you own or are authorized to analyze.
 
@@ -208,6 +216,13 @@ local PENDING_CLASSIFICATION_BATCH_SIZE = 50
 local CLASSIFICATION_YIELD_TIME = 0.02
 
 local ClassificationData = {}
+
+-- Phase 2.2 family/group intelligence. Each classification record can be
+-- assigned to a structural or name-based family for higher-level organization.
+local FamilyData = {}
+local FamilyCounts = {}
+local FamilyCategories = {}
+local FamilyOrder = {}
 
 local ClassificationCounts = {
 	Character = 0,
@@ -877,7 +892,7 @@ ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
 local ObjectsSummary = MakeText(
 	ObjectsPage,
-	"Phase 1 + Phase 2 classification. Scroll for all categories.",
+	"Phase 1 + Phase 2.1 classification + Phase 2.2 families.",
 	8,
 	COLORS.Muted
 )
@@ -897,7 +912,7 @@ local ClassificationModeButton = MakeButton(
 )
 
 ClassificationModeButton.Name = "ClassificationModeButton"
-ClassificationModeButton.Size = UDim2.new(0.5, -2, 0, 18)
+ClassificationModeButton.Size = UDim2.new(1 / 3, -3, 0, 18)
 ClassificationModeButton.Position = UDim2.fromOffset(0, 30)
 ClassificationModeButton.ZIndex = BASE_ZINDEX + 10
 
@@ -908,9 +923,20 @@ local StructureModeButton = MakeButton(
 )
 
 StructureModeButton.Name = "StructureModeButton"
-StructureModeButton.Size = UDim2.new(0.5, -2, 0, 18)
-StructureModeButton.Position = UDim2.new(0.5, 2, 0, 30)
+StructureModeButton.Size = UDim2.new(1 / 3, -3, 0, 18)
+StructureModeButton.Position = UDim2.new(1 / 3, 1, 0, 30)
 StructureModeButton.ZIndex = BASE_ZINDEX + 10
+
+local FamilyModeButton = MakeButton(
+	ObjectsPage,
+	"Families",
+	9
+)
+
+FamilyModeButton.Name = "FamilyModeButton"
+FamilyModeButton.Size = UDim2.new(1 / 3, -3, 0, 18)
+FamilyModeButton.Position = UDim2.new(2 / 3, 2, 0, 30)
+FamilyModeButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
 -- STRUCTURE VIEW
@@ -980,6 +1006,32 @@ ClassificationScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
+--------------------------------------------------
+-- FAMILY VIEW
+--------------------------------------------------
+
+local FamilyFrame = Instance.new("Frame")
+FamilyFrame.Name = "FamilyFrame"
+FamilyFrame.Size = UDim2.new(1, 0, 1, -52)
+FamilyFrame.Position = UDim2.fromOffset(0, 52)
+FamilyFrame.BackgroundColor3 = COLORS.Panel2
+FamilyFrame.BorderSizePixel = 0
+FamilyFrame.ZIndex = BASE_ZINDEX + 2
+FamilyFrame.Parent = ObjectsPage
+Corner(FamilyFrame, 5)
+
+local FamilyScroll = Instance.new("ScrollingFrame")
+FamilyScroll.Name = "FamilyScroll"
+FamilyScroll.Size = UDim2.new(1, -8, 1, -8)
+FamilyScroll.Position = UDim2.fromOffset(4, 4)
+FamilyScroll.BackgroundTransparency = 1
+FamilyScroll.BorderSizePixel = 0
+FamilyScroll.ScrollBarThickness = 3
+FamilyScroll.CanvasSize = UDim2.fromOffset(0, 0)
+FamilyScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+FamilyScroll.ZIndex = BASE_ZINDEX + 2
+FamilyScroll.Parent = FamilyFrame
+
 -- Rows are positioned manually so the compact mobile layout
 -- remains visible reliably on all screen sizes.
 local ClassificationRowHeight = 16
@@ -990,21 +1042,21 @@ local ObjectsPageMode = "Classification"
 
 local function UpdateObjectsPageMode()
 	local showingClassification = ObjectsPageMode == "Classification"
+	local showingStructure = ObjectsPageMode == "Structure"
+	local showingFamilies = ObjectsPageMode == "Families"
 
 	ClassificationFrame.Visible = showingClassification
-	StructureFrame.Visible = not showingClassification
+	StructureFrame.Visible = showingStructure
+	FamilyFrame.Visible = showingFamilies
 
-	if showingClassification then
-		ClassificationModeButton.BackgroundColor3 = COLORS.Accent
-		ClassificationModeButton.TextColor3 = Color3.new(1, 1, 1)
-		StructureModeButton.BackgroundColor3 = COLORS.Panel3
-		StructureModeButton.TextColor3 = COLORS.Text
-	else
-		StructureModeButton.BackgroundColor3 = COLORS.Accent
-		StructureModeButton.TextColor3 = Color3.new(1, 1, 1)
-		ClassificationModeButton.BackgroundColor3 = COLORS.Panel3
-		ClassificationModeButton.TextColor3 = COLORS.Text
-	end
+	ClassificationModeButton.BackgroundColor3 = showingClassification and COLORS.Accent or COLORS.Panel3
+	ClassificationModeButton.TextColor3 = showingClassification and Color3.new(1, 1, 1) or COLORS.Text
+
+	StructureModeButton.BackgroundColor3 = showingStructure and COLORS.Accent or COLORS.Panel3
+	StructureModeButton.TextColor3 = showingStructure and Color3.new(1, 1, 1) or COLORS.Text
+
+	FamilyModeButton.BackgroundColor3 = showingFamilies and COLORS.Accent or COLORS.Panel3
+	FamilyModeButton.TextColor3 = showingFamilies and Color3.new(1, 1, 1) or COLORS.Text
 end
 
 ClassificationModeButton.MouseButton1Click:Connect(function()
@@ -1014,6 +1066,11 @@ end)
 
 StructureModeButton.MouseButton1Click:Connect(function()
 	ObjectsPageMode = "Structure"
+	UpdateObjectsPageMode()
+end)
+
+FamilyModeButton.MouseButton1Click:Connect(function()
+	ObjectsPageMode = "Families"
 	UpdateObjectsPageMode()
 end)
 
@@ -1582,6 +1639,9 @@ local function UpdateCounters()
 		.. "Stored object limit: "
 		.. tostring(MAX_RESULTS)
 		.. "\n"
+		.. "Families detected: "
+		.. tostring(#FamilyOrder)
+		.. "\n"
 		.. "Scan limit status: "
 		.. (ScanTruncated and "TRUNCATED" or "FULL")
 end
@@ -1714,6 +1774,10 @@ end
 
 ResetClassification = function()
 	table.clear(ClassificationData)
+	table.clear(FamilyData)
+	table.clear(FamilyCounts)
+	table.clear(FamilyCategories)
+	table.clear(FamilyOrder)
 
 	for category in pairs(ClassificationCounts) do
 		ClassificationCounts[category] = 0
@@ -1943,6 +2007,216 @@ local function ClassifyObject(record)
 	AddClassificationSignal(signals, "No strong classification signal")
 
 	return "Unknown", signals
+end
+
+local function NormalizeFamilyName(name)
+	name = tostring(name or "")
+	name = string.gsub(name, "[%d_%-]+$", "")
+	name = string.gsub(name, "(%s+)(%d+)$", "")
+	name = string.gsub(name, "[%[%]%(%){}]", "")
+	name = string.gsub(name, "%s+", " ")
+	name = string.gsub(name, "^%s+", "")
+	name = string.gsub(name, "%s+$", "")
+
+	if name == "" then
+		return "Unnamed"
+	end
+
+	return name
+end
+
+local function GetFamilyRoot(instance, category)
+	if not instance then
+		return nil
+	end
+
+	local character = LocalPlayer.Character
+	if character and instance:IsDescendantOf(character) then
+		return character
+	end
+
+	local tool = instance:FindFirstAncestorOfClass("Tool")
+	if tool then
+		return tool
+	end
+
+	if category == "UI" then
+		local screenGui = instance:FindFirstAncestorOfClass("ScreenGui")
+		if screenGui then
+			return screenGui
+		end
+	end
+
+	if category == "NPC" and instance:IsA("Model") then
+		return instance
+	end
+
+	local current = instance
+	local candidate = nil
+
+	while current and current ~= workspace do
+		if current:IsA("Model") or current:IsA("Folder") or current:IsA("Configuration") then
+			candidate = current
+		end
+		current = current.Parent
+	end
+
+	return candidate
+end
+
+local function DetermineFamily(record, category)
+	local instance = record and record.Instance
+	if not instance then
+		return "Unknown Family", "No instance"
+	end
+
+	local root = GetFamilyRoot(instance, category)
+
+	if root then
+		local familyName = NormalizeFamilyName(root.Name)
+		local rootPath = SafeFullName(root)
+		return category .. " / " .. familyName, rootPath
+	end
+
+	-- When no meaningful structural container exists, group similar names
+	-- inside the same classification instead of treating every object as a
+	-- separate family.
+	local normalized = NormalizeFamilyName(instance.Name)
+	return category .. " / " .. normalized, SafeFullName(instance)
+end
+
+local function BuildFamilyData(classificationData)
+	local familyData = {}
+	local familyCounts = {}
+	local familyCategories = {}
+
+	for index, record in pairs(classificationData) do
+		local family, rootPath = DetermineFamily(record, record.Category)
+
+		familyData[index] = {
+			Instance = record.Instance,
+			Name = record.Name,
+			ClassName = record.ClassName,
+			FullName = record.FullName,
+			Category = record.Category,
+			Family = family,
+			Root = rootPath
+		}
+
+		familyCounts[family] = (familyCounts[family] or 0) + 1
+		familyCategories[family] = familyCategories[family] or record.Category
+	end
+
+	local familyOrder = {}
+	for family in pairs(familyCounts) do
+		table.insert(familyOrder, family)
+	end
+
+	table.sort(familyOrder, function(a, b)
+		local countA = familyCounts[a] or 0
+		local countB = familyCounts[b] or 0
+		if countA == countB then
+			return a < b
+		end
+		return countA > countB
+	end)
+
+	return familyData, familyCounts, familyCategories, familyOrder
+end
+
+local function CommitFamilyData(classificationData)
+	local familyData, familyCounts, familyCategories, familyOrder = BuildFamilyData(classificationData)
+
+	table.clear(FamilyData)
+	table.clear(FamilyCounts)
+	table.clear(FamilyCategories)
+	table.clear(FamilyOrder)
+
+	for index, data in pairs(familyData) do
+		FamilyData[index] = data
+	end
+	for family, count in pairs(familyCounts) do
+		FamilyCounts[family] = count
+	end
+	for family, category in pairs(familyCategories) do
+		FamilyCategories[family] = category
+	end
+	for index, family in ipairs(familyOrder) do
+		FamilyOrder[index] = family
+	end
+end
+
+local function CreateFamilyRow(family, count, category, order)
+	local row = Instance.new("Frame")
+	row.Name = "FamilyRow" .. order
+	row.Size = UDim2.new(1, -2, 0, 28)
+	row.Position = UDim2.fromOffset(0, (order - 1) * 30)
+	row.BackgroundColor3 = COLORS.Panel3
+	row.BorderSizePixel = 0
+	row.ZIndex = BASE_ZINDEX + 3
+	row.Parent = FamilyScroll
+	Corner(row, 4)
+
+	local familyLabel = MakeText(row, family, 8, COLORS.Text, Enum.Font.GothamMedium)
+	familyLabel.Position = UDim2.fromOffset(7, 2)
+	familyLabel.Size = UDim2.new(1, -48, 0, 13)
+	familyLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	familyLabel.ZIndex = BASE_ZINDEX + 4
+
+	local categoryLabel = MakeText(row, category, 7, COLORS.Muted)
+	categoryLabel.Position = UDim2.fromOffset(7, 14)
+	categoryLabel.Size = UDim2.new(1, -48, 0, 11)
+	categoryLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	categoryLabel.ZIndex = BASE_ZINDEX + 4
+
+	local countLabel = MakeText(row, tostring(count), 10, COLORS.Text, Enum.Font.GothamBold)
+	countLabel.Position = UDim2.new(1, -39, 0, 0)
+	countLabel.Size = UDim2.fromOffset(33, 28)
+	countLabel.TextXAlignment = Enum.TextXAlignment.Right
+	countLabel.ZIndex = BASE_ZINDEX + 4
+end
+
+local function UpdateFamilyUI()
+	if #FamilyOrder == 0 then
+		ObjectsSummary.Text = "No object families detected yet."
+	else
+		ObjectsSummary.Text = tostring(#FamilyOrder) .. " object families / groups detected."
+	end
+
+	for _, child in ipairs(FamilyScroll:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	for order, family in ipairs(FamilyOrder) do
+		CreateFamilyRow(
+			family,
+			FamilyCounts[family] or 0,
+			FamilyCategories[family] or "Unknown",
+			order
+		)
+	end
+
+	FamilyScroll.CanvasSize = UDim2.fromOffset(
+		0,
+		#FamilyOrder * 30
+	)
+end
+
+local FamilyUIUpdateScheduled = false
+
+local function RequestFamilyUIUpdate()
+	if FamilyUIUpdateScheduled then
+		return
+	end
+
+	FamilyUIUpdateScheduled = true
+
+	task.defer(function()
+		FamilyUIUpdateScheduled = false
+		UpdateFamilyUI()
+	end)
 end
 
 local function CreateClassificationRow(category, count, order)
@@ -2222,6 +2496,10 @@ local function RunClassification(scanGeneration)
 		ClassificationData[index] = data
 	end
 
+	-- Build Phase 2.2 family intelligence only after classification has fully
+	-- succeeded, keeping the same generation-safe commit model.
+	CommitFamilyData(ClassificationData)
+
 	for category in pairs(ClassificationCounts) do
 		ClassificationCounts[category] = localCounts[category] or 0
 	end
@@ -2231,6 +2509,7 @@ local function RunClassification(scanGeneration)
 	ClassificationComplete = true
 	ClassificationProgress = 100
 	UpdateClassificationUI()
+	UpdateFamilyUI()
 	UpdateOverallStatus("COMPLETE", 100)
 end
 
@@ -2521,7 +2800,34 @@ workspace.DescendantAdded:Connect(function(instance)
 				Signals = signals
 			}
 			ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
+
+			local family, rootPath = DetermineFamily(record, category)
+			local familyIndex = #ClassificationData
+			FamilyData[familyIndex] = {
+				Instance = record.Instance,
+				Name = record.Name,
+				ClassName = record.ClassName,
+				FullName = record.FullName,
+				Category = category,
+				Family = family,
+				Root = rootPath
+			}
+			FamilyCounts[family] = (FamilyCounts[family] or 0) + 1
+			FamilyCategories[family] = FamilyCategories[family] or category
+			if not table.find(FamilyOrder, family) then
+				table.insert(FamilyOrder, family)
+			end
+			table.sort(FamilyOrder, function(a, b)
+				local countA = FamilyCounts[a] or 0
+				local countB = FamilyCounts[b] or 0
+				if countA == countB then
+					return a < b
+				end
+				return countA > countB
+			end)
+
 			RequestClassificationUIUpdate()
+			RequestFamilyUIUpdate()
 		else
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
@@ -2606,6 +2912,7 @@ UpdateMainWidth()
 
 UpdateCounters()
 UpdateClassificationUI()
+UpdateFamilyUI()
 
 Main.Visible = true
 OpenButton.Visible = false
