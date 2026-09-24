@@ -2781,40 +2781,54 @@ end)
 
 local Minimized = false
 
+-- Small floating button shown while the analyzer is minimized.
+local MinimizedButton = MakeButton(
+	Gui,
+	"AI",
+	11
+)
+
+MinimizedButton.Name = "AnalyzerMinimizedButton"
+MinimizedButton.Size = UDim2.fromOffset(44, 36)
+MinimizedButton.BackgroundColor3 = COLORS.Accent
+MinimizedButton.TextColor3 = Color3.new(1, 1, 1)
+MinimizedButton.Font = Enum.Font.GothamBold
+MinimizedButton.ZIndex = BASE_ZINDEX + 40
+MinimizedButton.Visible = false
+MinimizedButton.Parent = Gui
+
+Corner(MinimizedButton, 8)
+Stroke(MinimizedButton, COLORS.Border, 1)
+
+local function SyncMinimizedButtonPosition()
+	MinimizedButton.Position = Main.Position
+	MinimizedButton.AnchorPoint = Main.AnchorPoint
+end
+
+MakeDraggable(MinimizedButton, MinimizedButton)
+
 MinimizeButton.MouseButton1Click:Connect(function()
 
-	Minimized =
-		not Minimized
+	Minimized = not Minimized
 
 	if Minimized then
-
-		UpdateMainWidth()
-
-		StatusHeader.Visible = false
-		StatusDetails.Visible = false
-		TabBar.Visible = false
-		Content.Visible = false
-		BottomBar.Visible = false
-
-		MinimizeButton.Text =
-			"+"
-
+		SyncMinimizedButtonPosition()
+		Main.Visible = false
+		MinimizedButton.Visible = true
 	else
-
+		Main.Visible = true
+		MinimizedButton.Visible = false
+		UpdateStatusLayout()
 		UpdateMainWidth()
-
-		StatusHeader.Visible = true
-		TabBar.Visible = true
-		Content.Visible = true
-		BottomBar.Visible = true
-
-		if StatusExpanded then
-			StatusDetails.Visible = true
-		end
-
-		MinimizeButton.Text =
-			"−"
 	end
+end)
+
+MinimizedButton.MouseButton1Click:Connect(function()
+	Minimized = false
+	Main.Visible = true
+	MinimizedButton.Visible = false
+	UpdateStatusLayout()
+	UpdateMainWidth()
 end)
 
 --------------------------------------------------
@@ -2824,6 +2838,7 @@ end)
 CloseButton.MouseButton1Click:Connect(function()
 
 	Main.Visible = false
+	MinimizedButton.Visible = false
 	OpenButton.Visible = true
 
 end)
@@ -2835,6 +2850,8 @@ end)
 OpenButton.MouseButton1Click:Connect(function()
 
 	Main.Visible = true
+	Minimized = false
+	MinimizedButton.Visible = false
 	OpenButton.Visible = false
 
 end)
