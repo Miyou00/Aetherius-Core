@@ -50,9 +50,10 @@
     • Debounced intelligence UI updates
 
     Optimization notes:
-    • Uses time-budgeted batches to reduce frame spikes
+    • Uses adaptive time-budgeted batches to reduce frame spikes
+    • Uses larger work batches with short yields for better throughput
     • Caches repeated hierarchy and family-name lookups
-    • Debounces classification/family UI refreshes
+    • Throttles scan/classification UI refreshes to reduce UI overhead
     • Preserves generation-safe scanning and classification
 
     Intended for games you own or are authorized to analyze.
@@ -79,9 +80,10 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- CONFIGURATION
 --------------------------------------------------
 
-local BATCH_SIZE = 250
-local YIELD_TIME = 0.03
-local SCAN_TIME_BUDGET = 0.008
+local BATCH_SIZE = 300
+local YIELD_TIME = 0.015
+local SCAN_TIME_BUDGET = 0.012
+local SCAN_UI_INTERVAL = 0.12
 
 local MAX_RESULTS = 50000
 local MAX_ATTRIBUTES_PER_OBJECT = 100
@@ -208,6 +210,7 @@ local ScanProgress = 0
 local ClassificationProgress = 0
 local ClassificationScheduled = false
 local ClassificationUIUpdateScheduled = false
+local LastClassificationUIUpdate = 0
 
 local Statuses = {
 	Structure = "WAITING",
@@ -221,10 +224,11 @@ local Statuses = {
 -- PHASE 2.1 -- OBJECT CLASSIFICATION
 --------------------------------------------------
 
-local CLASSIFICATION_BATCH_SIZE = 300
-local PENDING_CLASSIFICATION_BATCH_SIZE = 100
-local CLASSIFICATION_YIELD_TIME = 0.02
-local CLASSIFICATION_TIME_BUDGET = 0.008
+local CLASSIFICATION_BATCH_SIZE = 350
+local PENDING_CLASSIFICATION_BATCH_SIZE = 150
+local CLASSIFICATION_YIELD_TIME = 0.015
+local CLASSIFICATION_TIME_BUDGET = 0.012
+local CLASSIFICATION_UI_INTERVAL = 0.12
 
 local ClassificationData = {}
 
@@ -2360,7 +2364,13 @@ local function UpdateClassificationUI()
 	)
 end
 
-local function RequestClassificationUIUpdate()
+local function RequestClassificationUIUpdate(force)
+	local now = os.clock()
+
+	if not force and now - LastClassificationUIUpdate < CLASSIFICATION_UI_INTERVAL then
+		return
+	end
+
 	if ClassificationUIUpdateScheduled then
 		return
 	end
@@ -2369,6 +2379,7 @@ local function RequestClassificationUIUpdate()
 
 	task.defer(function()
 		ClassificationUIUpdateScheduled = false
+		LastClassificationUIUpdate = os.clock()
 		UpdateClassificationUI()
 	end)
 end
@@ -2570,9 +2581,31 @@ local function RunClassification(scanGeneration)
 	ClassificationScheduled = false
 	ClassificationComplete = true
 	ClassificationProgress = 100
-	UpdateClassificationUI()
+	RequestClassificationUIUpdate(true)
 	UpdateFamilyUI()
 	UpdateOverallStatus("COMPLETE", 100)
+end
+
+--------------------------------------------------
+-- SCAN UI THROTTLING
+--------------------------------------------------
+
+local LastScanUIUpdate = 0
+
+local function UpdateScanProgressUI(force)
+	local now = os.clock()
+
+	if not force and now - LastScanUIUpdate < SCAN_UI_INTERVAL then
+		return
+	end
+
+	LastScanUIUpdate = now
+	UpdateOverallStatus("ANALYZING", ScanProgress)
+	UpdateCounters()
+	SetStatus("Structure", "PROCESSING")
+	SetStatus("Attributes", "PROCESSING")
+	SetStatus("Tags", "PROCESSING")
+	SetStatus("Values", "PROCESSING")
 end
 
 --------------------------------------------------
@@ -2590,6 +2623,8 @@ local function RunScan()
 	local thisScan = CurrentScan
 	ScanProgress = 0
 	ClassificationProgress = 0
+	LastScanUIUpdate = 0
+	LastClassificationUIUpdate = 0
 	ClassificationScheduled = false
 	ClassificationRunning = false
 	ClassificationComplete = false
@@ -2623,12 +2658,7 @@ local function RunScan()
 
 			if index % BATCH_SIZE == 0 or index == total or os.clock() - batchStart >= SCAN_TIME_BUDGET then
 				ScanProgress = total > 0 and (index / total) * 100 or 100
-				UpdateOverallStatus("ANALYZING", ScanProgress)
-				UpdateCounters()
-				SetStatus("Structure", "PROCESSING")
-				SetStatus("Attributes", "PROCESSING")
-				SetStatus("Tags", "PROCESSING")
-				SetStatus("Values", "PROCESSING")
+				UpdateScanProgressUI(index == total)
 				batchStart = os.clock()
 				task.wait(YIELD_TIME)
 			end
@@ -2675,7 +2705,7 @@ local function RunScan()
 	end
 
 	ScanProgress = 100
-	UpdateCounters()
+	UpdateScanProgressUI(true)
 	SetStatus("Structure", ScanTruncated and "LIMIT" or "COMPLETE")
 	SetStatus("Attributes", "COMPLETE")
 	SetStatus("Tags", "COMPLETE")
