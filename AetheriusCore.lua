@@ -45,6 +45,15 @@
     • Family summary UI
     • Incremental family assignment for newly detected objects
     • Phase 2.1 classification integration
+    • Adaptive workload yielding
+    • Classification and family lookup caching
+    • Debounced intelligence UI updates
+
+    Optimization notes:
+    • Uses time-budgeted batches to reduce frame spikes
+    • Caches repeated hierarchy and family-name lookups
+    • Debounces classification/family UI refreshes
+    • Preserves generation-safe scanning and classification
 
     Intended for games you own or are authorized to analyze.
 
@@ -70,8 +79,9 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- CONFIGURATION
 --------------------------------------------------
 
-local BATCH_SIZE = 100
+local BATCH_SIZE = 250
 local YIELD_TIME = 0.03
+local SCAN_TIME_BUDGET = 0.008
 
 local MAX_RESULTS = 50000
 local MAX_ATTRIBUTES_PER_OBJECT = 100
@@ -211,9 +221,10 @@ local Statuses = {
 -- PHASE 2.1 -- OBJECT CLASSIFICATION
 --------------------------------------------------
 
-local CLASSIFICATION_BATCH_SIZE = 150
-local PENDING_CLASSIFICATION_BATCH_SIZE = 50
+local CLASSIFICATION_BATCH_SIZE = 300
+local PENDING_CLASSIFICATION_BATCH_SIZE = 100
 local CLASSIFICATION_YIELD_TIME = 0.02
+local CLASSIFICATION_TIME_BUDGET = 0.008
 
 local ClassificationData = {}
 
@@ -248,6 +259,13 @@ local PendingClassification = {}
 local ScannedInstances = {}
 local ScanTruncated = false
 
+-- Runtime caches reduce repeated ancestor/name work during classification
+-- and family detection. They are cleared for every new scan generation.
+local HumanoidAncestorCache = {}
+local FamilyRootCache = {}
+local NormalizedFamilyNameCache = {}
+local BackpackCache = nil
+
 local ResetClassification
 
 local ClassificationOrder = {
@@ -275,6 +293,10 @@ local function ClearScanData()
 	table.clear(PendingInstances)
 	table.clear(PendingClassification)
 	table.clear(ScannedInstances)
+	table.clear(HumanoidAncestorCache)
+	table.clear(FamilyRootCache)
+	table.clear(NormalizedFamilyNameCache)
+	BackpackCache = nil
 
 	ObjectCount = 0
 	AttributeCount = 0
@@ -384,9 +406,8 @@ end
 -- VALUE
 --------------------------------------------------
 
-local function GetValue(instance)
-
-	if not instance:IsA("ValueBase") then
+local function GetValue(instance, isValueBase)
+	if not isValueBase then
 		return nil
 	end
 
@@ -1678,8 +1699,9 @@ local function ScanInstance(instance)
 	local properties =
 		GetRelevantProperties(instance)
 
+	local isValueBase = instance:IsA("ValueBase")
 	local value =
-		GetValue(instance)
+		GetValue(instance, isValueBase)
 
 	local attributeCountForObject = 0
 
@@ -1708,10 +1730,7 @@ local function ScanInstance(instance)
 		if tagCountForObject
 			<= MAX_TAGS_PER_OBJECT then
 
-			table.insert(
-				limitedTags,
-				tag
-			)
+			limitedTags[tagCountForObject] = tag
 		end
 	end
 
@@ -1760,7 +1779,7 @@ local function ScanInstance(instance)
 	TagCount +=
 		tagCountForObject
 
-	if instance:IsA("ValueBase") then
+	if isValueBase then
 		ValueCount += 1
 	end
 
@@ -1803,17 +1822,37 @@ local function IsLocalPlayerCharacter(instance)
 end
 
 local function HasHumanoidAncestor(instance)
+	if HumanoidAncestorCache[instance] ~= nil then
+		return HumanoidAncestorCache[instance]
+	end
+
 	local current = instance
+	local found = false
+	local visited = {}
 
 	while current and current ~= workspace do
+		local cached = HumanoidAncestorCache[current]
+		if cached ~= nil then
+			found = cached
+			break
+		end
+
+		table.insert(visited, current)
+
 		if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
-			return true
+			found = true
+			break
 		end
 
 		current = current.Parent
 	end
 
-	return false
+	for _, visitedInstance in ipairs(visited) do
+		HumanoidAncestorCache[visitedInstance] = found
+	end
+
+	HumanoidAncestorCache[instance] = found
+	return found
 end
 
 local function NameContainsAny(instance, words)
@@ -1891,7 +1930,11 @@ local function ClassifyObject(record)
 		return "Tool", signals
 	end
 
-	local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+	if not BackpackCache then
+		BackpackCache = LocalPlayer:FindFirstChildOfClass("Backpack")
+	end
+
+	local backpack = BackpackCache
 
 	if backpack and instance:IsDescendantOf(backpack) then
 		AddClassificationSignal(signals, "Inside local Backpack")
@@ -2011,18 +2054,25 @@ end
 
 local function NormalizeFamilyName(name)
 	name = tostring(name or "")
-	name = string.gsub(name, "[%d_%-]+$", "")
-	name = string.gsub(name, "(%s+)(%d+)$", "")
-	name = string.gsub(name, "[%[%]%(%){}]", "")
-	name = string.gsub(name, "%s+", " ")
-	name = string.gsub(name, "^%s+", "")
-	name = string.gsub(name, "%s+$", "")
-
-	if name == "" then
-		return "Unnamed"
+	local cached = NormalizedFamilyNameCache[name]
+	if cached then
+		return cached
 	end
 
-	return name
+	local normalized = name
+	normalized = string.gsub(normalized, "[%d_%-]+$", "")
+	normalized = string.gsub(normalized, "(%s+)(%d+)$", "")
+	normalized = string.gsub(normalized, "[%[%]%(%){}]", "")
+	normalized = string.gsub(normalized, "%s+", " ")
+	normalized = string.gsub(normalized, "^%s+", "")
+	normalized = string.gsub(normalized, "%s+$", "")
+
+	if normalized == "" then
+		normalized = "Unnamed"
+	end
+
+	NormalizedFamilyNameCache[name] = normalized
+	return normalized
 end
 
 local function GetFamilyRoot(instance, category)
@@ -2030,24 +2080,33 @@ local function GetFamilyRoot(instance, category)
 		return nil
 	end
 
+	local cached = FamilyRootCache[instance]
+	if cached ~= nil then
+		return cached or nil
+	end
+
 	local character = LocalPlayer.Character
 	if character and instance:IsDescendantOf(character) then
+		FamilyRootCache[instance] = character
 		return character
 	end
 
 	local tool = instance:FindFirstAncestorOfClass("Tool")
 	if tool then
+		FamilyRootCache[instance] = tool
 		return tool
 	end
 
 	if category == "UI" then
 		local screenGui = instance:FindFirstAncestorOfClass("ScreenGui")
 		if screenGui then
+			FamilyRootCache[instance] = screenGui
 			return screenGui
 		end
 	end
 
 	if category == "NPC" and instance:IsA("Model") then
+		FamilyRootCache[instance] = instance
 		return instance
 	end
 
@@ -2061,6 +2120,7 @@ local function GetFamilyRoot(instance, category)
 		current = current.Parent
 	end
 
+	FamilyRootCache[instance] = candidate or false
 	return candidate
 end
 
@@ -2349,6 +2409,8 @@ local function RunClassification(scanGeneration)
 			UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
 		end
 
+		local classificationBatchStart = os.clock()
+
 		for index, record in ipairs(snapshot) do
 			if scanGeneration ~= CurrentScan then
 				return
@@ -2375,9 +2437,11 @@ local function RunClassification(scanGeneration)
 			classifiedInstances[record.Instance] = true
 			localCounts[category] = (localCounts[category] or 0) + 1
 
-			if index % CLASSIFICATION_BATCH_SIZE == 0 or index == total then
+			if index % CLASSIFICATION_BATCH_SIZE == 0 or index == total or os.clock() - classificationBatchStart >= CLASSIFICATION_TIME_BUDGET then
 				ClassificationProgress = total > 0 and (index / total) * 90 or 100
 				UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+				RequestClassificationUIUpdate()
+				classificationBatchStart = os.clock()
 				task.wait(CLASSIFICATION_YIELD_TIME)
 			end
 		end
@@ -2386,7 +2450,6 @@ local function RunClassification(scanGeneration)
 		-- table can change while this task is processing it, so take a fresh
 		-- snapshot repeatedly until there is no pending work left. This closes
 		-- the race where an object is added after the first pending snapshot.
-		local pendingProcessed = 0
 		local pendingStartProgress = 90
 
 		while next(PendingClassification) do
@@ -2444,7 +2507,6 @@ local function RunClassification(scanGeneration)
 				end
 
 				PendingClassification[instance] = nil
-				pendingProcessed += 1
 				pendingBatchProcessed += 1
 
 				if pendingBatchProcessed % PENDING_CLASSIFICATION_BATCH_SIZE == 0 then
@@ -2545,6 +2607,8 @@ local function RunScan()
 		local descendants = workspace:GetDescendants()
 		local total = #descendants
 
+		local batchStart = os.clock()
+
 		for index, instance in ipairs(descendants) do
 			if thisScan ~= CurrentScan then return end
 			while ScanPaused and thisScan == CurrentScan do
@@ -2557,7 +2621,7 @@ local function RunScan()
 				ScanInstance(instance)
 			end
 
-			if index % BATCH_SIZE == 0 or index == total then
+			if index % BATCH_SIZE == 0 or index == total or os.clock() - batchStart >= SCAN_TIME_BUDGET then
 				ScanProgress = total > 0 and (index / total) * 100 or 100
 				UpdateOverallStatus("ANALYZING", ScanProgress)
 				UpdateCounters()
@@ -2565,6 +2629,7 @@ local function RunScan()
 				SetStatus("Attributes", "PROCESSING")
 				SetStatus("Tags", "PROCESSING")
 				SetStatus("Values", "PROCESSING")
+				batchStart = os.clock()
 				task.wait(YIELD_TIME)
 			end
 
