@@ -49,6 +49,19 @@
     • Classification and family lookup caching
     • Debounced intelligence UI updates
 
+    Phase 2.3
+
+    Features:
+    • Object relevance detection
+    • Heuristic relevance scoring
+    • High / Medium / Low / Unknown relevance levels
+    • Relevance signal tracking
+    • Relevance summary UI
+    • Top relevant object listing
+    • Incremental relevance assignment for newly detected objects
+    • Phase 2.1 classification and Phase 2.2 family integration
+    • Mobile-friendly relevance ranking view
+
     Optimization notes:
     • Uses adaptive time-budgeted batches to reduce frame spikes
     • Uses larger work batches with short yields for better throughput
@@ -238,6 +251,18 @@ local FamilyData = {}
 local FamilyCounts = {}
 local FamilyCategories = {}
 local FamilyOrder = {}
+
+-- Phase 2.3 relevance intelligence. Scores are heuristic signals based only
+-- on client-visible scan/classification/family data.
+local RelevanceData = {}
+local RelevanceCounts = {
+	High = 0,
+	Medium = 0,
+	Low = 0,
+	Unknown = 0
+}
+local RelevanceOrder = {}
+local RelevanceUIUpdateScheduled = false
 
 local ClassificationCounts = {
 	Character = 0,
@@ -917,7 +942,7 @@ ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
 local ObjectsSummary = MakeText(
 	ObjectsPage,
-	"Phase 1 + Phase 2.1 classification + Phase 2.2 families.",
+	"Phase 1 + classification + families + relevance.",
 	8,
 	COLORS.Muted
 )
@@ -937,7 +962,7 @@ local ClassificationModeButton = MakeButton(
 )
 
 ClassificationModeButton.Name = "ClassificationModeButton"
-ClassificationModeButton.Size = UDim2.new(1 / 3, -3, 0, 18)
+ClassificationModeButton.Size = UDim2.new(0.25, -3, 0, 18)
 ClassificationModeButton.Position = UDim2.fromOffset(0, 30)
 ClassificationModeButton.ZIndex = BASE_ZINDEX + 10
 
@@ -948,8 +973,8 @@ local StructureModeButton = MakeButton(
 )
 
 StructureModeButton.Name = "StructureModeButton"
-StructureModeButton.Size = UDim2.new(1 / 3, -3, 0, 18)
-StructureModeButton.Position = UDim2.new(1 / 3, 1, 0, 30)
+StructureModeButton.Size = UDim2.new(0.25, -3, 0, 18)
+StructureModeButton.Position = UDim2.new(0.25, 1, 0, 30)
 StructureModeButton.ZIndex = BASE_ZINDEX + 10
 
 local FamilyModeButton = MakeButton(
@@ -959,9 +984,20 @@ local FamilyModeButton = MakeButton(
 )
 
 FamilyModeButton.Name = "FamilyModeButton"
-FamilyModeButton.Size = UDim2.new(1 / 3, -3, 0, 18)
-FamilyModeButton.Position = UDim2.new(2 / 3, 2, 0, 30)
+FamilyModeButton.Size = UDim2.new(0.25, -3, 0, 18)
+FamilyModeButton.Position = UDim2.new(0.50, 2, 0, 30)
 FamilyModeButton.ZIndex = BASE_ZINDEX + 10
+
+local RelevanceModeButton = MakeButton(
+	ObjectsPage,
+	"Relevance",
+	9
+)
+
+RelevanceModeButton.Name = "RelevanceModeButton"
+RelevanceModeButton.Size = UDim2.new(0.25, -3, 0, 18)
+RelevanceModeButton.Position = UDim2.new(0.75, 3, 0, 30)
+RelevanceModeButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
 -- STRUCTURE VIEW
@@ -1057,6 +1093,43 @@ FamilyScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 FamilyScroll.ZIndex = BASE_ZINDEX + 2
 FamilyScroll.Parent = FamilyFrame
 
+--------------------------------------------------
+-- RELEVANCE VIEW
+--------------------------------------------------
+
+local RelevanceFrame = Instance.new("Frame")
+RelevanceFrame.Name = "RelevanceFrame"
+RelevanceFrame.Size = UDim2.new(1, 0, 1, -52)
+RelevanceFrame.Position = UDim2.fromOffset(0, 52)
+RelevanceFrame.BackgroundColor3 = COLORS.Panel2
+RelevanceFrame.BorderSizePixel = 0
+RelevanceFrame.ZIndex = BASE_ZINDEX + 2
+RelevanceFrame.Parent = ObjectsPage
+Corner(RelevanceFrame, 5)
+
+local RelevanceHint = MakeText(
+	RelevanceFrame,
+	"Heuristic importance based on client-visible signals.",
+	7,
+	COLORS.Muted
+)
+RelevanceHint.Position = UDim2.fromOffset(6, 4)
+RelevanceHint.Size = UDim2.new(1, -12, 0, 15)
+RelevanceHint.TextTruncate = Enum.TextTruncate.AtEnd
+RelevanceHint.ZIndex = BASE_ZINDEX + 3
+
+local RelevanceScroll = Instance.new("ScrollingFrame")
+RelevanceScroll.Name = "RelevanceScroll"
+RelevanceScroll.Size = UDim2.new(1, -8, 1, -25)
+RelevanceScroll.Position = UDim2.fromOffset(4, 23)
+RelevanceScroll.BackgroundTransparency = 1
+RelevanceScroll.BorderSizePixel = 0
+RelevanceScroll.ScrollBarThickness = 3
+RelevanceScroll.CanvasSize = UDim2.fromOffset(0, 0)
+RelevanceScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+RelevanceScroll.ZIndex = BASE_ZINDEX + 2
+RelevanceScroll.Parent = RelevanceFrame
+
 -- Rows are positioned manually so the compact mobile layout
 -- remains visible reliably on all screen sizes.
 local ClassificationRowHeight = 16
@@ -1069,10 +1142,12 @@ local function UpdateObjectsPageMode()
 	local showingClassification = ObjectsPageMode == "Classification"
 	local showingStructure = ObjectsPageMode == "Structure"
 	local showingFamilies = ObjectsPageMode == "Families"
+	local showingRelevance = ObjectsPageMode == "Relevance"
 
 	ClassificationFrame.Visible = showingClassification
 	StructureFrame.Visible = showingStructure
 	FamilyFrame.Visible = showingFamilies
+	RelevanceFrame.Visible = showingRelevance
 
 	ClassificationModeButton.BackgroundColor3 = showingClassification and COLORS.Accent or COLORS.Panel3
 	ClassificationModeButton.TextColor3 = showingClassification and Color3.new(1, 1, 1) or COLORS.Text
@@ -1082,6 +1157,9 @@ local function UpdateObjectsPageMode()
 
 	FamilyModeButton.BackgroundColor3 = showingFamilies and COLORS.Accent or COLORS.Panel3
 	FamilyModeButton.TextColor3 = showingFamilies and Color3.new(1, 1, 1) or COLORS.Text
+
+	RelevanceModeButton.BackgroundColor3 = showingRelevance and COLORS.Accent or COLORS.Panel3
+	RelevanceModeButton.TextColor3 = showingRelevance and Color3.new(1, 1, 1) or COLORS.Text
 end
 
 ClassificationModeButton.MouseButton1Click:Connect(function()
@@ -1096,6 +1174,11 @@ end)
 
 FamilyModeButton.MouseButton1Click:Connect(function()
 	ObjectsPageMode = "Families"
+	UpdateObjectsPageMode()
+end)
+
+RelevanceModeButton.MouseButton1Click:Connect(function()
+	ObjectsPageMode = "Relevance"
 	UpdateObjectsPageMode()
 end)
 
@@ -1667,6 +1750,14 @@ local function UpdateCounters()
 		.. "Families detected: "
 		.. tostring(#FamilyOrder)
 		.. "\n"
+		.. "Relevance: "
+		.. tostring(RelevanceCounts.High or 0)
+		.. " high / "
+		.. tostring(RelevanceCounts.Medium or 0)
+		.. " medium / "
+		.. tostring(RelevanceCounts.Low or 0)
+		.. " low"
+		.. "\n"
 		.. "Scan limit status: "
 		.. (ScanTruncated and "TRUNCATED" or "FULL")
 end
@@ -1801,6 +1892,12 @@ ResetClassification = function()
 	table.clear(FamilyCounts)
 	table.clear(FamilyCategories)
 	table.clear(FamilyOrder)
+	table.clear(RelevanceData)
+	table.clear(RelevanceOrder)
+
+	for level in pairs(RelevanceCounts) do
+		RelevanceCounts[level] = 0
+	end
 
 	for category in pairs(ClassificationCounts) do
 		ClassificationCounts[category] = 0
@@ -2210,6 +2307,287 @@ local function CommitFamilyData(classificationData)
 	end
 end
 
+--------------------------------------------------
+-- PHASE 2.3 -- RELEVANCE DETECTION
+--------------------------------------------------
+
+local RelevanceCategoryWeights = {
+	Player = 45,
+	NPC = 40,
+	Tool = 40,
+	Interactive = 45,
+	Item = 35,
+	ValueData = 30,
+	System = 30,
+	Character = 25,
+	UI = 20,
+	Container = 15,
+	Effect = 8,
+	World = 5,
+	Unknown = 0
+}
+
+local RelevanceNameSignals = {
+	"quest", "mission", "objective", "reward", "shop", "vendor", "merchant",
+	"inventory", "backpack", "craft", "upgrade", "trade", "currency", "money",
+	"coin", "gem", "health", "damage", "level", "stats", "checkpoint", "spawn",
+	"teleport", "portal", "door", "button", "trigger", "interact", "controller",
+	"manager", "service", "config", "settings", "data"
+}
+
+local function GetRecordSignalCount(record)
+	local count = 0
+	if record then
+		if next(record.Attributes or {}) then
+			count += 1
+		end
+		if #(record.Tags or {}) > 0 then
+			count += 1
+		end
+		if record.Value ~= nil then
+			count += 1
+		end
+		if next(record.Properties or {}) then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function CalculateRelevance(record, classificationRecord, familyRecord)
+	local score = 0
+	local signals = {}
+	local category = classificationRecord and classificationRecord.Category or "Unknown"
+	local instance = record and record.Instance
+
+	local function AddScore(amount, signal)
+		score += amount
+		if signal and not table.find(signals, signal) then
+			table.insert(signals, signal)
+		end
+	end
+
+	AddScore(RelevanceCategoryWeights[category] or 0, category .. " category")
+
+	if instance and instance.Parent then
+		local lowerName = string.lower(instance.Name)
+		for _, word in ipairs(RelevanceNameSignals) do
+			if string.find(lowerName, word, 1, true) then
+				AddScore(10, "Name: " .. word)
+				break
+			end
+		end
+	end
+
+	local signalCount = GetRecordSignalCount(record)
+	if signalCount >= 1 then
+		AddScore(8, "Has scanned data")
+	end
+	if signalCount >= 2 then
+		AddScore(7, "Multiple data signals")
+	end
+	if signalCount >= 3 then
+		AddScore(5, "Rich object data")
+	end
+
+	if classificationRecord then
+		for _, signal in ipairs(classificationRecord.Signals or {}) do
+			local lowerSignal = string.lower(signal)
+			if string.find(lowerSignal, "interaction", 1, true)
+				or string.find(lowerSignal, "tool", 1, true)
+				or string.find(lowerSignal, "attribute", 1, true)
+				or string.find(lowerSignal, "value", 1, true) then
+				AddScore(5, signal)
+			end
+		end
+	end
+
+	if familyRecord and familyRecord.Family then
+		AddScore(3, "Family: " .. familyRecord.Family)
+	end
+
+	local level
+	if score >= 60 then
+		level = "High"
+	elseif score >= 30 then
+		level = "Medium"
+	elseif score >= 8 then
+		level = "Low"
+	else
+		level = "Unknown"
+	end
+
+	return score, level, signals
+end
+
+local function BuildRelevanceData(classificationData, familyData)
+	local relevanceData = {}
+	local relevanceCounts = {
+		High = 0,
+		Medium = 0,
+		Low = 0,
+		Unknown = 0
+	}
+	local relevanceOrder = {}
+
+	for index, classificationRecord in pairs(classificationData) do
+		local scanRecord = classificationRecord.Instance and ScannedInstances[classificationRecord.Instance]
+		if scanRecord then
+			local familyRecord = familyData[index]
+			local score, level, signals = CalculateRelevance(
+				scanRecord,
+				classificationRecord,
+				familyRecord
+			)
+
+			relevanceData[index] = {
+				Instance = classificationRecord.Instance,
+				Name = classificationRecord.Name,
+				ClassName = classificationRecord.ClassName,
+				FullName = classificationRecord.FullName,
+				Category = classificationRecord.Category,
+				Family = familyRecord and familyRecord.Family or "Unknown Family",
+				Score = score,
+				Level = level,
+				Signals = signals
+			}
+
+			relevanceCounts[level] = (relevanceCounts[level] or 0) + 1
+		table.insert(relevanceOrder, index)
+		end
+	end
+
+	table.sort(relevanceOrder, function(a, b)
+		local left = relevanceData[a]
+		local right = relevanceData[b]
+		if left.Score == right.Score then
+			return left.Name < right.Name
+		end
+		return left.Score > right.Score
+	end)
+
+	return relevanceData, relevanceCounts, relevanceOrder
+end
+
+local function CommitRelevanceData(classificationData)
+	local relevanceData, relevanceCounts, relevanceOrder = BuildRelevanceData(
+		classificationData,
+		FamilyData
+	)
+
+	table.clear(RelevanceData)
+	table.clear(RelevanceOrder)
+	for level in pairs(RelevanceCounts) do
+		RelevanceCounts[level] = relevanceCounts[level] or 0
+	end
+	for index, data in pairs(relevanceData) do
+		RelevanceData[index] = data
+	end
+	for index, dataIndex in ipairs(relevanceOrder) do
+		RelevanceOrder[index] = dataIndex
+	end
+end
+
+local function GetRelevanceTextColor(level)
+	if level == "High" then
+		return COLORS.Error
+	elseif level == "Medium" then
+		return COLORS.Warning
+	elseif level == "Low" then
+		return COLORS.Success
+	end
+	return COLORS.Muted
+end
+
+local function CreateRelevanceRow(data, order)
+	local row = Instance.new("Frame")
+	row.Name = "RelevanceRow" .. order
+	row.Size = UDim2.new(1, -2, 0, 31)
+	row.Position = UDim2.fromOffset(0, (order - 1) * 33)
+	row.BackgroundColor3 = COLORS.Panel3
+	row.BorderSizePixel = 0
+	row.ZIndex = BASE_ZINDEX + 3
+	row.Parent = RelevanceScroll
+	Corner(row, 4)
+
+	local levelLabel = MakeText(
+		row,
+		data.Level .. " " .. tostring(data.Score),
+		8,
+		GetRelevanceTextColor(data.Level),
+		Enum.Font.GothamBold
+	)
+	levelLabel.Position = UDim2.fromOffset(6, 2)
+	levelLabel.Size = UDim2.fromOffset(55, 13)
+	levelLabel.ZIndex = BASE_ZINDEX + 4
+
+	local nameLabel = MakeText(
+		row,
+		data.Name,
+		8,
+		COLORS.Text,
+		Enum.Font.GothamMedium
+	)
+	nameLabel.Position = UDim2.fromOffset(63, 2)
+	nameLabel.Size = UDim2.new(1, -70, 0, 13)
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	nameLabel.ZIndex = BASE_ZINDEX + 4
+
+	local detailLabel = MakeText(
+		row,
+		data.Category .. " / " .. data.Family,
+		7,
+		COLORS.Muted
+	)
+	detailLabel.Position = UDim2.fromOffset(63, 15)
+	detailLabel.Size = UDim2.new(1, -70, 0, 11)
+	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	detailLabel.ZIndex = BASE_ZINDEX + 4
+end
+
+local function UpdateRelevanceUI()
+	ObjectsSummary.Text =
+		"Relevance is heuristic: "
+		.. tostring(RelevanceCounts.High or 0)
+		.. " high / "
+		.. tostring(RelevanceCounts.Medium or 0)
+		.. " medium / "
+		.. tostring(RelevanceCounts.Low or 0)
+		.. " low."
+
+	for _, child in ipairs(RelevanceScroll:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	local limit = math.min(#RelevanceOrder, 100)
+	for order = 1, limit do
+		local index = RelevanceOrder[order]
+		local data = RelevanceData[index]
+		if data then
+			CreateRelevanceRow(data, order)
+		end
+	end
+
+	RelevanceScroll.CanvasSize = UDim2.fromOffset(
+		0,
+		limit * 33
+	)
+end
+
+local function RequestRelevanceUIUpdate()
+	if RelevanceUIUpdateScheduled then
+		return
+	end
+
+	RelevanceUIUpdateScheduled = true
+	task.defer(function()
+		RelevanceUIUpdateScheduled = false
+		UpdateRelevanceUI()
+	end)
+end
+
 local function CreateFamilyRow(family, count, category, order)
 	local row = Instance.new("Frame")
 	row.Name = "FamilyRow" .. order
@@ -2339,7 +2717,7 @@ local function UpdateClassificationUI()
 	elseif ClassificationRunning then
 		ObjectsSummary.Text = "Classifying scanned objects..."
 	else
-		ObjectsSummary.Text = "Phase 1 structure + Phase 2 classification."
+		ObjectsSummary.Text = "Phase 1 structure + classification + families + relevance."
 	end
 
 	for _, child in ipairs(ClassificationScroll:GetChildren()) do
@@ -2573,6 +2951,10 @@ local function RunClassification(scanGeneration)
 	-- succeeded, keeping the same generation-safe commit model.
 	CommitFamilyData(ClassificationData)
 
+	-- Phase 2.3 relevance is built only after classification and family data
+	-- are complete, so its signals use the full stored scan context.
+	CommitRelevanceData(ClassificationData)
+
 	for category in pairs(ClassificationCounts) do
 		ClassificationCounts[category] = localCounts[category] or 0
 	end
@@ -2583,6 +2965,7 @@ local function RunClassification(scanGeneration)
 	ClassificationProgress = 100
 	RequestClassificationUIUpdate(true)
 	UpdateFamilyUI()
+	UpdateRelevanceUI()
 	UpdateOverallStatus("COMPLETE", 100)
 end
 
@@ -2938,8 +3321,39 @@ workspace.DescendantAdded:Connect(function(instance)
 				return countA > countB
 			end)
 
+			local familyRecord = FamilyData[familyIndex]
+			local score, level, signals = CalculateRelevance(
+				record,
+				ClassificationData[classificationIndex],
+				familyRecord
+			)
+
+			local relevanceIndex = #RelevanceData + 1
+			RelevanceData[relevanceIndex] = {
+				Instance = record.Instance,
+				Name = record.Name,
+				ClassName = record.ClassName,
+				FullName = record.FullName,
+				Category = category,
+				Family = family,
+				Score = score,
+				Level = level,
+				Signals = signals
+			}
+			RelevanceCounts[level] = (RelevanceCounts[level] or 0) + 1
+			table.insert(RelevanceOrder, relevanceIndex)
+			table.sort(RelevanceOrder, function(a, b)
+				local left = RelevanceData[a]
+				local right = RelevanceData[b]
+				if left.Score == right.Score then
+					return left.Name < right.Name
+				end
+				return left.Score > right.Score
+			end)
+
 			RequestClassificationUIUpdate()
 			RequestFamilyUIUpdate()
+			RequestRelevanceUIUpdate()
 		else
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
@@ -3025,6 +3439,7 @@ UpdateMainWidth()
 UpdateCounters()
 UpdateClassificationUI()
 UpdateFamilyUI()
+UpdateRelevanceUI()
 
 Main.Visible = true
 OpenButton.Visible = false
