@@ -62,6 +62,21 @@
     • Phase 2.1 classification and Phase 2.2 family integration
     • Mobile-friendly relevance ranking view
 
+    Phase 2.4
+
+    Features:
+    • Relationship detection
+    • Parent / child relationship tracking
+    • Shared family relationship detection
+    • Shared tag relationship detection
+    • Shared attribute-key relationship detection
+    • Relationship strength tracking
+    • Relationship summary UI
+    • Relationship list with source and target objects
+    • Incremental relationship updates for newly detected objects
+    • Phase 2.1 classification, Phase 2.2 family, and Phase 2.3 relevance integration
+    • Mobile-friendly relationship view
+
     Optimization notes:
     • Uses adaptive time-budgeted batches to reduce frame spikes
     • Uses larger work batches with short yields for better throughput
@@ -263,6 +278,19 @@ local RelevanceCounts = {
 }
 local RelevanceOrder = {}
 local RelevanceUIUpdateScheduled = false
+
+-- Phase 2.4 relationship intelligence. Relationships are stored as compact
+-- links between already-scanned objects; no additional workspace rescan is used.
+local RelationData = {}
+local RelationCounts = {
+	ParentChild = 0,
+	Family = 0,
+	SharedTag = 0,
+	SharedAttribute = 0
+}
+local RelationOrder = {}
+local RelationUIUpdateScheduled = false
+local RelationPairKeys = {}
 
 local ClassificationCounts = {
 	Character = 0,
@@ -1295,15 +1323,28 @@ RelationsTitle.ZIndex = BASE_ZINDEX + 3
 
 local RelationsInfo = MakeText(
 	RelationsPage,
-	"Relationship detection will be added in a later phase.",
-	10,
+	"Waiting for relationship analysis...",
+	8,
 	COLORS.Muted
 )
 
-RelationsInfo.Position = UDim2.fromOffset(0, 28)
-RelationsInfo.Size = UDim2.new(1, 0, 0, 40)
+RelationsInfo.Position = UDim2.fromOffset(0, 25)
+RelationsInfo.Size = UDim2.new(1, 0, 0, 28)
 RelationsInfo.TextWrapped = true
 RelationsInfo.ZIndex = BASE_ZINDEX + 3
+
+local RelationsScroll = Instance.new("ScrollingFrame")
+RelationsScroll.Name = "RelationsScroll"
+RelationsScroll.Size = UDim2.new(1, -8, 1, -58)
+RelationsScroll.Position = UDim2.fromOffset(4, 53)
+RelationsScroll.BackgroundColor3 = COLORS.Panel2
+RelationsScroll.BorderSizePixel = 0
+RelationsScroll.ScrollBarThickness = 3
+RelationsScroll.CanvasSize = UDim2.fromOffset(0, 0)
+RelationsScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+RelationsScroll.ZIndex = BASE_ZINDEX + 2
+RelationsScroll.Parent = RelationsPage
+Corner(RelationsScroll, 5)
 
 --------------------------------------------------
 -- BEHAVIOR PAGE
@@ -1894,6 +1935,13 @@ ResetClassification = function()
 	table.clear(FamilyOrder)
 	table.clear(RelevanceData)
 	table.clear(RelevanceOrder)
+	table.clear(RelationData)
+	table.clear(RelationOrder)
+	table.clear(RelationPairKeys)
+
+	for relationType in pairs(RelationCounts) do
+		RelationCounts[relationType] = 0
+	end
 
 	for level in pairs(RelevanceCounts) do
 		RelevanceCounts[level] = 0
@@ -2488,6 +2536,304 @@ local function CommitRelevanceData(classificationData)
 	end
 end
 
+--------------------------------------------------
+-- PHASE 2.4 -- RELATIONSHIP DETECTION
+--------------------------------------------------
+
+local RELATION_MAX_PER_OBJECT = 24
+local RELATION_MAX_SHARED_GROUP = 8
+
+local function RelationKey(fromIndex, toIndex, relationType)
+	if relationType == "ParentChild" then
+		return relationType .. "|" .. tostring(fromIndex) .. "|" .. tostring(toIndex)
+	end
+
+	local first = math.min(fromIndex, toIndex)
+	local second = math.max(fromIndex, toIndex)
+	return relationType .. "|" .. tostring(first) .. "|" .. tostring(second)
+end
+
+local function AddRelation(objectEntries, relationList, relationCounts, pairKeys, fromIndex, toIndex, relationType, strength, detail)
+	if not fromIndex or not toIndex or fromIndex == toIndex then
+		return
+	end
+
+	local key = RelationKey(fromIndex, toIndex, relationType)
+	if pairKeys[key] then
+		return
+	end
+
+	local fromEntry = objectEntries[fromIndex]
+	local toEntry = objectEntries[toIndex]
+	if not fromEntry or not toEntry then
+		return
+	end
+
+	pairKeys[key] = true
+
+	local relation = {
+		FromIndex = fromIndex,
+		ToIndex = toIndex,
+		FromName = fromEntry.Base.Name,
+		ToName = toEntry.Base.Name,
+		FromClass = fromEntry.Base.ClassName,
+		ToClass = toEntry.Base.ClassName,
+		Type = relationType,
+		Strength = strength,
+		Detail = detail or ""
+	}
+
+	table.insert(relationList, relation)
+	relationCounts[relationType] = (relationCounts[relationType] or 0) + 1
+end
+
+local function BuildRelationshipData(classificationData, familyData)
+	local objectEntries = {}
+	local relationList = {}
+	local relationCounts = {
+		ParentChild = 0,
+		Family = 0,
+		SharedTag = 0,
+		SharedAttribute = 0
+	}
+	local pairKeys = {}
+
+	for index, classificationRecord in pairs(classificationData) do
+		local scanRecord = classificationRecord.Instance and ScannedInstances[classificationRecord.Instance]
+		if scanRecord then
+			objectEntries[index] = {
+				Base = {
+					Instance = classificationRecord.Instance,
+					Name = classificationRecord.Name,
+					ClassName = classificationRecord.ClassName,
+					FullName = classificationRecord.FullName
+				},
+				Scan = scanRecord,
+				Classification = classificationRecord,
+				Family = familyData[index] and familyData[index].Family or "Unknown Family"
+			}
+		end
+	end
+
+	local instanceToIndex = {}
+	local familyGroups = {}
+	local tagGroups = {}
+	local attributeGroups = {}
+
+	for index, entry in pairs(objectEntries) do
+		instanceToIndex[entry.Base.Instance] = index
+
+		local family = entry.Family
+		familyGroups[family] = familyGroups[family] or {}
+		table.insert(familyGroups[family], index)
+
+		for _, tag in ipairs(entry.Scan.Tags or {}) do
+			tagGroups[tag] = tagGroups[tag] or {}
+			table.insert(tagGroups[tag], index)
+		end
+
+		for attributeName in pairs(entry.Scan.Attributes or {}) do
+			attributeGroups[attributeName] = attributeGroups[attributeName] or {}
+			table.insert(attributeGroups[attributeName], index)
+		end
+	end
+
+	-- Direct structural links.
+	for index, entry in pairs(objectEntries) do
+		local parentIndex = instanceToIndex[entry.Scan.Parent]
+		if parentIndex then
+			AddRelation(
+				objectEntries, relationList, relationCounts, pairKeys,
+				parentIndex, index, "ParentChild", 100,
+				"Direct parent / child"
+			)
+		end
+	end
+
+	-- Shared-family links. Large groups are intentionally skipped so a common
+	-- container does not produce thousands of pair combinations.
+	for family, members in pairs(familyGroups) do
+		if #members > 1 and #members <= RELATION_MAX_SHARED_GROUP then
+			for i = 1, #members - 1 do
+				for j = i + 1, #members do
+					AddRelation(
+						objectEntries, relationList, relationCounts, pairKeys,
+						members[i], members[j], "Family", 70, family
+					)
+				end
+			end
+		end
+	end
+
+	-- Shared-tag links.
+	for tag, members in pairs(tagGroups) do
+		if #members > 1 and #members <= RELATION_MAX_SHARED_GROUP then
+			for i = 1, #members - 1 do
+				for j = i + 1, #members do
+					AddRelation(
+						objectEntries, relationList, relationCounts, pairKeys,
+						members[i], members[j], "SharedTag", 60,
+						"Tag: " .. tostring(tag)
+					)
+				end
+			end
+		end
+	end
+
+	-- Shared attribute-key links. The key is considered a relationship signal;
+	-- actual attribute values are not exposed as a cross-object comparison.
+	for attributeName, members in pairs(attributeGroups) do
+		if #members > 1 and #members <= RELATION_MAX_SHARED_GROUP then
+			for i = 1, #members - 1 do
+				for j = i + 1, #members do
+					AddRelation(
+						objectEntries, relationList, relationCounts, pairKeys,
+						members[i], members[j], "SharedAttribute", 45,
+						"Attribute: " .. tostring(attributeName)
+					)
+				end
+			end
+		end
+	end
+
+	return relationList, relationCounts, pairKeys
+end
+
+local function CommitRelationshipData(classificationData)
+	local relationList, relationCounts, pairKeys = BuildRelationshipData(
+		classificationData,
+		FamilyData
+	)
+
+	table.clear(RelationData)
+	table.clear(RelationOrder)
+	table.clear(RelationPairKeys)
+
+	for index, data in ipairs(relationList) do
+		RelationData[index] = data
+		RelationOrder[index] = index
+	end
+
+	for relationType in pairs(RelationCounts) do
+		RelationCounts[relationType] = relationCounts[relationType] or 0
+	end
+
+	for key in pairs(pairKeys) do
+		RelationPairKeys[key] = true
+	end
+
+	table.sort(RelationOrder, function(a, b)
+		local left = RelationData[a]
+		local right = RelationData[b]
+		if left.Strength == right.Strength then
+			if left.Type == right.Type then
+				return left.FromName .. left.ToName < right.FromName .. right.ToName
+			end
+			return left.Type < right.Type
+		end
+		return left.Strength > right.Strength
+	end)
+end
+
+local function GetRelationTextColor(relationType)
+	if relationType == "ParentChild" then
+		return COLORS.Accent
+	elseif relationType == "Family" then
+		return COLORS.Success
+	elseif relationType == "SharedTag" then
+		return COLORS.Warning
+	end
+	return COLORS.Muted
+end
+
+local function CreateRelationRow(data, order)
+	local row = Instance.new("Frame")
+	row.Name = "RelationRow" .. order
+	row.Size = UDim2.new(1, -2, 0, 38)
+	row.Position = UDim2.fromOffset(0, (order - 1) * 40)
+	row.BackgroundColor3 = COLORS.Panel3
+	row.BorderSizePixel = 0
+	row.ZIndex = BASE_ZINDEX + 3
+	row.Parent = RelationsScroll
+	Corner(row, 4)
+
+	local typeLabel = MakeText(
+		row,
+		data.Type,
+		7,
+		GetRelationTextColor(data.Type),
+		Enum.Font.GothamBold
+	)
+	typeLabel.Position = UDim2.fromOffset(6, 3)
+	typeLabel.Size = UDim2.fromOffset(88, 13)
+	typeLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	typeLabel.ZIndex = BASE_ZINDEX + 4
+
+	local namesLabel = MakeText(
+		row,
+		data.FromName .. "  →  " .. data.ToName,
+		8,
+		COLORS.Text,
+		Enum.Font.GothamMedium
+	)
+	namesLabel.Position = UDim2.fromOffset(96, 2)
+	namesLabel.Size = UDim2.new(1, -102, 0, 15)
+	namesLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	namesLabel.ZIndex = BASE_ZINDEX + 4
+
+	local detailLabel = MakeText(
+		row,
+		"Strength " .. tostring(data.Strength) .. "  •  " .. tostring(data.Detail),
+		7,
+		COLORS.Muted
+	)
+	detailLabel.Position = UDim2.fromOffset(96, 18)
+	detailLabel.Size = UDim2.new(1, -102, 0, 12)
+	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	detailLabel.ZIndex = BASE_ZINDEX + 4
+end
+
+local function UpdateRelationsUI()
+	RelationsInfo.Text =
+		""
+		.. tostring(RelationCounts.ParentChild or 0)
+		.. " parent / child  •  "
+		.. tostring(RelationCounts.Family or 0)
+		.. " family  •  "
+		.. tostring(RelationCounts.SharedTag or 0)
+		.. " tag  •  "
+		.. tostring(RelationCounts.SharedAttribute or 0)
+		.. " attribute"
+
+	for _, child in ipairs(RelationsScroll:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	local limit = math.min(#RelationOrder, 100)
+	for order = 1, limit do
+		local relation = RelationData[RelationOrder[order]]
+		if relation then
+			CreateRelationRow(relation, order)
+		end
+	end
+
+	RelationsScroll.CanvasSize = UDim2.fromOffset(0, limit * 40)
+end
+
+local function RequestRelationsUIUpdate()
+	if RelationUIUpdateScheduled then
+		return
+	end
+
+	RelationUIUpdateScheduled = true
+	task.defer(function()
+		RelationUIUpdateScheduled = false
+		UpdateRelationsUI()
+	end)
+end
+
 local function GetRelevanceTextColor(level)
 	if level == "High" then
 		return COLORS.Error
@@ -2954,6 +3300,7 @@ local function RunClassification(scanGeneration)
 	-- Phase 2.3 relevance is built only after classification and family data
 	-- are complete, so its signals use the full stored scan context.
 	CommitRelevanceData(ClassificationData)
+	CommitRelationshipData(ClassificationData)
 
 	for category in pairs(ClassificationCounts) do
 		ClassificationCounts[category] = localCounts[category] or 0
@@ -2966,6 +3313,7 @@ local function RunClassification(scanGeneration)
 	RequestClassificationUIUpdate(true)
 	UpdateFamilyUI()
 	UpdateRelevanceUI()
+	UpdateRelationsUI()
 	UpdateOverallStatus("COMPLETE", 100)
 end
 
@@ -3240,6 +3588,32 @@ OpenButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
+-- LIVE RELATIONSHIP REFRESH
+--------------------------------------------------
+
+local RelationRefreshScheduled = false
+
+local function ScheduleLiveRelationshipRefresh()
+	if RelationRefreshScheduled then
+		return
+	end
+
+	if not ClassificationComplete then
+		return
+	end
+
+	RelationRefreshScheduled = true
+	task.defer(function()
+		RelationRefreshScheduled = false
+		if not ClassificationComplete then
+			return
+		end
+		CommitRelationshipData(ClassificationData)
+		UpdateRelationsUI()
+	end)
+end
+
+--------------------------------------------------
 -- LIVE DESCENDANT DETECTION
 --------------------------------------------------
 
@@ -3354,6 +3728,7 @@ workspace.DescendantAdded:Connect(function(instance)
 			RequestClassificationUIUpdate()
 			RequestFamilyUIUpdate()
 			RequestRelevanceUIUpdate()
+			ScheduleLiveRelationshipRefresh()
 		else
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
@@ -3440,6 +3815,7 @@ UpdateCounters()
 UpdateClassificationUI()
 UpdateFamilyUI()
 UpdateRelevanceUI()
+UpdateRelationsUI()
 
 Main.Visible = true
 OpenButton.Visible = false
