@@ -143,6 +143,11 @@ local MAX_RESULTS = 50000
 local MAX_ATTRIBUTES_PER_OBJECT = 100
 local MAX_TAGS_PER_OBJECT = 50
 
+-- Relationship limits are shared by the analyzer UI and relationship builder.
+local RELATION_MAX_PER_OBJECT = 24
+local RELATION_MAX_TOTAL = 5000
+local RELATION_MAX_SHARED_GROUP = 8
+
 local AUTO_SCAN = true
 
 local DISPLAY_ORDER = 2147483647
@@ -341,6 +346,9 @@ local ClassificationComplete = false
 local PendingInstances = {}
 local PendingClassification = {}
 local ScannedInstances = {}
+local StructuralChangeQueue = {}
+local StructuralChangeDetected = false
+local StructuralChangeScheduled = false
 local ScanTruncated = false
 
 -- Runtime caches reduce repeated ancestor/name work during classification
@@ -376,6 +384,9 @@ local function ClearScanData()
 	table.clear(ScanData)
 	table.clear(PendingInstances)
 	table.clear(PendingClassification)
+	table.clear(StructuralChangeQueue)
+	StructuralChangeDetected = false
+	StructuralChangeScheduled = false
 	table.clear(ScannedInstances)
 	table.clear(HumanoidAncestorCache)
 	table.clear(FamilyRootCache)
@@ -1923,7 +1934,11 @@ local function ScanInstance(instance)
 			properties,
 
 		Value =
-			value
+			value,
+
+		AttributeCount = attributeCountForObject,
+		TagCount = tagCountForObject,
+		IsValueBase = isValueBase
 	}
 
 	table.insert(
@@ -2133,10 +2148,9 @@ local function ClassifyObject(record)
 		end
 	end
 
-	if HasHumanoidAncestor(instance) then
-		AddClassificationSignal(signals, "Inside character hierarchy")
-		return "Character", signals
-	end
+	-- Specific object types are checked before the generic humanoid-ancestor
+	-- fallback so NPC-contained tools, UI, effects, and interactions keep their
+	-- specific classifications instead of becoming Character.
 
 	-- Tools.
 	if instance:IsA("Tool") then
@@ -2195,6 +2209,12 @@ local function ClassifyObject(record)
 	if instance:IsA("ValueBase") then
 		AddClassificationSignal(signals, "ValueBase")
 		return "ValueData", signals
+	end
+
+	-- Generic humanoid-ancestor fallback comes after specific classifications.
+	if HasHumanoidAncestor(instance) then
+		AddClassificationSignal(signals, "Inside character hierarchy")
+		return "Character", signals
 	end
 
 	if next(record.Attributes or {}) then
@@ -2610,10 +2630,6 @@ end
 --------------------------------------------------
 -- PHASE 2.4 -- RELATIONSHIP DETECTION
 --------------------------------------------------
-
-local RELATION_MAX_PER_OBJECT = 24
-local RELATION_MAX_TOTAL = 5000
-local RELATION_MAX_SHARED_GROUP = 8
 
 local function RelationKey(fromIndex, toIndex, relationType)
 	if relationType == "ParentChild" then
@@ -3509,7 +3525,17 @@ local function RunScan()
 				PendingInstances[instance] = nil
 
 				if #ScanData >= MAX_RESULTS then
-					ScanTruncated = true
+					local pendingWorkRemaining = false
+					for pendingInstance in pairs(PendingInstances) do
+						if pendingInstance.Parent
+							and pendingInstance:IsDescendantOf(workspace)
+							and not ScannedInstances[pendingInstance] then
+							pendingWorkRemaining = true
+							break
+						end
+					end
+
+					ScanTruncated = ScanTruncated or pendingWorkRemaining
 					table.clear(PendingInstances)
 					break
 				end
@@ -3529,6 +3555,14 @@ local function RunScan()
 	end
 
 	ScanRunning = false
+
+	-- Structural changes that occurred during the scan are already represented
+	-- by the scan/pending queues. Do not trigger a second intelligence rebuild
+	-- for those same events after the generation completes.
+	table.clear(StructuralChangeQueue)
+	StructuralChangeDetected = false
+	StructuralChangeScheduled = false
+
 	if not success then
 		SetStatus("Structure", "ERROR")
 		SetStatus("Attributes", "ERROR")
@@ -3633,28 +3667,213 @@ OpenButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
--- LIVE RELATIONSHIP REFRESH
+-- LIVE STRUCTURAL CHANGE REFRESH
 --------------------------------------------------
 
-local RelationRefreshScheduled = false
+-- Structural changes reuse the existing scan/classification/family/relevance/
+-- relationship engines. A short debounce batches several related Roblox events
+-- (for example, moving a model also moves its descendants) into one refresh.
+local function RefreshScanRecord(instance, record)
+	if not instance or not record then
+		return false
+	end
 
-local function ScheduleLiveRelationshipRefresh()
-	if RelationRefreshScheduled then
+	if not instance.Parent or not instance:IsDescendantOf(workspace) then
+		return false
+	end
+
+	local attributes = SafeAttributes(instance)
+	local tags = SafeTags(instance)
+	local properties = GetRelevantProperties(instance)
+	local isValueBase = instance:IsA("ValueBase")
+	local value = GetValue(instance, isValueBase)
+
+	local limitedAttributes = {}
+	local attributeCountForObject = 0
+	for name, attributeValue in pairs(attributes) do
+		attributeCountForObject += 1
+		if attributeCountForObject <= MAX_ATTRIBUTES_PER_OBJECT then
+			limitedAttributes[name] = attributeValue
+		end
+	end
+
+	local limitedTags = {}
+	local tagCountForObject = 0
+	for _, tag in ipairs(tags) do
+		tagCountForObject += 1
+		if tagCountForObject <= MAX_TAGS_PER_OBJECT then
+			limitedTags[tagCountForObject] = tag
+		end
+	end
+
+	AttributeCount += attributeCountForObject - (record.AttributeCount or 0)
+	TagCount += tagCountForObject - (record.TagCount or 0)
+
+	local wasValueBase = record.IsValueBase == true
+	if wasValueBase ~= isValueBase then
+		ValueCount += isValueBase and 1 or -1
+	end
+
+	record.Name = instance.Name
+	record.ClassName = instance.ClassName
+	record.FullName = SafeFullName(instance)
+	record.Parent = instance.Parent
+	record.ParentName = instance.Parent and instance.Parent.Name or nil
+	record.Attributes = limitedAttributes
+	record.Tags = limitedTags
+	record.Properties = properties
+	record.Value = value
+	record.AttributeCount = attributeCountForObject
+	record.TagCount = tagCountForObject
+	record.IsValueBase = isValueBase
+
+	ScannedInstances[instance] = record
+	return true
+end
+
+local function RefreshScannedSubtree(root)
+	if not root or not root.Parent or not root:IsDescendantOf(workspace) then
+		return false
+	end
+
+	InvalidateHierarchyCaches(root)
+
+	local refreshed = false
+	local rootRecord = ScannedInstances[root]
+	if rootRecord and RefreshScanRecord(root, rootRecord) then
+		refreshed = true
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		local record = ScannedInstances[descendant]
+		if record and RefreshScanRecord(descendant, record) then
+			refreshed = true
+		end
+	end
+
+	return refreshed
+end
+
+local function RemoveScannedSubtree(root)
+	if not root or not ScannedInstances[root] then
+		return false
+	end
+
+	local removalSet = {[root] = true}
+	for _, descendant in ipairs(root:GetDescendants()) do
+		removalSet[descendant] = true
+	end
+
+	local removedAny = false
+	local kept = {}
+
+	for _, record in ipairs(ScanData) do
+		if removalSet[record.Instance] then
+			removedAny = true
+			AttributeCount -= record.AttributeCount or 0
+			TagCount -= record.TagCount or 0
+			if record.IsValueBase then
+				ValueCount -= 1
+			end
+			ScannedInstances[record.Instance] = nil
+			PendingInstances[record.Instance] = nil
+			PendingClassification[record.Instance] = nil
+		else
+			kept[#kept + 1] = record
+		end
+	end
+
+	if not removedAny then
+		return false
+	end
+
+	table.clear(ScanData)
+	for index, record in ipairs(kept) do
+		ScanData[index] = record
+	end
+
+	ObjectCount = #ScanData
+	AttributeCount = math.max(0, AttributeCount)
+	TagCount = math.max(0, TagCount)
+	ValueCount = math.max(0, ValueCount)
+	return true
+end
+
+local function HasQueuedStructuralAncestor(instance)
+	if not instance then
+		return false
+	end
+
+	local current = instance.Parent
+	while current and current ~= workspace do
+		if StructuralChangeQueue[current] then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+local function ScheduleStructuralAnalysisRefresh()
+	if ScanRunning then
 		return
 	end
 
-	if not ClassificationComplete then
+	if StructuralChangeScheduled then
 		return
 	end
 
-	RelationRefreshScheduled = true
+	StructuralChangeScheduled = true
 	task.defer(function()
-		RelationRefreshScheduled = false
-		if not ClassificationComplete then
+		-- Allow a burst of DescendantRemoving/Added events to settle before
+		-- rebuilding intelligence once.
+		task.wait(0.05)
+
+		StructuralChangeScheduled = false
+		if ScanRunning then
 			return
 		end
-		CommitRelationshipData(ClassificationData)
-		UpdateRelationsUI()
+
+		if next(StructuralChangeQueue) == nil then
+			return
+		end
+
+		local changes = table.clone(StructuralChangeQueue)
+		table.clear(StructuralChangeQueue)
+
+		local changed = StructuralChangeDetected
+		StructuralChangeDetected = false
+		for instance in pairs(changes) do
+			if instance and instance.Parent and instance:IsDescendantOf(workspace) then
+				if RefreshScannedSubtree(instance) then
+					changed = true
+				end
+			else
+				if RemoveScannedSubtree(instance) then
+					changed = true
+				end
+			end
+		end
+
+		if not changed then
+			return
+		end
+
+		UpdateCounters()
+
+		-- Cancel the previous intelligence generation safely. The old task keeps
+		-- its generation token and therefore cannot commit stale results.
+		CurrentScan += 1
+		local refreshGeneration = CurrentScan
+		ClassificationRunning = false
+		ClassificationScheduled = true
+		ClassificationComplete = false
+		ClassificationProgress = 0
+
+		UpdateOverallStatus("CLASSIFYING", 0)
+		task.defer(function()
+			RunClassification(refreshGeneration)
+		end)
 	end)
 end
 
@@ -3665,8 +3884,6 @@ end
 workspace.DescendantAdded:Connect(function(instance)
 	local eventScan = CurrentScan
 	task.defer(function()
-		-- A delayed event belongs to the generation that existed when the
-		-- event was received. It must not modify a newer scan.
 		if eventScan ~= CurrentScan then
 			return
 		end
@@ -3682,7 +3899,14 @@ workspace.DescendantAdded:Connect(function(instance)
 			return
 		end
 
+		-- An already-scanned instance being added again means its hierarchy may
+		-- have changed. Refresh it instead of silently ignoring the event.
 		if ScannedInstances[instance] then
+			if not HasQueuedStructuralAncestor(instance) then
+				StructuralChangeQueue[instance] = true
+			end
+			StructuralChangeDetected = true
+			ScheduleStructuralAnalysisRefresh()
 			return
 		end
 
@@ -3698,8 +3922,15 @@ workspace.DescendantAdded:Connect(function(instance)
 		end
 		UpdateCounters()
 
-		-- Classification is considered active from the moment it is scheduled,
-		-- eliminating the scan-to-classification startup race.
+		-- If this addition is part of a reparent/removal burst, the queued
+		-- structural refresh will rebuild all intelligence from the updated
+		-- ScanData. Avoid doing a second incremental classification here.
+		if next(StructuralChangeQueue) then
+			ClassificationComplete = false
+			RequestClassificationUIUpdate()
+			return
+		end
+
 		if ClassificationRunning or ClassificationScheduled then
 			PendingClassification[instance] = record
 			ClassificationComplete = false
@@ -3743,7 +3974,7 @@ workspace.DescendantAdded:Connect(function(instance)
 			end)
 
 			local familyRecord = FamilyData[familyIndex]
-			local score, level, signals = CalculateRelevance(
+			local score, level, relevanceSignals = CalculateRelevance(
 				record,
 				ClassificationData[classificationIndex],
 				familyRecord
@@ -3759,7 +3990,7 @@ workspace.DescendantAdded:Connect(function(instance)
 				Family = family,
 				Score = score,
 				Level = level,
-				Signals = signals
+				Signals = relevanceSignals
 			}
 			RelevanceCounts[level] = (RelevanceCounts[level] or 0) + 1
 			table.insert(RelevanceOrder, relevanceIndex)
@@ -3775,10 +4006,9 @@ workspace.DescendantAdded:Connect(function(instance)
 			RequestClassificationUIUpdate()
 			RequestFamilyUIUpdate()
 			RequestRelevanceUIUpdate()
-			ScheduleLiveRelationshipRefresh()
+			CommitRelationshipData(ClassificationData)
+			UpdateRelationsUI()
 		else
-			-- Classification previously failed or has not completed. Keep the
-			-- new record pending and schedule a fresh generation-safe retry.
 			PendingClassification[instance] = record
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
@@ -3792,6 +4022,25 @@ workspace.DescendantAdded:Connect(function(instance)
 			end
 		end
 	end)
+end)
+
+workspace.DescendantRemoving:Connect(function(instance)
+	-- Remove the old scan snapshot immediately. If the object is reparented
+	-- back into workspace, DescendantAdded will scan it again as a fresh record.
+	-- This prevents removed/reparented objects from surviving in intelligence
+	-- data while still avoiding a second scanner.
+	local removed = RemoveScannedSubtree(instance)
+	PendingInstances[instance] = nil
+	PendingClassification[instance] = nil
+	if not HasQueuedStructuralAncestor(instance) then
+		StructuralChangeQueue[instance] = true
+	end
+	StructuralChangeDetected = StructuralChangeDetected or removed
+	if removed and not ScanRunning then
+		ClassificationComplete = false
+		RequestClassificationUIUpdate()
+	end
+	ScheduleStructuralAnalysisRefresh()
 end)
 
 --------------------------------------------------
