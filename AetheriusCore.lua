@@ -349,6 +349,8 @@ local ScannedInstances = {}
 local StructuralChangeQueue = {}
 local StructuralChangeDetected = false
 local StructuralChangeScheduled = false
+local StructuralRefreshPending = false
+local StructuralRefreshLastStart = 0
 local ScheduleStructuralAnalysisRefresh
 local NameWatchConnections = {}
 local ScanTruncated = false
@@ -3451,7 +3453,20 @@ local function RunClassification(scanGeneration)
 	UpdateFamilyUI()
 	UpdateRelevanceUI()
 	UpdateRelationsUI()
-	UpdateOverallStatus("COMPLETE", 100)
+
+	-- Live changes that arrived while this classification was running are
+	-- deliberately coalesced into the next refresh instead of cancelling the
+	-- current classification task. This prevents progress from repeatedly
+	-- resetting to 0% while a dynamic game is changing.
+	if StructuralRefreshPending or next(StructuralChangeQueue) then
+		StructuralRefreshPending = false
+		UpdateOverallStatus("COMPLETE", 100)
+		task.defer(function()
+			ScheduleStructuralAnalysisRefresh()
+		end)
+	else
+		UpdateOverallStatus("COMPLETE", 100)
+	end
 end
 
 --------------------------------------------------
@@ -3857,6 +3872,16 @@ end
 
 ScheduleStructuralAnalysisRefresh = function()
 	if ScanRunning then
+		StructuralRefreshPending = true
+		return
+	end
+
+	-- Never interrupt an active classification. Changes are queued and the
+	-- existing classification is allowed to finish first. Cancelling and
+	-- restarting here was the reason the progress indicator could remain at
+	-- 0% in games with frequent object changes.
+	if ClassificationRunning or ClassificationScheduled then
+		StructuralRefreshPending = true
 		return
 	end
 
@@ -3866,16 +3891,23 @@ ScheduleStructuralAnalysisRefresh = function()
 
 	StructuralChangeScheduled = true
 	task.defer(function()
-		-- Allow a burst of DescendantRemoving/Added events to settle before
+		-- Allow a burst of DescendantRemoving/Added/Name events to settle before
 		-- rebuilding intelligence once.
-		task.wait(0.05)
+		task.wait(0.10)
 
 		StructuralChangeScheduled = false
 		if ScanRunning then
+			StructuralRefreshPending = true
+			return
+		end
+
+		if ClassificationRunning or ClassificationScheduled then
+			StructuralRefreshPending = true
 			return
 		end
 
 		if next(StructuralChangeQueue) == nil then
+			StructuralRefreshPending = false
 			return
 		end
 
@@ -3897,16 +3929,19 @@ ScheduleStructuralAnalysisRefresh = function()
 		end
 
 		if not changed then
+			StructuralRefreshPending = false
 			return
 		end
 
 		UpdateCounters()
 
-		-- Cancel the previous intelligence generation safely. The old task keeps
-		-- its generation token and therefore cannot commit stale results.
+		-- Start a new intelligence generation only after the current one has
+		-- finished. This preserves generation safety without repeatedly killing
+		-- classification because of live changes.
 		CurrentScan += 1
 		local refreshGeneration = CurrentScan
-		ClassificationRunning = false
+		StructuralRefreshLastStart = os.clock()
+		StructuralRefreshPending = false
 		ClassificationScheduled = true
 		ClassificationComplete = false
 		ClassificationProgress = 0
@@ -4095,7 +4130,7 @@ workspace.DescendantRemoving:Connect(function(instance)
 	end
 	StructuralChangeDetected = StructuralChangeDetected or removed
 	if removed and not ScanRunning then
-		ClassificationComplete = false
+		StructuralRefreshPending = true
 		RequestClassificationUIUpdate()
 	end
 	ScheduleStructuralAnalysisRefresh()
