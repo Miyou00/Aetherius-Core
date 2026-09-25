@@ -349,6 +349,8 @@ local ScannedInstances = {}
 local StructuralChangeQueue = {}
 local StructuralChangeDetected = false
 local StructuralChangeScheduled = false
+local ScheduleStructuralAnalysisRefresh
+local NameWatchConnections = {}
 local ScanTruncated = false
 
 -- Runtime caches reduce repeated ancestor/name work during classification
@@ -1839,6 +1841,36 @@ local function UpdateCounters()
 end
 
 --------------------------------------------------
+-- LIVE NAME CHANGE WATCHER
+--------------------------------------------------
+
+local function WatchInstanceName(instance)
+	if not instance or NameWatchConnections[instance] then
+		return
+	end
+
+	local connection
+	connection = instance:GetPropertyChangedSignal("Name"):Connect(function()
+		if not instance.Parent or not instance:IsDescendantOf(workspace) then
+			local existing = NameWatchConnections[instance]
+			if existing then
+				existing:Disconnect()
+				NameWatchConnections[instance] = nil
+			end
+			return
+		end
+
+		StructuralChangeQueue[instance] = true
+		StructuralChangeDetected = true
+		if ScheduleStructuralAnalysisRefresh then
+			ScheduleStructuralAnalysisRefresh()
+		end
+	end)
+
+	NameWatchConnections[instance] = connection
+end
+
+--------------------------------------------------
 -- SCAN ONE INSTANCE
 --------------------------------------------------
 
@@ -1853,6 +1885,7 @@ local function ScanInstance(instance)
 	end
 
 	if ScannedInstances[instance] then
+		WatchInstanceName(instance)
 		return ScannedInstances[instance]
 	end
 
@@ -1959,6 +1992,7 @@ local function ScanInstance(instance)
 	end
 
 	ScannedInstances[instance] = record
+	WatchInstanceName(instance)
 	return record
 end
 
@@ -3585,6 +3619,9 @@ local function RunScan()
 	-- DescendantAdded event cannot fall into the gap between scan and start.
 	ClassificationScheduled = true
 	ClassificationProgress = 0
+	if next(StructuralChangeQueue) and ScheduleStructuralAnalysisRefresh then
+		ScheduleStructuralAnalysisRefresh()
+	end
 	task.spawn(function()
 		RunClassification(thisScan)
 	end)
@@ -3637,6 +3674,10 @@ RescanButton.MouseButton1Click:Connect(function()
 
 	table.clear(PendingInstances)
 	table.clear(PendingClassification)
+	for instance, connection in pairs(NameWatchConnections) do
+		connection:Disconnect()
+		NameWatchConnections[instance] = nil
+	end
 
 	PauseButton.Text = "Pause"
 	UpdateOverallStatus("ANALYZING", 0)
@@ -3814,7 +3855,7 @@ local function HasQueuedStructuralAncestor(instance)
 	return false
 end
 
-local function ScheduleStructuralAnalysisRefresh()
+ScheduleStructuralAnalysisRefresh = function()
 	if ScanRunning then
 		return
 	end
@@ -3893,6 +3934,17 @@ workspace.DescendantAdded:Connect(function(instance)
 		end
 
 		InvalidateHierarchyCaches(instance)
+
+		-- Adding a Humanoid can change the classification of the existing
+		-- model and its already-scanned descendants. Queue that model so the
+		-- existing structural refresh rebuilds its intelligence together.
+		if instance:IsA("Humanoid") then
+			local humanoidModel = instance:FindFirstAncestorOfClass("Model")
+			if humanoidModel and ScannedInstances[humanoidModel] then
+				StructuralChangeQueue[humanoidModel] = true
+				StructuralChangeDetected = true
+			end
+		end
 
 		if ScanRunning then
 			PendingInstances[instance] = true
@@ -4025,6 +4077,12 @@ workspace.DescendantAdded:Connect(function(instance)
 end)
 
 workspace.DescendantRemoving:Connect(function(instance)
+	local nameConnection = NameWatchConnections[instance]
+	if nameConnection then
+		nameConnection:Disconnect()
+		NameWatchConnections[instance] = nil
+	end
+
 	-- Remove the old scan snapshot immediately. If the object is reparented
 	-- back into workspace, DescendantAdded will scan it again as a fresh record.
 	-- This prevents removed/reparented objects from surviving in intelligence
