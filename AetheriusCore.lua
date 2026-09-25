@@ -99,9 +99,35 @@
 --------------------------------------------------
 
 local Players = game:GetService("Players")
+local VirtualUser = game:GetService("VirtualUser")
 local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------
+-- ANTI-AFK
+--------------------------------------------------
+
+local ANTI_AFK_ENABLED = true
+
+local function StartAntiAFK()
+    if not ANTI_AFK_ENABLED or not LocalPlayer then
+        return
+    end
+
+    LocalPlayer.Idled:Connect(function()
+        if not ANTI_AFK_ENABLED then
+            return
+        end
+
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new(0, 0))
+        end)
+    end)
+end
+
+StartAntiAFK()
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 --------------------------------------------------
