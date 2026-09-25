@@ -253,6 +253,7 @@ end
 local ScanData = {}
 
 local ObjectCount = 0
+-- Detected totals. Per-object storage is capped below; UI labels these as detected.
 local AttributeCount = 0
 local TagCount = 0
 local ValueCount = 0
@@ -593,20 +594,9 @@ Title.Position = UDim2.fromOffset(12, 0)
 Title.Size = UDim2.new(1, -75, 1, 0)
 Title.ZIndex = BASE_ZINDEX + 2
 
-local MinimizeButton = MakeButton(
-	TitleBar,
-	"−",
-	15
-)
-
-MinimizeButton.Size = UDim2.fromOffset(24, 24)
-MinimizeButton.Position = UDim2.new(1, -57, 0.5, -12)
-MinimizeButton.BackgroundColor3 = COLORS.Panel3
-MinimizeButton.ZIndex = BASE_ZINDEX + 2
-
 local CloseButton = MakeButton(
 	TitleBar,
-	"×",
+	"-",
 	15
 )
 
@@ -1783,14 +1773,16 @@ local function UpdateCounters()
 		tostring(ValueCount)
 
 	StructureInfo.Text =
-		"Objects: "
+		"Objects stored: "
 		.. tostring(ObjectCount)
 		.. "\n"
-		.. "Attributes: "
+		.. "Attributes detected: "
 		.. tostring(AttributeCount)
+		.. " (max " .. tostring(MAX_ATTRIBUTES_PER_OBJECT) .. " stored/object)"
 		.. "\n"
-		.. "Tags: "
+		.. "Tags detected: "
 		.. tostring(TagCount)
+		.. " (max " .. tostring(MAX_TAGS_PER_OBJECT) .. " stored/object)"
 		.. "\n"
 		.. "Value objects: "
 		.. tostring(ValueCount)
@@ -1799,11 +1791,13 @@ local function UpdateCounters()
 		"Objects stored: "
 		.. tostring(ObjectCount)
 		.. "\n"
-		.. "Attributes scanned: "
+		.. "Attributes detected: "
 		.. tostring(AttributeCount)
+		.. " (max " .. tostring(MAX_ATTRIBUTES_PER_OBJECT) .. " stored/object)"
 		.. "\n"
-		.. "Tags scanned: "
+		.. "Tags detected: "
 		.. tostring(TagCount)
+		.. " (max " .. tostring(MAX_TAGS_PER_OBJECT) .. " stored/object)"
 		.. "\n"
 		.. "Values detected: "
 		.. tostring(ValueCount)
@@ -1824,6 +1818,10 @@ local function UpdateCounters()
 		.. " medium / "
 		.. tostring(RelevanceCounts.Low or 0)
 		.. " low"
+		.. "\n"
+		.. "Relationships stored: "
+		.. tostring(#RelationData)
+		.. " / max " .. tostring(RELATION_MAX_TOTAL)
 		.. "\n"
 		.. "Scan limit status: "
 		.. (ScanTruncated and "TRUNCATED" or "FULL")
@@ -1996,26 +1994,67 @@ local function IsLocalPlayerCharacter(instance)
 	return instance == character or instance:IsDescendantOf(character)
 end
 
+local function InvalidateHierarchyCaches(instance)
+	if not instance then
+		return
+	end
+
+	-- Clear the moved/changed instance, its descendants, and its ancestry.
+	-- This covers reparenting, newly-added Humanoids, Tools, ScreenGuis, and
+	-- other hierarchy changes that could invalidate cached results.
+	HumanoidAncestorCache[instance] = nil
+	FamilyRootCache[instance] = nil
+
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		HumanoidAncestorCache[descendant] = nil
+		FamilyRootCache[descendant] = nil
+	end
+
+	local current = instance.Parent
+	while current and current ~= workspace do
+		HumanoidAncestorCache[current] = nil
+		FamilyRootCache[current] = nil
+		current = current.Parent
+	end
+end
+
 local function HasHumanoidAncestor(instance)
-	if HumanoidAncestorCache[instance] ~= nil then
-		return HumanoidAncestorCache[instance]
+	local cached = HumanoidAncestorCache[instance]
+	if cached ~= nil then
+		if cached == false then
+			-- A negative cache entry is only safe while the hierarchy remains
+			-- unchanged. Live hierarchy events clear these entries.
+			return false
+		end
+		if cached:IsDescendantOf(workspace)
+			and cached:IsA("Model")
+			and cached:FindFirstChildOfClass("Humanoid")
+			and instance:IsDescendantOf(cached) then
+			return true
+		end
+		HumanoidAncestorCache[instance] = nil
 	end
 
 	local current = instance
-	local found = false
+	local foundRoot = nil
 	local visited = {}
 
 	while current and current ~= workspace do
-		local cached = HumanoidAncestorCache[current]
-		if cached ~= nil then
-			found = cached
+		local cachedRoot = HumanoidAncestorCache[current]
+		if cachedRoot ~= nil then
+			if cachedRoot ~= false
+				and cachedRoot:IsDescendantOf(workspace)
+				and cachedRoot:IsA("Model")
+				and cachedRoot:FindFirstChildOfClass("Humanoid") then
+				foundRoot = cachedRoot
+			end
 			break
 		end
 
 		table.insert(visited, current)
 
 		if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
-			found = true
+			foundRoot = current
 			break
 		end
 
@@ -2023,11 +2062,11 @@ local function HasHumanoidAncestor(instance)
 	end
 
 	for _, visitedInstance in ipairs(visited) do
-		HumanoidAncestorCache[visitedInstance] = found
+		HumanoidAncestorCache[visitedInstance] = foundRoot or false
 	end
 
-	HumanoidAncestorCache[instance] = found
-	return found
+	HumanoidAncestorCache[instance] = foundRoot or false
+	return foundRoot ~= nil
 end
 
 local function NameContainsAny(instance, words)
@@ -2257,7 +2296,13 @@ local function GetFamilyRoot(instance, category)
 
 	local cached = FamilyRootCache[instance]
 	if cached ~= nil then
-		return cached or nil
+		if cached == false then
+			return nil
+		end
+		if cached:IsDescendantOf(workspace) and instance:IsDescendantOf(cached) then
+			return cached
+		end
+		FamilyRootCache[instance] = nil
 	end
 
 	local character = LocalPlayer.Character
@@ -2567,6 +2612,7 @@ end
 --------------------------------------------------
 
 local RELATION_MAX_PER_OBJECT = 24
+local RELATION_MAX_TOTAL = 5000
 local RELATION_MAX_SHARED_GROUP = 8
 
 local function RelationKey(fromIndex, toIndex, relationType)
@@ -2579,8 +2625,12 @@ local function RelationKey(fromIndex, toIndex, relationType)
 	return relationType .. "|" .. tostring(first) .. "|" .. tostring(second)
 end
 
-local function AddRelation(objectEntries, relationList, relationCounts, pairKeys, fromIndex, toIndex, relationType, strength, detail)
+local function AddRelation(objectEntries, relationList, relationCounts, pairKeys, relationCountsByObject, fromIndex, toIndex, relationType, strength, detail)
 	if not fromIndex or not toIndex or fromIndex == toIndex then
+		return
+	end
+
+	if #relationList >= RELATION_MAX_TOTAL then
 		return
 	end
 
@@ -2592,6 +2642,14 @@ local function AddRelation(objectEntries, relationList, relationCounts, pairKeys
 	local fromEntry = objectEntries[fromIndex]
 	local toEntry = objectEntries[toIndex]
 	if not fromEntry or not toEntry then
+		return
+	end
+
+	local fromCount = relationCountsByObject[fromIndex] or 0
+	local toCount = relationCountsByObject[toIndex] or 0
+
+	if fromCount >= RELATION_MAX_PER_OBJECT
+		or toCount >= RELATION_MAX_PER_OBJECT then
 		return
 	end
 
@@ -2611,6 +2669,8 @@ local function AddRelation(objectEntries, relationList, relationCounts, pairKeys
 
 	table.insert(relationList, relation)
 	relationCounts[relationType] = (relationCounts[relationType] or 0) + 1
+	relationCountsByObject[fromIndex] = fromCount + 1
+	relationCountsByObject[toIndex] = toCount + 1
 end
 
 local function BuildRelationshipData(classificationData, familyData)
@@ -2623,6 +2683,7 @@ local function BuildRelationshipData(classificationData, familyData)
 		SharedAttribute = 0
 	}
 	local pairKeys = {}
+	local relationCountsByObject = {}
 
 	for index, classificationRecord in pairs(classificationData) do
 		local scanRecord = classificationRecord.Instance and ScannedInstances[classificationRecord.Instance]
@@ -2669,7 +2730,7 @@ local function BuildRelationshipData(classificationData, familyData)
 		local parentIndex = instanceToIndex[entry.Scan.Parent]
 		if parentIndex then
 			AddRelation(
-				objectEntries, relationList, relationCounts, pairKeys,
+				objectEntries, relationList, relationCounts, pairKeys, relationCountsByObject,
 				parentIndex, index, "ParentChild", 100,
 				"Direct parent / child"
 			)
@@ -2683,7 +2744,7 @@ local function BuildRelationshipData(classificationData, familyData)
 			for i = 1, #members - 1 do
 				for j = i + 1, #members do
 					AddRelation(
-						objectEntries, relationList, relationCounts, pairKeys,
+						objectEntries, relationList, relationCounts, pairKeys, relationCountsByObject,
 						members[i], members[j], "Family", 70, family
 					)
 				end
@@ -2697,7 +2758,7 @@ local function BuildRelationshipData(classificationData, familyData)
 			for i = 1, #members - 1 do
 				for j = i + 1, #members do
 					AddRelation(
-						objectEntries, relationList, relationCounts, pairKeys,
+						objectEntries, relationList, relationCounts, pairKeys, relationCountsByObject,
 						members[i], members[j], "SharedTag", 60,
 						"Tag: " .. tostring(tag)
 					)
@@ -2713,7 +2774,7 @@ local function BuildRelationshipData(classificationData, familyData)
 			for i = 1, #members - 1 do
 				for j = i + 1, #members do
 					AddRelation(
-						objectEntries, relationList, relationCounts, pairKeys,
+						objectEntries, relationList, relationCounts, pairKeys, relationCountsByObject,
 						members[i], members[j], "SharedAttribute", 45,
 						"Attribute: " .. tostring(attributeName)
 					)
@@ -3426,21 +3487,38 @@ local function RunScan()
 			end
 		end
 
-		for instance in pairs(PendingInstances) do
+		-- DescendantAdded can add entries while this loop yields. Repeatedly
+		-- drain fresh snapshots so entries added during a pass cannot be
+		-- skipped by Lua's table iteration semantics.
+		while next(PendingInstances) do
 			if thisScan ~= CurrentScan then return end
-			while ScanPaused and thisScan == CurrentScan do
-				UpdateOverallStatus("PAUSED", ScanProgress)
-				task.wait(0.1)
+
+			local pendingSnapshot = table.clone(PendingInstances)
+
+			for instance in pairs(pendingSnapshot) do
+				if thisScan ~= CurrentScan then return end
+				while ScanPaused and thisScan == CurrentScan do
+					UpdateOverallStatus("PAUSED", ScanProgress)
+					task.wait(0.1)
+				end
+				if thisScan ~= CurrentScan then return end
+
+				if instance.Parent and instance:IsDescendantOf(workspace) then
+					ScanInstance(instance)
+				end
+				PendingInstances[instance] = nil
+
+				if #ScanData >= MAX_RESULTS then
+					ScanTruncated = true
+					table.clear(PendingInstances)
+					break
+				end
 			end
-			if thisScan ~= CurrentScan then return end
-			if instance.Parent and instance:IsDescendantOf(workspace) then
-				ScanInstance(instance)
-			end
-			PendingInstances[instance] = nil
+
 			if #ScanData >= MAX_RESULTS then
-				ScanTruncated = true
 				break
 			end
+			task.wait(YIELD_TIME)
 		end
 	end)
 
@@ -3533,69 +3611,12 @@ RescanButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
--- MINIMIZE
---------------------------------------------------
-
-local Minimized = false
-
--- Small floating button shown while the analyzer is minimized.
-local MinimizedButton = MakeButton(
-	Gui,
-	"AI",
-	11
-)
-
-MinimizedButton.Name = "AnalyzerMinimizedButton"
-MinimizedButton.Size = UDim2.fromOffset(44, 36)
-MinimizedButton.BackgroundColor3 = COLORS.Accent
-MinimizedButton.TextColor3 = Color3.new(1, 1, 1)
-MinimizedButton.Font = Enum.Font.GothamBold
-MinimizedButton.ZIndex = BASE_ZINDEX + 40
-MinimizedButton.Visible = false
-MinimizedButton.Parent = Gui
-
-Corner(MinimizedButton, 8)
-Stroke(MinimizedButton, COLORS.Border, 1)
-
-local function SyncMinimizedButtonPosition()
-	MinimizedButton.Position = Main.Position
-	MinimizedButton.AnchorPoint = Main.AnchorPoint
-end
-
-MakeDraggable(MinimizedButton, MinimizedButton)
-
-MinimizeButton.MouseButton1Click:Connect(function()
-
-	Minimized = not Minimized
-
-	if Minimized then
-		SyncMinimizedButtonPosition()
-		Main.Visible = false
-		MinimizedButton.Visible = true
-	else
-		Main.Visible = true
-		MinimizedButton.Visible = false
-		UpdateStatusLayout()
-		UpdateMainWidth()
-	end
-end)
-
-MinimizedButton.MouseButton1Click:Connect(function()
-	Minimized = false
-	Main.Visible = true
-	MinimizedButton.Visible = false
-	UpdateStatusLayout()
-	UpdateMainWidth()
-end)
-
---------------------------------------------------
 -- CLOSE
 --------------------------------------------------
 
 CloseButton.MouseButton1Click:Connect(function()
 
 	Main.Visible = false
-	MinimizedButton.Visible = false
 	OpenButton.Visible = true
 
 end)
@@ -3607,8 +3628,6 @@ end)
 OpenButton.MouseButton1Click:Connect(function()
 
 	Main.Visible = true
-	Minimized = false
-	MinimizedButton.Visible = false
 	OpenButton.Visible = false
 
 end)
@@ -3655,6 +3674,8 @@ workspace.DescendantAdded:Connect(function(instance)
 		if not instance or not instance.Parent or not instance:IsDescendantOf(workspace) then
 			return
 		end
+
+		InvalidateHierarchyCaches(instance)
 
 		if ScanRunning then
 			PendingInstances[instance] = true
@@ -3756,8 +3777,19 @@ workspace.DescendantAdded:Connect(function(instance)
 			RequestRelevanceUIUpdate()
 			ScheduleLiveRelationshipRefresh()
 		else
+			-- Classification previously failed or has not completed. Keep the
+			-- new record pending and schedule a fresh generation-safe retry.
+			PendingClassification[instance] = record
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
+
+			if not ClassificationRunning and not ClassificationScheduled then
+				ClassificationScheduled = true
+				local retryGeneration = CurrentScan
+				task.defer(function()
+					RunClassification(retryGeneration)
+				end)
+			end
 		end
 	end)
 end)
@@ -3767,6 +3799,8 @@ end)
 --------------------------------------------------
 
 LocalPlayer.CharacterAdded:Connect(function()
+	table.clear(HumanoidAncestorCache)
+	table.clear(FamilyRootCache)
 
 	task.wait(0.5)
 
@@ -3798,9 +3832,7 @@ end
 
 UpdateMainWidth = function()
 	local height
-	if Minimized then
-		height = 38
-	elseif StatusExpanded then
+	if StatusExpanded then
 		height = 377
 	else
 		height = 293
