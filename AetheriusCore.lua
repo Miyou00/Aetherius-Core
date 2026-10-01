@@ -4198,8 +4198,18 @@ local function RemoveScannedSubtree(root)
 	end
 
 	local removalSet = {[root] = true}
-	for _, descendant in ipairs(root:GetDescendants()) do
-		removalSet[descendant] = true
+	-- Traverse children directly to avoid allocating the additional array
+	-- returned by GetDescendants() during large subtree removals.
+	local pendingRemoval = {root}
+	while #pendingRemoval > 0 do
+		local current = pendingRemoval[#pendingRemoval]
+		pendingRemoval[#pendingRemoval] = nil
+		for _, child in ipairs(current:GetChildren()) do
+			if not removalSet[child] then
+				removalSet[child] = true
+				pendingRemoval[#pendingRemoval + 1] = child
+			end
+		end
 	end
 
 	-- Disconnect name watchers and discard queued work for every object in the
