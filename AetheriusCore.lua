@@ -119,7 +119,19 @@ local LocalPlayer = Players.LocalPlayer
 -- Keep the analyzer independent from VirtualUser / anti-AFK behavior.
 -- Those APIs are not required for client-visible inspection and may not be
 -- available in every execution environment.
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+-- Validate the local player and wait briefly for its GUI instead of hanging
+-- indefinitely if this script starts outside a normal client context.
+if not LocalPlayer then
+	warn("[ClientGameAnalyzer] LocalPlayer is unavailable; startup cancelled.")
+	return
+end
+
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+
+if not PlayerGui or not PlayerGui:IsA("PlayerGui") then
+	warn("[ClientGameAnalyzer] PlayerGui was not available; startup cancelled.")
+	return
+end
 
 --------------------------------------------------
 -- CONFIGURATION
