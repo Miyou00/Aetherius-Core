@@ -77,6 +77,17 @@
     • Phase 2.1 classification, Phase 2.2 family, and Phase 2.3 relevance integration
     • Mobile-friendly relationship view
 
+    Phase 2.5
+
+    Features:
+    • Intelligence summary data built from existing analysis results
+    • Object, classification, family, relevance, and relationship totals
+    • Top relevant object references with supporting signals
+    • Most-connected object summary
+    • Unknown classification and scan-limit indicators
+    • Summary refresh after completed and incremental analysis
+    • No duplicate scanning or parallel detection engines
+
     Optimization notes:
     • Uses adaptive time-budgeted batches to reduce frame spikes
     • Uses larger work batches with short yields for better throughput
@@ -326,6 +337,21 @@ local RelationCounts = {
 local RelationOrder = {}
 local RelationUIUpdateScheduled = false
 local RelationPairKeys = {}
+
+-- Phase 2.5 summary is a compact derived snapshot. It references existing
+-- analysis records and does not run another scan or detection pass.
+local IntelligenceSummary = {
+    Status = "WAITING",
+    ObjectCount = 0,
+    ClassifiedCount = 0,
+    FamilyCount = 0,
+    RelevanceCounts = {High = 0, Medium = 0, Low = 0, Unknown = 0},
+    RelationshipCounts = {ParentChild = 0, Family = 0, SharedTag = 0, SharedAttribute = 0},
+    UnknownClassificationCount = 0,
+    ScanTruncated = false,
+    TopRelevant = {},
+    MostConnected = nil
+}
 
 local ClassificationCounts = {
 	Character = 0,
@@ -2030,6 +2056,21 @@ ResetClassification = function()
 		ClassificationCounts[category] = 0
 	end
 
+	table.clear(IntelligenceSummary.TopRelevant)
+	IntelligenceSummary.Status = "WAITING"
+	IntelligenceSummary.ObjectCount = 0
+	IntelligenceSummary.ClassifiedCount = 0
+	IntelligenceSummary.FamilyCount = 0
+	IntelligenceSummary.UnknownClassificationCount = 0
+	IntelligenceSummary.ScanTruncated = false
+	IntelligenceSummary.MostConnected = nil
+	for level in pairs(IntelligenceSummary.RelevanceCounts) do
+		IntelligenceSummary.RelevanceCounts[level] = 0
+	end
+	for relationType in pairs(IntelligenceSummary.RelationshipCounts) do
+		IntelligenceSummary.RelationshipCounts[relationType] = 0
+	end
+
 	ClassificationComplete = false
 end
 
@@ -2893,6 +2934,80 @@ local function CommitRelationshipData(classificationData)
 	end)
 end
 
+-- Phase 2.5: refresh only from the already-built Phase 1-2.4 tables.
+-- Relationship traversal is bounded by RELATION_MAX_TOTAL; top relevance
+-- records reuse the pre-sorted RelevanceOrder list.
+local function RefreshIntelligenceSummary()
+    IntelligenceSummary.Status = ClassificationComplete and "COMPLETE" or "UPDATING"
+    IntelligenceSummary.ObjectCount = ObjectCount
+    IntelligenceSummary.ClassifiedCount = 0
+    IntelligenceSummary.FamilyCount = #FamilyOrder
+    IntelligenceSummary.UnknownClassificationCount = ClassificationCounts.Unknown or 0
+    IntelligenceSummary.ScanTruncated = ScanTruncated
+
+    for _, count in pairs(ClassificationCounts) do
+        IntelligenceSummary.ClassifiedCount += count or 0
+    end
+    for level in pairs(IntelligenceSummary.RelevanceCounts) do
+        IntelligenceSummary.RelevanceCounts[level] = RelevanceCounts[level] or 0
+    end
+    for relationType in pairs(IntelligenceSummary.RelationshipCounts) do
+        IntelligenceSummary.RelationshipCounts[relationType] = RelationCounts[relationType] or 0
+    end
+
+    table.clear(IntelligenceSummary.TopRelevant)
+    local topLimit = math.min(5, #RelevanceOrder)
+    for position = 1, topLimit do
+        local relevanceIndex = RelevanceOrder[position]
+        local entry = RelevanceData[relevanceIndex]
+        if entry then
+            IntelligenceSummary.TopRelevant[#IntelligenceSummary.TopRelevant + 1] = {
+                Index = entry.Index,
+                Instance = entry.Instance,
+                Name = entry.Name,
+                ClassName = entry.ClassName,
+                FullName = entry.FullName,
+                Category = entry.Category,
+                Family = entry.Family,
+                Score = entry.Score,
+                Level = entry.Level,
+                Signals = table.clone(entry.Signals or {})
+            }
+        end
+    end
+
+    local connectionCounts = {}
+    for _, relation in ipairs(RelationData) do
+        connectionCounts[relation.FromIndex] = (connectionCounts[relation.FromIndex] or 0) + 1
+        connectionCounts[relation.ToIndex] = (connectionCounts[relation.ToIndex] or 0) + 1
+    end
+
+    local mostConnectedIndex, mostConnectedCount
+    for index, count in pairs(connectionCounts) do
+        local candidate = ClassificationData[index]
+        local current = mostConnectedIndex and ClassificationData[mostConnectedIndex]
+        if candidate and (not mostConnectedCount or count > mostConnectedCount
+            or (count == mostConnectedCount and candidate.FullName < current.FullName)) then
+            mostConnectedIndex = index
+            mostConnectedCount = count
+        end
+    end
+
+    IntelligenceSummary.MostConnected = nil
+    if mostConnectedIndex and ClassificationData[mostConnectedIndex] then
+        local entry = ClassificationData[mostConnectedIndex]
+        IntelligenceSummary.MostConnected = {
+            Index = mostConnectedIndex,
+            Instance = entry.Instance,
+            Name = entry.Name,
+            ClassName = entry.ClassName,
+            FullName = entry.FullName,
+            Category = entry.Category,
+            ConnectionCount = mostConnectedCount or 0
+        }
+    end
+end
+
 local function GetRelationTextColor(relationType)
 	if relationType == "ParentChild" then
 		return COLORS.Accent
@@ -3570,6 +3685,7 @@ local function RunClassification(scanGeneration)
 	ClassificationScheduled = false
 	ClassificationComplete = true
 	ClassificationProgress = 100
+	RefreshIntelligenceSummary()
 	RequestClassificationUIUpdate(true)
 	UpdateFamilyUI()
 	UpdateRelevanceUI()
@@ -4089,6 +4205,7 @@ workspace.DescendantAdded:Connect(function(instance)
 			return
 		end
 
+		IntelligenceSummary.Status = "UPDATING"
 		InvalidateHierarchyCaches(instance)
 
 		-- Adding a Humanoid can change the classification of the existing
@@ -4220,6 +4337,7 @@ workspace.DescendantAdded:Connect(function(instance)
 			RequestFamilyUIUpdate()
 			RequestRelevanceUIUpdate()
 			CommitRelationshipData(ClassificationData)
+			RefreshIntelligenceSummary()
 			UpdateRelationsUI()
 		else
 			PendingClassification[instance] = record
@@ -4249,6 +4367,9 @@ workspace.DescendantRemoving:Connect(function(instance)
 	-- This prevents removed/reparented objects from surviving in intelligence
 	-- data while still avoiding a second scanner.
 	local removed = RemoveScannedSubtree(instance)
+	if removed then
+		IntelligenceSummary.Status = "UPDATING"
+	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
 	if not HasQueuedStructuralAncestor(instance) then
