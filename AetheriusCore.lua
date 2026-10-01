@@ -4174,6 +4174,20 @@ local function RemoveScannedSubtree(root)
 		removalSet[descendant] = true
 	end
 
+	-- Disconnect name watchers and discard queued work for every object in the
+	-- removed subtree, including descendants that have no current scan record.
+	-- This avoids retaining stale references while a hierarchy is detached.
+	for removedInstance in pairs(removalSet) do
+		local nameConnection = NameWatchConnections[removedInstance]
+		if nameConnection then
+			nameConnection:Disconnect()
+			NameWatchConnections[removedInstance] = nil
+		end
+		StructuralChangeQueue[removedInstance] = nil
+		PendingInstances[removedInstance] = nil
+		PendingClassification[removedInstance] = nil
+	end
+
 	local removedAny = false
 	local kept = {}
 
