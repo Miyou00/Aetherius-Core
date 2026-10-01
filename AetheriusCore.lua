@@ -340,6 +340,8 @@ local RelationPairKeys = {}
 
 -- Phase 2.5 summary is a compact derived snapshot. It references existing
 -- analysis records and does not run another scan or detection pass.
+local UpdateIntelligenceUI
+
 local IntelligenceSummary = {
     Status = "WAITING",
     ObjectCount = 0,
@@ -812,6 +814,7 @@ local Pages = {}
 
 local TabNames = {
 	"Overview",
+	"Intel",
 	"Objects",
 	"Player",
 	"Relations",
@@ -1493,6 +1496,126 @@ DataInfo.Size = UDim2.new(1, 0, 1, -28)
 DataInfo.TextYAlignment = Enum.TextYAlignment.Top
 DataInfo.TextWrapped = true
 DataInfo.ZIndex = BASE_ZINDEX + 3
+
+--------------------------------------------------
+-- PHASE 2.6 -- INTELLIGENCE SUMMARY PAGE
+--------------------------------------------------
+
+local IntelligencePage = Pages.Intel
+
+local IntelligenceTitle = MakeText(
+    IntelligencePage,
+    "Intelligence Summary",
+    12,
+    COLORS.Text,
+    Enum.Font.GothamBold
+)
+IntelligenceTitle.Size = UDim2.new(1, 0, 0, 20)
+IntelligenceTitle.ZIndex = BASE_ZINDEX + 3
+
+local IntelligenceStatus = MakeText(
+    IntelligencePage,
+    "Waiting for analysis...",
+    8,
+    COLORS.Muted
+)
+IntelligenceStatus.Position = UDim2.fromOffset(0, 20)
+IntelligenceStatus.Size = UDim2.new(1, 0, 0, 15)
+IntelligenceStatus.TextTruncate = Enum.TextTruncate.AtEnd
+IntelligenceStatus.ZIndex = BASE_ZINDEX + 3
+
+local IntelligenceScroll = Instance.new("ScrollingFrame")
+IntelligenceScroll.Name = "IntelligenceScroll"
+IntelligenceScroll.Position = UDim2.fromOffset(0, 37)
+IntelligenceScroll.Size = UDim2.new(1, -2, 1, -37)
+IntelligenceScroll.BackgroundColor3 = COLORS.Panel2
+IntelligenceScroll.BorderSizePixel = 0
+IntelligenceScroll.ScrollBarThickness = 3
+IntelligenceScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+IntelligenceScroll.CanvasSize = UDim2.fromOffset(0, 0)
+IntelligenceScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+IntelligenceScroll.ZIndex = BASE_ZINDEX + 2
+IntelligenceScroll.Parent = IntelligencePage
+Corner(IntelligenceScroll, 5)
+
+local IntelligenceText = MakeText(
+    IntelligenceScroll,
+    "Summary will appear after analysis.",
+    8,
+    COLORS.Text,
+    Enum.Font.Gotham
+)
+IntelligenceText.Name = "IntelligenceText"
+IntelligenceText.Position = UDim2.fromOffset(7, 5)
+IntelligenceText.Size = UDim2.new(1, -16, 0, 20)
+IntelligenceText.TextYAlignment = Enum.TextYAlignment.Top
+IntelligenceText.TextWrapped = true
+IntelligenceText.ZIndex = BASE_ZINDEX + 3
+
+UpdateIntelligenceUI = function()
+    if not IntelligenceText or not IntelligenceStatus then
+        return
+    end
+
+    local summary = IntelligenceSummary
+    local relevance = summary.RelevanceCounts
+    local relations = summary.RelationshipCounts
+    local lines = {
+        "OVERVIEW",
+        "Objects: " .. tostring(summary.ObjectCount)
+            .. "    Classified: " .. tostring(summary.ClassifiedCount),
+        "Families: " .. tostring(summary.FamilyCount)
+            .. "    Unknown class: " .. tostring(summary.UnknownClassificationCount),
+        "",
+        "RELEVANCE",
+        "High: " .. tostring(relevance.High or 0)
+            .. "    Medium: " .. tostring(relevance.Medium or 0),
+        "Low: " .. tostring(relevance.Low or 0)
+            .. "    Unknown: " .. tostring(relevance.Unknown or 0),
+        "",
+        "RELATIONSHIPS",
+        "Parent/Child: " .. tostring(relations.ParentChild or 0),
+        "Family: " .. tostring(relations.Family or 0)
+            .. "    Shared tag: " .. tostring(relations.SharedTag or 0),
+        "Shared attribute: " .. tostring(relations.SharedAttribute or 0),
+        "",
+        "TOP RELEVANT OBJECTS"
+    }
+
+    if #summary.TopRelevant == 0 then
+        table.insert(lines, "No relevance results yet.")
+    else
+        for rank, entry in ipairs(summary.TopRelevant) do
+            table.insert(lines, tostring(rank) .. ". " .. tostring(entry.Name)
+                .. " [" .. tostring(entry.ClassName) .. "]"
+                .. " - " .. tostring(entry.Level) .. " / " .. tostring(entry.Score))
+            table.insert(lines, "   " .. tostring(entry.FullName or entry.Name))
+        end
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "MOST CONNECTED OBJECT")
+    local connected = summary.MostConnected
+    if connected then
+        table.insert(lines, tostring(connected.Name) .. " [" .. tostring(connected.ClassName) .. "]")
+        table.insert(lines, "Connections: " .. tostring(connected.ConnectionCount))
+        table.insert(lines, tostring(connected.FullName or connected.Name))
+    else
+        table.insert(lines, "No relationships detected yet.")
+    end
+
+    table.insert(lines, "")
+    table.insert(lines, "SCAN: " .. (summary.ScanTruncated and "LIMIT REACHED" or "Within scan limit"))
+
+    IntelligenceStatus.Text = "Status: " .. tostring(summary.Status)
+    IntelligenceStatus.TextColor3 = summary.Status == "COMPLETE" and COLORS.Success
+        or (summary.Status == "UPDATING" and COLORS.Warning or COLORS.Muted)
+    IntelligenceText.Text = table.concat(lines, "\n")
+    local lineCount = #lines
+    local estimatedHeight = math.max(20, lineCount * 12 + 8)
+    IntelligenceText.Size = UDim2.new(1, -16, 0, estimatedHeight)
+    IntelligenceScroll.CanvasSize = UDim2.fromOffset(0, estimatedHeight + 10)
+end
 
 --------------------------------------------------
 -- BOTTOM CONTROLS
@@ -3006,6 +3129,10 @@ local function RefreshIntelligenceSummary()
             ConnectionCount = mostConnectedCount or 0
         }
     end
+
+    if UpdateIntelligenceUI then
+        UpdateIntelligenceUI()
+    end
 end
 
 local function GetRelationTextColor(relationType)
@@ -4206,6 +4333,7 @@ workspace.DescendantAdded:Connect(function(instance)
 		end
 
 		IntelligenceSummary.Status = "UPDATING"
+        if UpdateIntelligenceUI then UpdateIntelligenceUI() end
 		InvalidateHierarchyCaches(instance)
 
 		-- Adding a Humanoid can change the classification of the existing
@@ -4369,6 +4497,7 @@ workspace.DescendantRemoving:Connect(function(instance)
 	local removed = RemoveScannedSubtree(instance)
 	if removed then
 		IntelligenceSummary.Status = "UPDATING"
+        if UpdateIntelligenceUI then UpdateIntelligenceUI() end
 	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
@@ -4463,6 +4592,7 @@ UpdateClassificationUI()
 UpdateFamilyUI()
 UpdateRelevanceUI()
 UpdateRelationsUI()
+UpdateIntelligenceUI()
 
 Main.Visible = true
 OpenButton.Visible = false
