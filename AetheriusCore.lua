@@ -293,6 +293,7 @@ local CLASSIFICATION_TIME_BUDGET = 0.004
 local CLASSIFICATION_UI_INTERVAL = 0.25
 
 local ClassificationData = {}
+local ClassificationIndexByInstance = {}
 
 -- Phase 2.2 family/group intelligence. Each classification record can be
 -- assigned to a structural or name-based family for higher-level organization.
@@ -2006,6 +2007,7 @@ end
 
 ResetClassification = function()
 	table.clear(ClassificationData)
+	table.clear(ClassificationIndexByInstance)
 	table.clear(FamilyData)
 	table.clear(FamilyCounts)
 	table.clear(FamilyCategories)
@@ -2538,10 +2540,13 @@ local function CalculateRelevance(record, classificationRecord, familyRecord)
 	local instance = record and record.Instance
 
 	local function AddScore(amount, signal)
-		score += amount
-		if signal and not table.find(signals, signal) then
+		if signal then
+			if table.find(signals, signal) then
+				return
+			end
 			table.insert(signals, signal)
 		end
+		score += amount
 	end
 
 	AddScore(RelevanceCategoryWeights[category] or 0, category .. " category")
@@ -2568,13 +2573,16 @@ local function CalculateRelevance(record, classificationRecord, familyRecord)
 	end
 
 	if classificationRecord then
+		local classificationBonusCount = 0
 		for _, signal in ipairs(classificationRecord.Signals or {}) do
 			local lowerSignal = string.lower(signal)
-			if string.find(lowerSignal, "interaction", 1, true)
+			local isRelevantSignal = string.find(lowerSignal, "interaction", 1, true)
 				or string.find(lowerSignal, "tool", 1, true)
 				or string.find(lowerSignal, "attribute", 1, true)
-				or string.find(lowerSignal, "value", 1, true) then
+				or string.find(lowerSignal, "value", 1, true)
+			if isRelevantSignal and not table.find(signals, signal) and classificationBonusCount < 2 then
 				AddScore(5, signal)
+				classificationBonusCount += 1
 			end
 		end
 	end
@@ -2606,10 +2614,13 @@ local function BuildRelevanceData(classificationData, familyData)
 		Unknown = 0
 	}
 	local relevanceOrder = {}
+	local seenInstances = {}
 
 	for index, classificationRecord in pairs(classificationData) do
-		local scanRecord = classificationRecord.Instance and ScannedInstances[classificationRecord.Instance]
-		if scanRecord then
+		local instance = classificationRecord.Instance
+		local scanRecord = instance and ScannedInstances[instance]
+		if scanRecord and not seenInstances[instance] then
+			seenInstances[instance] = true
 			local familyRecord = familyData[index]
 			local score, level, signals = CalculateRelevance(
 				scanRecord,
@@ -2618,6 +2629,7 @@ local function BuildRelevanceData(classificationData, familyData)
 			)
 
 			relevanceData[index] = {
+				Index = index,
 				Instance = classificationRecord.Instance,
 				Name = classificationRecord.Name,
 				ClassName = classificationRecord.ClassName,
@@ -2630,7 +2642,7 @@ local function BuildRelevanceData(classificationData, familyData)
 			}
 
 			relevanceCounts[level] = (relevanceCounts[level] or 0) + 1
-		table.insert(relevanceOrder, index)
+			table.insert(relevanceOrder, index)
 		end
 	end
 
@@ -2638,7 +2650,10 @@ local function BuildRelevanceData(classificationData, familyData)
 		local left = relevanceData[a]
 		local right = relevanceData[b]
 		if left.Score == right.Score then
-			return left.Name < right.Name
+			if left.FullName == right.FullName then
+				return left.ClassName < right.ClassName
+			end
+			return left.FullName < right.FullName
 		end
 		return left.Score > right.Score
 	end)
@@ -3067,8 +3082,8 @@ end
 local function CreateRelevanceRow(data, order)
 	local row = Instance.new("Frame")
 	row.Name = "RelevanceRow" .. order
-	row.Size = UDim2.new(1, -2, 0, 31)
-	row.Position = UDim2.fromOffset(0, (order - 1) * 33)
+	row.Size = UDim2.new(1, -2, 0, 43)
+	row.Position = UDim2.fromOffset(0, (order - 1) * 45)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
 	row.ZIndex = BASE_ZINDEX + 3
@@ -3088,7 +3103,7 @@ local function CreateRelevanceRow(data, order)
 
 	local nameLabel = MakeText(
 		row,
-		data.Name,
+		"#" .. tostring(data.Index or order) .. " " .. data.Name,
 		8,
 		COLORS.Text,
 		Enum.Font.GothamMedium
@@ -3100,7 +3115,7 @@ local function CreateRelevanceRow(data, order)
 
 	local detailLabel = MakeText(
 		row,
-		data.Category .. " / " .. data.Family,
+		data.ClassName .. " / " .. data.Category .. " / " .. data.Family,
 		7,
 		COLORS.Muted
 	)
@@ -3108,6 +3123,17 @@ local function CreateRelevanceRow(data, order)
 	detailLabel.Size = UDim2.new(1, -70, 0, 11)
 	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	detailLabel.ZIndex = BASE_ZINDEX + 4
+
+	local pathLabel = MakeText(
+		row,
+		data.FullName or data.Name,
+		6,
+		COLORS.Muted
+	)
+	pathLabel.Position = UDim2.fromOffset(63, 28)
+	pathLabel.Size = UDim2.new(1, -70, 0, 10)
+	pathLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	pathLabel.ZIndex = BASE_ZINDEX + 4
 end
 
 local function UpdateRelevanceUI()
@@ -3137,7 +3163,7 @@ local function UpdateRelevanceUI()
 
 	RelevanceScroll.CanvasSize = UDim2.fromOffset(
 		0,
-		limit * 33
+		limit * 45
 	)
 end
 
@@ -3508,8 +3534,12 @@ local function RunClassification(scanGeneration)
 
 	-- Commit only after the entire generation completed successfully.
 	table.clear(ClassificationData)
+	table.clear(ClassificationIndexByInstance)
 	for index, data in pairs(localData) do
 		ClassificationData[index] = data
+		if data.Instance then
+			ClassificationIndexByInstance[data.Instance] = index
+		end
 	end
 
 	-- Keep the heavy intelligence stages separated by scheduler yields.
@@ -4114,8 +4144,12 @@ workspace.DescendantAdded:Connect(function(instance)
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
 		elseif ClassificationComplete then
+			if ClassificationIndexByInstance[record.Instance] then
+				return
+			end
 			local category, signals = ClassifyObject(record)
 			local classificationIndex = #ClassificationData + 1
+			ClassificationIndexByInstance[record.Instance] = classificationIndex
 			ClassificationData[classificationIndex] = {
 				Instance = record.Instance,
 				Name = record.Name,
@@ -4158,8 +4192,9 @@ workspace.DescendantAdded:Connect(function(instance)
 				familyRecord
 			)
 
-			local relevanceIndex = #RelevanceData + 1
+			local relevanceIndex = classificationIndex
 			RelevanceData[relevanceIndex] = {
+				Index = relevanceIndex,
 				Instance = record.Instance,
 				Name = record.Name,
 				ClassName = record.ClassName,
