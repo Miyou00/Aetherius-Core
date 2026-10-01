@@ -375,6 +375,8 @@ local StructuralRefreshPending = false
 local StructuralRefreshLastStart = 0
 local ScheduleStructuralAnalysisRefresh
 local NameWatchConnections = {}
+-- Coalesce duplicate deferred add events for the same instance.
+local PendingDescendantAdded = {}
 local ScanTruncated = false
 
 -- Runtime caches reduce repeated ancestor/name work during classification
@@ -409,6 +411,7 @@ local ClassificationOrder = {
 local function ClearScanData()
 	table.clear(ScanData)
 	table.clear(PendingInstances)
+	table.clear(PendingDescendantAdded)
 	table.clear(PendingClassification)
 	table.clear(StructuralChangeQueue)
 	StructuralChangeDetected = false
@@ -4398,8 +4401,17 @@ end
 --------------------------------------------------
 
 GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(instance)
+	-- Multiple add notifications can arrive during rapid reparenting. Only
+	-- keep one deferred handler per instance until its queued handler starts.
+	if PendingDescendantAdded[instance] then
+		return
+	end
 	local eventScan = CurrentScan
+	PendingDescendantAdded[instance] = eventScan
 	task.defer(function()
+		if PendingDescendantAdded[instance] == eventScan then
+			PendingDescendantAdded[instance] = nil
+		end
 		if eventScan ~= CurrentScan then
 			return
 		end
@@ -4680,6 +4692,7 @@ Gui.Destroying:Connect(function()
 		end
 	end
 	table.clear(GlobalConnections)
+	table.clear(PendingDescendantAdded)
 	if ViewportConnection then
 		ViewportConnection:Disconnect()
 		ViewportConnection = nil
