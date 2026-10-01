@@ -88,16 +88,6 @@
     • Summary refresh after completed and incremental analysis
     • No duplicate scanning or parallel detection engines
 
-    Phase 2.7
-
-    Features:
-    • Event-driven monitoring of selected client-visible properties
-    • ValueBase value-change tracking
-    • Bounded behavior history with old/new values and object paths
-    • Throttled behavior UI refreshes and per-property event cooldown
-    • Connection cleanup on object removal and rescans
-    • Watch and history caps to limit runtime overhead
-
     Optimization notes:
     • Uses adaptive time-budgeted batches to reduce frame spikes
     • Uses larger work batches with short yields for better throughput
@@ -365,19 +355,6 @@ local IntelligenceSummary = {
     MostConnected = nil
 }
 
--- Phase 2.7: event-driven behavior observations from client-visible properties.
-local BEHAVIOR_MAX_WATCHED_OBJECTS = 1500
-local BEHAVIOR_MAX_HISTORY = 100
-local BEHAVIOR_EVENT_COOLDOWN = 0.10
-local BehaviorHistory = {}
-local BehaviorConnections = {}
-local BehaviorWatchedCount = 0
-local BehaviorLastEventAt = {}
-local BehaviorUIUpdateScheduled = false
-local BehaviorMonitoringEnabled = true
-local UpdateBehaviorUI
-local ResetBehaviorMonitoring
-
 local ClassificationCounts = {
 	Character = 0,
 	NPC = 0,
@@ -439,7 +416,6 @@ local ClassificationOrder = {
 --------------------------------------------------
 
 local function ClearScanData()
-	ResetBehaviorMonitoring()
 	table.clear(ScanData)
 	table.clear(PendingInstances)
 	table.clear(PendingClassification)
@@ -1452,42 +1428,15 @@ BehaviorTitle.ZIndex = BASE_ZINDEX + 3
 
 local BehaviorInfo = MakeText(
 	BehaviorPage,
-	"Waiting for scanned objects...",
-	8,
+	"Dynamic state monitoring will be added in a later phase.",
+	10,
 	COLORS.Muted
 )
 
-BehaviorInfo.Position = UDim2.fromOffset(0, 26)
-BehaviorInfo.Size = UDim2.new(1, 0, 0, 28)
+BehaviorInfo.Position = UDim2.fromOffset(0, 28)
+BehaviorInfo.Size = UDim2.new(1, 0, 0, 40)
 BehaviorInfo.TextWrapped = true
 BehaviorInfo.ZIndex = BASE_ZINDEX + 3
-
-local BehaviorScroll = Instance.new("ScrollingFrame")
-BehaviorScroll.Name = "BehaviorScroll"
-BehaviorScroll.Size = UDim2.new(1, -8, 1, -59)
-BehaviorScroll.Position = UDim2.fromOffset(4, 55)
-BehaviorScroll.BackgroundColor3 = COLORS.Panel2
-BehaviorScroll.BorderSizePixel = 0
-BehaviorScroll.ScrollBarThickness = 3
-BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 0)
-BehaviorScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-BehaviorScroll.ZIndex = BASE_ZINDEX + 2
-BehaviorScroll.Parent = BehaviorPage
-Corner(BehaviorScroll, 5)
-
-local BehaviorText = MakeText(
-	BehaviorScroll,
-	"No changes observed yet.",
-	8,
-	COLORS.Text,
-	Enum.Font.Gotham
-)
-BehaviorText.Name = "BehaviorText"
-BehaviorText.Position = UDim2.fromOffset(7, 5)
-BehaviorText.Size = UDim2.new(1, -16, 0, 24)
-BehaviorText.TextYAlignment = Enum.TextYAlignment.Top
-BehaviorText.TextWrapped = true
-BehaviorText.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- REMOTES PAGE
@@ -2076,177 +2025,6 @@ local function WatchInstanceName(instance)
 end
 
 --------------------------------------------------
--- PHASE 2.7 -- DYNAMIC BEHAVIOR MONITORING
---------------------------------------------------
-
-local function FormatBehaviorValue(value)
-	local result = tostring(value)
-	if #result > 90 then
-		result = string.sub(result, 1, 87) .. "..."
-	end
-	return result
-end
-
-local function ScheduleBehaviorUIUpdate()
-	if BehaviorUIUpdateScheduled then
-		return
-	end
-	BehaviorUIUpdateScheduled = true
-	task.delay(0.20, function()
-		BehaviorUIUpdateScheduled = false
-		if UpdateBehaviorUI then
-			UpdateBehaviorUI()
-		end
-	end)
-end
-
-UpdateBehaviorUI = function()
-	local lines = {}
-	for index = #BehaviorHistory, math.max(1, #BehaviorHistory - 29), -1 do
-		local event = BehaviorHistory[index]
-		if event then
-			table.insert(lines, event.Time .. "  " .. event.Name .. " [" .. event.ClassName .. "]")
-			table.insert(lines, "  " .. event.Property .. ": " .. event.OldValue .. " -> " .. event.NewValue)
-			table.insert(lines, "  " .. event.Path)
-			table.insert(lines, "")
-		end
-	end
-	if #lines == 0 then
-		lines = {"No changes observed yet.", "", "Monitoring watches selected properties of scanned objects."}
-	end
-	BehaviorText.Text = table.concat(lines, "\n")
-	local lineCount = #lines
-	local estimatedHeight = math.max(24, lineCount * 11 + 8)
-	BehaviorText.Size = UDim2.new(1, -16, 0, estimatedHeight)
-	BehaviorScroll.CanvasSize = UDim2.fromOffset(0, estimatedHeight + 10)
-	BehaviorInfo.Text = "Monitoring: " .. (BehaviorMonitoringEnabled and "ON" or "OFF")
-		.. "  |  Watched: " .. tostring(BehaviorWatchedCount)
-		.. "/" .. tostring(BEHAVIOR_MAX_WATCHED_OBJECTS)
-		.. "  |  History: " .. tostring(#BehaviorHistory) .. "/" .. tostring(BEHAVIOR_MAX_HISTORY)
-end
-
-local function DisconnectBehaviorWatch(instance)
-	local connections = BehaviorConnections[instance]
-	if not connections then
-		return
-	end
-	for _, connection in ipairs(connections) do
-		connection:Disconnect()
-	end
-	BehaviorConnections[instance] = nil
-	BehaviorLastEventAt[instance] = nil
-	BehaviorWatchedCount = math.max(0, BehaviorWatchedCount - 1)
-end
-
-local function RecordBehaviorChange(instance, propertyName, oldValue, newValue)
-	if not BehaviorMonitoringEnabled or oldValue == newValue then
-		return
-	end
-	local now = os.clock()
-	local lastByProperty = BehaviorLastEventAt[instance]
-	if not lastByProperty then
-		lastByProperty = {}
-		BehaviorLastEventAt[instance] = lastByProperty
-	end
-	local previousAt = lastByProperty[propertyName] or 0
-	if now - previousAt < BEHAVIOR_EVENT_COOLDOWN then
-		return
-	end
-	lastByProperty[propertyName] = now
-
-	local record = ScannedInstances[instance]
-	if not record then
-		return
-	end
-	local entry = {
-		Time = os.date("%H:%M:%S"),
-		Name = instance.Name,
-		ClassName = instance.ClassName,
-		Path = SafeFullName(instance),
-		Property = propertyName,
-		OldValue = FormatBehaviorValue(oldValue),
-		NewValue = FormatBehaviorValue(newValue)
-	}
-	table.insert(BehaviorHistory, entry)
-	if #BehaviorHistory > BEHAVIOR_MAX_HISTORY then
-		table.remove(BehaviorHistory, 1)
-	end
-	ScheduleBehaviorUIUpdate()
-end
-
-local function WatchInstanceBehavior(instance, record)
-	if not BehaviorMonitoringEnabled or not instance or not record then
-		return
-	end
-	if BehaviorConnections[instance] then
-		return
-	end
-	if BehaviorWatchedCount >= BEHAVIOR_MAX_WATCHED_OBJECTS then
-		return
-	end
-
-	local properties = {}
-	for propertyName in pairs(record.Properties or {}) do
-		table.insert(properties, propertyName)
-	end
-	if record.IsValueBase and not table.find(properties, "Value") then
-		table.insert(properties, "Value")
-	end
-	if #properties == 0 then
-		return
-	end
-	table.sort(properties)
-	local connections = {}
-	local propertyLimit = math.min(#properties, 4)
-	for index = 1, propertyLimit do
-		local propertyName = properties[index]
-		local watchedProperty = propertyName
-		local ok, signal = pcall(function()
-			return instance:GetPropertyChangedSignal(watchedProperty)
-		end)
-		if ok and signal then
-			local connection = signal:Connect(function()
-				if not BehaviorMonitoringEnabled or not ScannedInstances[instance] then
-					return
-				end
-				local oldValue
-				local newValue
-				if watchedProperty == "Value" and instance:IsA("ValueBase") then
-					oldValue = record.Value
-					newValue = GetValue(instance, true)
-					record.Value = newValue
-				else
-					oldValue = record.Properties[watchedProperty]
-					local currentProperties = GetRelevantProperties(instance)
-					newValue = currentProperties[watchedProperty]
-					record.Properties[watchedProperty] = newValue
-				end
-				RecordBehaviorChange(instance, watchedProperty, oldValue, newValue)
-			end)
-			table.insert(connections, connection)
-		end
-	end
-	if #connections > 0 then
-		BehaviorConnections[instance] = connections
-		BehaviorWatchedCount += 1
-	end
-end
-
-ResetBehaviorMonitoring = function()
-	for instance in pairs(BehaviorConnections) do
-		DisconnectBehaviorWatch(instance)
-	end
-	table.clear(BehaviorConnections)
-	table.clear(BehaviorHistory)
-	table.clear(BehaviorLastEventAt)
-	BehaviorWatchedCount = 0
-	BehaviorUIUpdateScheduled = false
-	if UpdateBehaviorUI then
-		UpdateBehaviorUI()
-	end
-end
-
---------------------------------------------------
 -- SCAN ONE INSTANCE
 --------------------------------------------------
 
@@ -2369,7 +2147,6 @@ local function ScanInstance(instance)
 
 	ScannedInstances[instance] = record
 	WatchInstanceName(instance)
-	WatchInstanceBehavior(instance, record)
 	return record
 end
 
@@ -4371,8 +4148,6 @@ local function RefreshScanRecord(instance, record)
 	record.IsValueBase = isValueBase
 
 	ScannedInstances[instance] = record
-	DisconnectBehaviorWatch(instance)
-	WatchInstanceBehavior(instance, record)
 	return true
 end
 
@@ -4411,10 +4186,6 @@ local function RemoveScannedSubtree(root)
 
 	local removedAny = false
 	local kept = {}
-
-	for removedInstance in pairs(removalSet) do
-		DisconnectBehaviorWatch(removedInstance)
-	end
 
 	for _, record in ipairs(ScanData) do
 		if removalSet[record.Instance] then
@@ -4822,7 +4593,6 @@ UpdateFamilyUI()
 UpdateRelevanceUI()
 UpdateRelationsUI()
 UpdateIntelligenceUI()
-UpdateBehaviorUI()
 
 Main.Visible = true
 OpenButton.Visible = false
