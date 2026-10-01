@@ -374,7 +374,6 @@ local StructuralChangeScheduled = false
 local StructuralRefreshPending = false
 local StructuralRefreshLastStart = 0
 local ScheduleStructuralAnalysisRefresh
-local QueueStructuralChange
 local NameWatchConnections = {}
 -- Coalesce duplicate deferred add events for the same instance.
 local PendingDescendantAdded = {}
@@ -2010,7 +2009,9 @@ local function WatchInstanceName(instance)
 		end
 
 		-- A queued ancestor refresh already covers this instance's subtree.
-		QueueStructuralChange(instance)
+		if not HasQueuedStructuralAncestor(instance) then
+			StructuralChangeQueue[instance] = true
+		end
 		StructuralChangeDetected = true
 		if ScheduleStructuralAnalysisRefresh then
 			ScheduleStructuralAnalysisRefresh()
@@ -4294,24 +4295,6 @@ local function HasQueuedStructuralAncestor(instance, queuedChanges)
 	return false
 end
 
--- Keep only the highest queued root for each overlapping subtree. The
--- existing ancestor check avoids adding covered children; this also removes
--- child entries already queued before their ancestor was received.
-QueueStructuralChange = function(instance)
-	if not instance or HasQueuedStructuralAncestor(instance) then
-		return false
-	end
-
-	for queuedInstance in pairs(StructuralChangeQueue) do
-		if queuedInstance ~= instance and queuedInstance:IsDescendantOf(instance) then
-			StructuralChangeQueue[queuedInstance] = nil
-		end
-	end
-
-	StructuralChangeQueue[instance] = true
-	return true
-end
-
 ScheduleStructuralAnalysisRefresh = function()
 	if ScanRunning then
 		StructuralRefreshPending = true
@@ -4466,7 +4449,9 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 			local humanoidModel = instance:FindFirstAncestorOfClass("Model")
 			if humanoidModel and ScannedInstances[humanoidModel] then
 				-- Avoid queueing a model already covered by a higher ancestor.
-				QueueStructuralChange(humanoidModel)
+				if not HasQueuedStructuralAncestor(humanoidModel) then
+					StructuralChangeQueue[humanoidModel] = true
+				end
 				StructuralChangeDetected = true
 			end
 		end
@@ -4479,7 +4464,9 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		-- An already-scanned instance being added again means its hierarchy may
 		-- have changed. Refresh it instead of silently ignoring the event.
 		if ScannedInstances[instance] then
-			QueueStructuralChange(instance)
+			if not HasQueuedStructuralAncestor(instance) then
+				StructuralChangeQueue[instance] = true
+			end
 			StructuralChangeDetected = true
 			ScheduleStructuralAnalysisRefresh()
 			return
@@ -4566,7 +4553,9 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
-	QueueStructuralChange(instance)
+	if not HasQueuedStructuralAncestor(instance) then
+		StructuralChangeQueue[instance] = true
+	end
 	StructuralChangeDetected = StructuralChangeDetected or removed
 	if removed and not ScanRunning then
 		StructuralRefreshPending = true
@@ -4667,35 +4656,46 @@ Gui.Destroying:Connect(function()
 end)
 
 --------------------------------------------------
--- INITIAL STATE
+-- INITIAL STATE (GUARDED ERROR REPORTING)
 --------------------------------------------------
 
-ShowPage("Overview")
+local _initOk, _initError = xpcall(function()
+	ShowPage("Overview")
 
-UpdateStatusLayout()
-UpdateMainWidth()
+	UpdateStatusLayout()
+	UpdateMainWidth()
 
-UpdateCounters()
-UpdateClassificationUI()
-UpdateFamilyUI()
-UpdateRelevanceUI()
-UpdateRelationsUI()
-UpdateIntelligenceUI()
+	UpdateCounters()
+	UpdateClassificationUI()
+	UpdateFamilyUI()
+	UpdateRelevanceUI()
+	UpdateRelationsUI()
+	UpdateIntelligenceUI()
 
-Main.Visible = true
-OpenButton.Visible = false
+	Main.Visible = true
+	OpenButton.Visible = false
+end, function(err)
+	local message = tostring(err)
+	if debug and type(debug.traceback) == "function" then
+		return debug.traceback(message, 2)
+	end
+	return message
+end)
+
+if not _initOk then
+	warn("[Client Game Intelligence Analyzer] Startup error:\n" .. tostring(_initError))
+end
 
 --------------------------------------------------
 -- AUTO SCAN
 --------------------------------------------------
 
-if AUTO_SCAN then
-
+if AUTO_SCAN and _initOk then
 	task.spawn(function()
-
 		task.wait(0.5)
-
-		RunScan()
-
+		local _scanOk, _scanError = pcall(RunScan)
+		if not _scanOk then
+			warn("[Client Game Intelligence Analyzer] Auto-scan error: " .. tostring(_scanError))
+		end
 	end)
 end
