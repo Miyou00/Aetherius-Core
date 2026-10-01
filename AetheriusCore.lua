@@ -4335,7 +4335,9 @@ ScheduleStructuralAnalysisRefresh = function()
 					if RefreshScannedSubtree(instance) then
 						changed = true
 					end
-				else
+				elseif ScannedInstances[instance] then
+					-- DescendantRemoving may already have removed this subtree.
+					-- Skip the second traversal when no scan record remains.
 					if RemoveScannedSubtree(instance) then
 						changed = true
 					end
