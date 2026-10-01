@@ -4150,18 +4150,41 @@ local function RefreshScannedSubtree(root)
 		return false
 	end
 
-	InvalidateHierarchyCaches(root)
-
-	local refreshed = false
-	local rootRecord = ScannedInstances[root]
-	if rootRecord and RefreshScanRecord(root, rootRecord) then
-		refreshed = true
+	-- Walk the hierarchy incrementally instead of materializing every descendant
+	-- at once. This function runs in the deferred structural-refresh task, so
+	-- yielding here keeps large subtree refreshes from monopolizing a frame.
+	local current = root.Parent
+	while current and current ~= workspace do
+		HumanoidAncestorCache[current] = nil
+		FamilyRootCache[current] = nil
+		current = current.Parent
 	end
 
-	for _, descendant in ipairs(root:GetDescendants()) do
-		local record = ScannedInstances[descendant]
-		if record and RefreshScanRecord(descendant, record) then
-			refreshed = true
+	local refreshed = false
+	local pending = {root}
+	local processed = 0
+	local batchSize = 100
+
+	while #pending > 0 do
+		local instance = table.remove(pending)
+		if instance and instance:IsDescendantOf(workspace) then
+			HumanoidAncestorCache[instance] = nil
+			FamilyRootCache[instance] = nil
+
+			local record = ScannedInstances[instance]
+			if record and RefreshScanRecord(instance, record) then
+				refreshed = true
+			end
+
+			for _, child in ipairs(instance:GetChildren()) do
+				pending[#pending + 1] = child
+			end
+		end
+
+		processed += 1
+		if processed >= batchSize then
+			processed = 0
+			task.wait()
 		end
 	end
 
