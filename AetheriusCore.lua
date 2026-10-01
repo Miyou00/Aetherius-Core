@@ -374,6 +374,7 @@ local StructuralChangeScheduled = false
 local StructuralRefreshPending = false
 local StructuralRefreshLastStart = 0
 local ScheduleStructuralAnalysisRefresh
+local QueueStructuralChange
 local NameWatchConnections = {}
 -- Coalesce duplicate deferred add events for the same instance.
 local PendingDescendantAdded = {}
@@ -2009,9 +2010,7 @@ local function WatchInstanceName(instance)
 		end
 
 		-- A queued ancestor refresh already covers this instance's subtree.
-		if not HasQueuedStructuralAncestor(instance) then
-			StructuralChangeQueue[instance] = true
-		end
+		QueueStructuralChange(instance)
 		StructuralChangeDetected = true
 		if ScheduleStructuralAnalysisRefresh then
 			ScheduleStructuralAnalysisRefresh()
@@ -4278,14 +4277,39 @@ local function HasQueuedStructuralAncestor(instance, queuedChanges)
 		return false
 	end
 
+	local queue = queuedChanges or StructuralChangeQueue
 	local current = instance.Parent
+	-- Most duplicate events are caused by an immediately queued parent. Check
+	-- it first, then continue walking only when the direct parent is not queued.
+	if current and current ~= workspace and queue[current] then
+		return true
+	end
+	current = current and current.Parent
 	while current and current ~= workspace do
-		if (queuedChanges or StructuralChangeQueue)[current] then
+		if queue[current] then
 			return true
 		end
 		current = current.Parent
 	end
 	return false
+end
+
+-- Keep only the highest queued root for each overlapping subtree. The
+-- existing ancestor check avoids adding covered children; this also removes
+-- child entries already queued before their ancestor was received.
+QueueStructuralChange = function(instance)
+	if not instance or HasQueuedStructuralAncestor(instance) then
+		return false
+	end
+
+	for queuedInstance in pairs(StructuralChangeQueue) do
+		if queuedInstance ~= instance and queuedInstance:IsDescendantOf(instance) then
+			StructuralChangeQueue[queuedInstance] = nil
+		end
+	end
+
+	StructuralChangeQueue[instance] = true
+	return true
 end
 
 ScheduleStructuralAnalysisRefresh = function()
@@ -4442,9 +4466,7 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 			local humanoidModel = instance:FindFirstAncestorOfClass("Model")
 			if humanoidModel and ScannedInstances[humanoidModel] then
 				-- Avoid queueing a model already covered by a higher ancestor.
-				if not HasQueuedStructuralAncestor(humanoidModel) then
-					StructuralChangeQueue[humanoidModel] = true
-				end
+				QueueStructuralChange(humanoidModel)
 				StructuralChangeDetected = true
 			end
 		end
@@ -4457,9 +4479,7 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		-- An already-scanned instance being added again means its hierarchy may
 		-- have changed. Refresh it instead of silently ignoring the event.
 		if ScannedInstances[instance] then
-			if not HasQueuedStructuralAncestor(instance) then
-				StructuralChangeQueue[instance] = true
-			end
+			QueueStructuralChange(instance)
 			StructuralChangeDetected = true
 			ScheduleStructuralAnalysisRefresh()
 			return
@@ -4546,9 +4566,7 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
-	if not HasQueuedStructuralAncestor(instance) then
-		StructuralChangeQueue[instance] = true
-	end
+	QueueStructuralChange(instance)
 	StructuralChangeDetected = StructuralChangeDetected or removed
 	if removed and not ScanRunning then
 		StructuralRefreshPending = true
