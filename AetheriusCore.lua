@@ -194,6 +194,7 @@ local COLORS = {
 --------------------------------------------------
 
 local Gui = Instance.new("ScreenGui")
+local GlobalConnections = {}
 
 Gui.Name = "ClientGameAnalyzer"
 Gui.ResetOnSpawn = false
@@ -4396,7 +4397,7 @@ end
 -- LIVE DESCENDANT DETECTION
 --------------------------------------------------
 
-workspace.DescendantAdded:Connect(function(instance)
+GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(instance)
 	local eventScan = CurrentScan
 	task.defer(function()
 		if eventScan ~= CurrentScan then
@@ -4566,7 +4567,7 @@ workspace.DescendantAdded:Connect(function(instance)
 	end)
 end)
 
-workspace.DescendantRemoving:Connect(function(instance)
+GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(function(instance)
 	local nameConnection = NameWatchConnections[instance]
 	if nameConnection then
 		nameConnection:Disconnect()
@@ -4607,7 +4608,7 @@ end)
 -- PLAYER UPDATES
 --------------------------------------------------
 
-LocalPlayer.CharacterAdded:Connect(function()
+GlobalConnections.CharacterAdded = LocalPlayer.CharacterAdded:Connect(function()
 	table.clear(HumanoidAncestorCache)
 	table.clear(FamilyRootCache)
 
@@ -4667,7 +4668,31 @@ local function ConnectViewportSize()
 end
 
 CameraConnection = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(ConnectViewportSize)
+GlobalConnections.CameraChanged = CameraConnection
 ConnectViewportSize()
+
+-- Release long-lived listeners and per-instance watchers when the analyzer is destroyed.
+Gui.Destroying:Connect(function()
+	CurrentScan += 1
+	for _, connection in pairs(GlobalConnections) do
+		if connection then
+			connection:Disconnect()
+		end
+	end
+	table.clear(GlobalConnections)
+	if ViewportConnection then
+		ViewportConnection:Disconnect()
+		ViewportConnection = nil
+	end
+	if CameraConnection then
+		CameraConnection:Disconnect()
+		CameraConnection = nil
+	end
+	for instance, connection in pairs(NameWatchConnections) do
+		connection:Disconnect()
+		NameWatchConnections[instance] = nil
+	end
+end)
 
 --------------------------------------------------
 -- INITIAL STATE
