@@ -4217,9 +4217,11 @@ local function RemoveScannedSubtree(root)
 	end
 
 	local removedAny = false
-	local kept = {}
+	-- Compact ScanData in place instead of allocating a second large array.
+	-- `kept` is the next write position for records that remain in the scan.
+	local kept = 1
 
-	for _, record in ipairs(ScanData) do
+	for index, record in ipairs(ScanData) do
 		if removalSet[record.Instance] then
 			removedAny = true
 			AttributeCount -= record.AttributeCount or 0
@@ -4231,7 +4233,10 @@ local function RemoveScannedSubtree(root)
 			PendingInstances[record.Instance] = nil
 			PendingClassification[record.Instance] = nil
 		else
-			kept[#kept + 1] = record
+			if kept ~= index then
+				ScanData[kept] = record
+			end
+			kept += 1
 		end
 	end
 
@@ -4239,9 +4244,9 @@ local function RemoveScannedSubtree(root)
 		return false
 	end
 
-	table.clear(ScanData)
-	for index, record in ipairs(kept) do
-		ScanData[index] = record
+	-- Drop references left in the old tail after in-place compaction.
+	while #ScanData >= kept do
+		ScanData[#ScanData] = nil
 	end
 
 	ObjectCount = #ScanData
