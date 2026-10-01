@@ -4322,8 +4322,11 @@ ScheduleStructuralAnalysisRefresh = function()
 			return
 		end
 
-		local changes = table.clone(StructuralChangeQueue)
-		table.clear(StructuralChangeQueue)
+		-- Hand the current queue to this refresh and immediately replace it.
+		-- New events can enter the fresh queue while this batch is processed,
+		-- without cloning every queued instance.
+		local changes = StructuralChangeQueue
+		StructuralChangeQueue = {}
 
 		local changed = StructuralChangeDetected
 		StructuralChangeDetected = false
