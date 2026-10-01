@@ -82,6 +82,8 @@
     • Uses larger work batches with short yields for better throughput
     • Caches repeated hierarchy and family-name lookups
     • Throttles scan/classification UI refreshes to reduce UI overhead
+    • Uses shorter classification time slices to reduce frame spikes
+    • Separates family/relevance/relationship generation with scheduler yields
     • Preserves generation-safe scanning and classification
 
     Intended for games you own or are authorized to analyze.
@@ -284,11 +286,11 @@ local Statuses = {
 -- PHASE 2.1 -- OBJECT CLASSIFICATION
 --------------------------------------------------
 
-local CLASSIFICATION_BATCH_SIZE = 350
-local PENDING_CLASSIFICATION_BATCH_SIZE = 150
-local CLASSIFICATION_YIELD_TIME = 0.015
-local CLASSIFICATION_TIME_BUDGET = 0.012
-local CLASSIFICATION_UI_INTERVAL = 0.12
+local CLASSIFICATION_BATCH_SIZE = 100
+local PENDING_CLASSIFICATION_BATCH_SIZE = 50
+local CLASSIFICATION_YIELD_TIME = 0.01
+local CLASSIFICATION_TIME_BUDGET = 0.004
+local CLASSIFICATION_UI_INTERVAL = 0.25
 
 local ClassificationData = {}
 
@@ -2714,6 +2716,8 @@ local function AddRelation(objectEntries, relationList, relationCounts, pairKeys
 		ToName = toEntry.Base.Name,
 		FromClass = fromEntry.Base.ClassName,
 		ToClass = toEntry.Base.ClassName,
+		FromFullName = fromEntry.Base.FullName or fromEntry.Base.Name,
+		ToFullName = toEntry.Base.FullName or toEntry.Base.Name,
 		Type = relationType,
 		Strength = strength,
 		Detail = detail or ""
@@ -2888,8 +2892,8 @@ end
 local function CreateRelationRow(data, order)
 	local row = Instance.new("Frame")
 	row.Name = "RelationRow" .. order
-	row.Size = UDim2.new(1, -2, 0, 38)
-	row.Position = UDim2.fromOffset(0, (order - 1) * 40)
+	row.Size = UDim2.new(1, -2, 0, 60)
+	row.Position = UDim2.fromOffset(0, (order - 1) * 62)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
 	row.ZIndex = BASE_ZINDEX + 3
@@ -2898,38 +2902,116 @@ local function CreateRelationRow(data, order)
 
 	local typeLabel = MakeText(
 		row,
-		data.Type,
+		table.concat(data.Types, " + "),
 		7,
-		GetRelationTextColor(data.Type),
+		GetRelationTextColor(data.PrimaryType),
 		Enum.Font.GothamBold
 	)
-	typeLabel.Position = UDim2.fromOffset(6, 3)
-	typeLabel.Size = UDim2.fromOffset(88, 13)
+	typeLabel.Position = UDim2.fromOffset(6, 2)
+	typeLabel.Size = UDim2.new(1, -12, 0, 12)
 	typeLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	typeLabel.ZIndex = BASE_ZINDEX + 4
 
 	local namesLabel = MakeText(
 		row,
-		data.FromName .. "  →  " .. data.ToName,
+		data.FromName .. " [" .. data.FromClass .. "]  →  "
+			.. data.ToName .. " [" .. data.ToClass .. "]",
 		8,
 		COLORS.Text,
 		Enum.Font.GothamMedium
 	)
-	namesLabel.Position = UDim2.fromOffset(96, 2)
-	namesLabel.Size = UDim2.new(1, -102, 0, 15)
+	namesLabel.Position = UDim2.fromOffset(6, 15)
+	namesLabel.Size = UDim2.new(1, -12, 0, 13)
 	namesLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	namesLabel.ZIndex = BASE_ZINDEX + 4
 
+	local pathLabel = MakeText(
+		row,
+		data.FromFullName .. "  →  " .. data.ToFullName,
+		6,
+		COLORS.Muted,
+		Enum.Font.Gotham
+	)
+	pathLabel.Position = UDim2.fromOffset(6, 29)
+	pathLabel.Size = UDim2.new(1, -12, 0, 11)
+	pathLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	pathLabel.ZIndex = BASE_ZINDEX + 4
+
 	local detailLabel = MakeText(
 		row,
-		"Strength " .. tostring(data.Strength) .. "  •  " .. tostring(data.Detail),
-		7,
-		COLORS.Muted
+		"Strength " .. tostring(data.Strength) .. "  •  " .. table.concat(data.Details, " | "),
+		6,
+		COLORS.Muted,
+		Enum.Font.Gotham
 	)
-	detailLabel.Position = UDim2.fromOffset(96, 18)
-	detailLabel.Size = UDim2.new(1, -102, 0, 12)
+	detailLabel.Position = UDim2.fromOffset(6, 42)
+	detailLabel.Size = UDim2.new(1, -12, 0, 12)
 	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
 	detailLabel.ZIndex = BASE_ZINDEX + 4
+end
+
+local function BuildRelationDisplayGroups()
+	local groupsByPair = {}
+	local groups = {}
+
+	for _, relationIndex in ipairs(RelationOrder) do
+		local relation = RelationData[relationIndex]
+		if relation then
+			local first = math.min(relation.FromIndex, relation.ToIndex)
+			local second = math.max(relation.FromIndex, relation.ToIndex)
+			local key = tostring(first) .. "|" .. tostring(second)
+			local group = groupsByPair[key]
+
+			if not group then
+				group = {
+					FromIndex = relation.FromIndex,
+					ToIndex = relation.ToIndex,
+					FromName = relation.FromName,
+					ToName = relation.ToName,
+					FromClass = relation.FromClass,
+					ToClass = relation.ToClass,
+					FromFullName = relation.FromFullName or relation.FromName,
+					ToFullName = relation.ToFullName or relation.ToName,
+					Types = {},
+					TypeSet = {},
+					Details = {},
+					DetailSet = {},
+					PrimaryType = relation.Type,
+					Strength = relation.Strength or 0
+				}
+				groupsByPair[key] = group
+				table.insert(groups, group)
+			end
+
+			if not group.TypeSet[relation.Type] then
+				group.TypeSet[relation.Type] = true
+				table.insert(group.Types, relation.Type)
+			end
+			local detail = tostring(relation.Type) .. ": " .. tostring(relation.Detail or "")
+			if not group.DetailSet[detail] then
+				group.DetailSet[detail] = true
+				table.insert(group.Details, detail)
+			end
+			if (relation.Strength or 0) > group.Strength then
+				group.Strength = relation.Strength
+				group.PrimaryType = relation.Type
+			end
+		end
+	end
+
+	for _, group in ipairs(groups) do
+		table.sort(group.Types)
+		table.sort(group.Details)
+	end
+	table.sort(groups, function(a, b)
+		if a.Strength == b.Strength then
+			local left = a.FromFullName .. "|" .. a.ToFullName
+			local right = b.FromFullName .. "|" .. b.ToFullName
+			return left < right
+		end
+		return a.Strength > b.Strength
+	end)
+	return groups
 end
 
 local function UpdateRelationsUI()
@@ -2950,15 +3032,13 @@ local function UpdateRelationsUI()
 		end
 	end
 
-	local limit = math.min(#RelationOrder, 100)
+	local displayGroups = BuildRelationDisplayGroups()
+	local limit = math.min(#displayGroups, 100)
 	for order = 1, limit do
-		local relation = RelationData[RelationOrder[order]]
-		if relation then
-			CreateRelationRow(relation, order)
-		end
+		CreateRelationRow(displayGroups[order], order)
 	end
 
-	RelationsScroll.CanvasSize = UDim2.fromOffset(0, limit * 40)
+	RelationsScroll.CanvasSize = UDim2.fromOffset(0, limit * 62)
 end
 
 local function RequestRelationsUIUpdate()
@@ -3432,13 +3512,24 @@ local function RunClassification(scanGeneration)
 		ClassificationData[index] = data
 	end
 
+	-- Keep the heavy intelligence stages separated by scheduler yields.
+	-- Classification, family, relevance, and relationship generation all
+	-- reuse the existing engines; this only prevents their work from stacking
+	-- into one long frame after classification reaches 100%.
+	task.wait()
+
 	-- Build Phase 2.2 family intelligence only after classification has fully
 	-- succeeded, keeping the same generation-safe commit model.
 	CommitFamilyData(ClassificationData)
 
+	task.wait()
+
 	-- Phase 2.3 relevance is built only after classification and family data
 	-- are complete, so its signals use the full stored scan context.
 	CommitRelevanceData(ClassificationData)
+
+	task.wait()
+
 	CommitRelationshipData(ClassificationData)
 
 	for category in pairs(ClassificationCounts) do
