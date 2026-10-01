@@ -4368,7 +4368,15 @@ workspace.DescendantAdded:Connect(function(instance)
 		end
 
 		IntelligenceSummary.Status = "UPDATING"
-        if UpdateIntelligenceUI then UpdateIntelligenceUI() end
+        if not IntelligenceSummary.UIUpdateScheduled then
+            IntelligenceSummary.UIUpdateScheduled = true
+            task.defer(function()
+                IntelligenceSummary.UIUpdateScheduled = false
+                if UpdateIntelligenceUI then
+                    UpdateIntelligenceUI()
+                end
+            end)
+        end
 		InvalidateHierarchyCaches(instance)
 
 		-- Adding a Humanoid can change the classification of the existing
@@ -4532,7 +4540,15 @@ workspace.DescendantRemoving:Connect(function(instance)
 	local removed = RemoveScannedSubtree(instance)
 	if removed then
 		IntelligenceSummary.Status = "UPDATING"
-        if UpdateIntelligenceUI then UpdateIntelligenceUI() end
+        if not IntelligenceSummary.UIUpdateScheduled then
+            IntelligenceSummary.UIUpdateScheduled = true
+            task.defer(function()
+                IntelligenceSummary.UIUpdateScheduled = false
+                if UpdateIntelligenceUI then
+                    UpdateIntelligenceUI()
+                end
+            end)
+        end
 	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
