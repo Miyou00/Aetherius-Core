@@ -4043,6 +4043,10 @@ RescanButton.MouseButton1Click:Connect(function()
 
 	table.clear(PendingInstances)
 	table.clear(PendingClassification)
+	-- Discard structural changes from the previous scan generation.
+	table.clear(StructuralChangeQueue)
+	StructuralChangeDetected = false
+	StructuralRefreshPending = false
 	for instance, connection in pairs(NameWatchConnections) do
 		connection:Disconnect()
 		NameWatchConnections[instance] = nil
