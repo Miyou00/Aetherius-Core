@@ -1428,7 +1428,7 @@ BehaviorTitle.ZIndex = BASE_ZINDEX + 3
 
 local BehaviorInfo = MakeText(
 	BehaviorPage,
-	"Dynamic state monitoring will be added in a later phase.",
+	"Phase 2.7 Step 1: Behavior page UI shell. Monitoring is not active in this test build.",
 	10,
 	COLORS.Muted
 )
@@ -1437,6 +1437,34 @@ BehaviorInfo.Position = UDim2.fromOffset(0, 28)
 BehaviorInfo.Size = UDim2.new(1, 0, 0, 40)
 BehaviorInfo.TextWrapped = true
 BehaviorInfo.ZIndex = BASE_ZINDEX + 3
+
+local BehaviorScroll = Instance.new("ScrollingFrame")
+BehaviorScroll.Name = "BehaviorScroll"
+BehaviorScroll.Size = UDim2.new(1, -8, 1, -76)
+BehaviorScroll.Position = UDim2.fromOffset(4, 72)
+BehaviorScroll.BackgroundColor3 = COLORS.Panel2
+BehaviorScroll.BorderSizePixel = 0
+BehaviorScroll.ScrollBarThickness = 3
+BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 0)
+BehaviorScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+BehaviorScroll.ZIndex = BASE_ZINDEX + 2
+BehaviorScroll.Parent = BehaviorPage
+Corner(BehaviorScroll, 5)
+
+local BehaviorText = MakeText(
+	BehaviorScroll,
+	"Dynamic behavior monitoring is not enabled yet. This page is being tested separately before adding property watchers or event history.",
+	10,
+	COLORS.Muted
+)
+
+BehaviorText.Position = UDim2.fromOffset(8, 8)
+BehaviorText.Size = UDim2.new(1, -16, 0, 54)
+BehaviorText.TextWrapped = true
+BehaviorText.TextYAlignment = Enum.TextYAlignment.Top
+BehaviorText.ZIndex = BASE_ZINDEX + 3
+
+BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 70)
 
 --------------------------------------------------
 -- REMOTES PAGE
