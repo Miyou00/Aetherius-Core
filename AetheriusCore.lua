@@ -112,35 +112,13 @@
 --------------------------------------------------
 
 local Players = game:GetService("Players")
-local VirtualUser = game:GetService("VirtualUser")
 local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
 
---------------------------------------------------
--- ANTI-AFK
---------------------------------------------------
-
-local ANTI_AFK_ENABLED = true
-
-local function StartAntiAFK()
-    if not ANTI_AFK_ENABLED or not LocalPlayer then
-        return
-    end
-
-    LocalPlayer.Idled:Connect(function()
-        if not ANTI_AFK_ENABLED then
-            return
-        end
-
-        pcall(function()
-            VirtualUser:CaptureController()
-            VirtualUser:ClickButton2(Vector2.new(0, 0))
-        end)
-    end)
-end
-
-StartAntiAFK()
+-- Keep the analyzer independent from VirtualUser / anti-AFK behavior.
+-- Those APIs are not required for client-visible inspection and may not be
+-- available in every execution environment.
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 --------------------------------------------------
