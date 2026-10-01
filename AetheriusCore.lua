@@ -2008,7 +2008,10 @@ local function WatchInstanceName(instance)
 			return
 		end
 
-		StructuralChangeQueue[instance] = true
+		-- A queued ancestor refresh already covers this instance's subtree.
+		if not HasQueuedStructuralAncestor(instance) then
+			StructuralChangeQueue[instance] = true
+		end
 		StructuralChangeDetected = true
 		if ScheduleStructuralAnalysisRefresh then
 			ScheduleStructuralAnalysisRefresh()
@@ -4438,7 +4441,10 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		if instance:IsA("Humanoid") then
 			local humanoidModel = instance:FindFirstAncestorOfClass("Model")
 			if humanoidModel and ScannedInstances[humanoidModel] then
-				StructuralChangeQueue[humanoidModel] = true
+				-- Avoid queueing a model already covered by a higher ancestor.
+				if not HasQueuedStructuralAncestor(humanoidModel) then
+					StructuralChangeQueue[humanoidModel] = true
+				end
 				StructuralChangeDetected = true
 			end
 		end
