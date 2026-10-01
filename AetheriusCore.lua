@@ -4166,7 +4166,8 @@ local function RefreshScannedSubtree(root)
 	local batchSize = 100
 
 	while #pending > 0 do
-		local instance = table.remove(pending)
+		local instance = pending[#pending]
+		pending[#pending] = nil
 		if instance and instance:IsDescendantOf(workspace) then
 			HumanoidAncestorCache[instance] = nil
 			FamilyRootCache[instance] = nil
