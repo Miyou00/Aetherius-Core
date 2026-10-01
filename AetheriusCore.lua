@@ -4480,37 +4480,25 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 			return
 		end
 
-		if ClassificationRunning or ClassificationScheduled then
-			PendingClassification[instance] = record
-			ClassificationComplete = false
-			RequestClassificationUIUpdate()
-		elseif ClassificationComplete then
-			-- Coalesce live additions into the existing generation-safe pipeline.
-			-- Rebuilding once for a burst avoids sorting and recommitting family,
-			-- relevance, and relationship data separately for every new instance.
-			PendingClassification[instance] = record
-			ClassificationComplete = false
-			RequestClassificationUIUpdate()
+		-- Queue live additions through one shared scheduling path. This keeps
+		-- the running, scheduled, and completed cases from maintaining separate
+		-- copies of the same enqueue logic, while preserving the generation guard.
+		PendingClassification[instance] = record
+		ClassificationComplete = false
+		RequestClassificationUIUpdate()
 
-			if not ClassificationRunning and not ClassificationScheduled then
-				ClassificationScheduled = true
-				local retryGeneration = CurrentScan
-				task.defer(function()
-					RunClassification(retryGeneration)
-				end)
-			end
-		else
-			PendingClassification[instance] = record
-			ClassificationComplete = false
-			RequestClassificationUIUpdate()
-
-			if not ClassificationRunning and not ClassificationScheduled then
-				ClassificationScheduled = true
-				local retryGeneration = CurrentScan
-				task.defer(function()
-					RunClassification(retryGeneration)
-				end)
-			end
+		if not ClassificationRunning and not ClassificationScheduled then
+			ClassificationScheduled = true
+			local retryGeneration = CurrentScan
+			task.defer(function()
+				-- Briefly collect nearby additions so one classification pass can
+				-- process the batch instead of rebuilding intelligence per event.
+				task.wait(0.1)
+				if retryGeneration ~= CurrentScan or not ClassificationScheduled then
+					return
+				end
+				RunClassification(retryGeneration)
+			end)
 		end
 	end)
 end)
