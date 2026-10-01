@@ -435,23 +435,6 @@ local function ClearScanData()
 	ScanTruncated = false
 
 	ResetClassification()
-	IntelligenceSummary.Status = "UPDATING"
-	IntelligenceSummary.ObjectCount = 0
-	IntelligenceSummary.ClassifiedCount = 0
-	IntelligenceSummary.FamilyCount = 0
-	IntelligenceSummary.UnknownClassificationCount = 0
-	IntelligenceSummary.ScanTruncated = false
-	IntelligenceSummary.MostConnected = nil
-	table.clear(IntelligenceSummary.TopRelevant)
-	for level in pairs(IntelligenceSummary.RelevanceCounts) do
-		IntelligenceSummary.RelevanceCounts[level] = 0
-	end
-	for relationType in pairs(IntelligenceSummary.RelationshipCounts) do
-		IntelligenceSummary.RelationshipCounts[relationType] = 0
-	end
-	if UpdateIntelligenceUI then
-		UpdateIntelligenceUI()
-	end
 end
 
 local function SafeFullName(instance)
@@ -1445,7 +1428,7 @@ BehaviorTitle.ZIndex = BASE_ZINDEX + 3
 
 local BehaviorInfo = MakeText(
 	BehaviorPage,
-	"Phase 2.7 Step 1: Behavior page UI shell. Monitoring is not active in this test build.",
+	"Dynamic state monitoring will be added in a later phase.",
 	10,
 	COLORS.Muted
 )
@@ -1454,34 +1437,6 @@ BehaviorInfo.Position = UDim2.fromOffset(0, 28)
 BehaviorInfo.Size = UDim2.new(1, 0, 0, 40)
 BehaviorInfo.TextWrapped = true
 BehaviorInfo.ZIndex = BASE_ZINDEX + 3
-
-local BehaviorScroll = Instance.new("ScrollingFrame")
-BehaviorScroll.Name = "BehaviorScroll"
-BehaviorScroll.Size = UDim2.new(1, -8, 1, -76)
-BehaviorScroll.Position = UDim2.fromOffset(4, 72)
-BehaviorScroll.BackgroundColor3 = COLORS.Panel2
-BehaviorScroll.BorderSizePixel = 0
-BehaviorScroll.ScrollBarThickness = 3
-BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 0)
-BehaviorScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-BehaviorScroll.ZIndex = BASE_ZINDEX + 2
-BehaviorScroll.Parent = BehaviorPage
-Corner(BehaviorScroll, 5)
-
-local BehaviorText = MakeText(
-	BehaviorScroll,
-	"Dynamic behavior monitoring is not enabled yet. This page is being tested separately before adding property watchers or event history.",
-	10,
-	COLORS.Muted
-)
-
-BehaviorText.Position = UDim2.fromOffset(8, 8)
-BehaviorText.Size = UDim2.new(1, -16, 0, 54)
-BehaviorText.TextWrapped = true
-BehaviorText.TextYAlignment = Enum.TextYAlignment.Top
-BehaviorText.ZIndex = BASE_ZINDEX + 3
-
-BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 70)
 
 --------------------------------------------------
 -- REMOTES PAGE
@@ -3819,10 +3774,6 @@ local function RunClassification(scanGeneration)
 		return
 	end
 
-	-- Protect the full derived-analysis pipeline too. Family, relevance,
-	-- relationship, summary, or UI errors must not leave the analyzer marked
-	-- as actively classifying forever.
-	local pipelineSuccess, pipelineErr = pcall(function()
 	-- Commit only after the entire generation completed successfully.
 	table.clear(ClassificationData)
 	table.clear(ClassificationIndexByInstance)
@@ -3866,24 +3817,6 @@ local function RunClassification(scanGeneration)
 	UpdateFamilyUI()
 	UpdateRelevanceUI()
 	UpdateRelationsUI()
-	end)
-
-	if scanGeneration ~= CurrentScan then
-		return
-	end
-
-	if not pipelineSuccess then
-		ClassificationRunning = false
-		ClassificationScheduled = false
-		ClassificationComplete = false
-		ClassificationProgress = 0
-		IntelligenceSummary.Status = "ERROR"
-		UpdateClassificationUI()
-		if UpdateIntelligenceUI then UpdateIntelligenceUI() end
-		UpdateOverallStatus("ERROR", 0)
-		warn("[Client Game Intelligence Analyzer] Intelligence pipeline error:", pipelineErr)
-		return
-	end
 
 	-- Live changes that arrived while this classification was running are
 	-- deliberately coalesced into the next refresh instead of cancelling the
@@ -4036,10 +3969,11 @@ local function RunScan()
 
 	ScanRunning = false
 
-	-- Keep structural changes queued until classification can reconcile them.
-	-- In particular, a Name change can happen after an instance was scanned,
-	-- leaving its stored record stale even though the instance was visited.
-	-- RunClassification schedules one coalesced refresh after it completes.
+	-- Structural changes that occurred during the scan are already represented
+	-- by the scan/pending queues. Do not trigger a second intelligence rebuild
+	-- for those same events after the generation completes.
+	table.clear(StructuralChangeQueue)
+	StructuralChangeDetected = false
 	StructuralChangeScheduled = false
 
 	if not success then
