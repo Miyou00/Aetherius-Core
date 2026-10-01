@@ -4306,18 +4306,22 @@ ScheduleStructuralAnalysisRefresh = function()
 		-- rebuilding intelligence once.
 		task.wait(0.10)
 
-		StructuralChangeScheduled = false
+		-- Keep the scheduled flag set while this refresh is active so new
+		-- events cannot start a second structural refresh during a yield.
 		if ScanRunning then
+			StructuralChangeScheduled = false
 			StructuralRefreshPending = true
 			return
 		end
 
 		if ClassificationRunning or ClassificationScheduled then
+			StructuralChangeScheduled = false
 			StructuralRefreshPending = true
 			return
 		end
 
 		if next(StructuralChangeQueue) == nil then
+			StructuralChangeScheduled = false
 			StructuralRefreshPending = false
 			return
 		end
@@ -4329,6 +4333,7 @@ ScheduleStructuralAnalysisRefresh = function()
 		StructuralChangeQueue = {}
 
 		local changed = StructuralChangeDetected
+		local processedChanges = 0
 		StructuralChangeDetected = false
 		for instance in pairs(changes) do
 			-- If a queued ancestor will refresh or remove this subtree, skip the
@@ -4346,10 +4351,24 @@ ScheduleStructuralAnalysisRefresh = function()
 					end
 				end
 			end
+
+			processedChanges += 1
+			if processedChanges >= 40 then
+				processedChanges = 0
+				task.wait(0.015)
+			end
 		end
+		StructuralChangeScheduled = false
 
 		if not changed then
-			StructuralRefreshPending = false
+			if next(StructuralChangeQueue) then
+				StructuralRefreshPending = true
+				task.defer(function()
+					ScheduleStructuralAnalysisRefresh()
+				end)
+			else
+				StructuralRefreshPending = false
+			end
 			return
 		end
 
