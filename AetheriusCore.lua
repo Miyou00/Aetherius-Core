@@ -4485,84 +4485,20 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 			ClassificationComplete = false
 			RequestClassificationUIUpdate()
 		elseif ClassificationComplete then
-			if ClassificationIndexByInstance[record.Instance] then
-				return
-			end
-			local category, signals = ClassifyObject(record)
-			local classificationIndex = #ClassificationData + 1
-			ClassificationIndexByInstance[record.Instance] = classificationIndex
-			ClassificationData[classificationIndex] = {
-				Instance = record.Instance,
-				Name = record.Name,
-				ClassName = record.ClassName,
-				FullName = record.FullName,
-				Category = category,
-				Signals = signals
-			}
-			ClassificationCounts[category] = (ClassificationCounts[category] or 0) + 1
-
-			local family, rootPath = DetermineFamily(record, category)
-			local familyIndex = #ClassificationData
-			FamilyData[familyIndex] = {
-				Instance = record.Instance,
-				Name = record.Name,
-				ClassName = record.ClassName,
-				FullName = record.FullName,
-				Category = category,
-				Family = family,
-				Root = rootPath
-			}
-			FamilyCounts[family] = (FamilyCounts[family] or 0) + 1
-			FamilyCategories[family] = FamilyCategories[family] or category
-			if not table.find(FamilyOrder, family) then
-				table.insert(FamilyOrder, family)
-			end
-			table.sort(FamilyOrder, function(a, b)
-				local countA = FamilyCounts[a] or 0
-				local countB = FamilyCounts[b] or 0
-				if countA == countB then
-					return a < b
-				end
-				return countA > countB
-			end)
-
-			local familyRecord = FamilyData[familyIndex]
-			local score, level, relevanceSignals = CalculateRelevance(
-				record,
-				ClassificationData[classificationIndex],
-				familyRecord
-			)
-
-			local relevanceIndex = classificationIndex
-			RelevanceData[relevanceIndex] = {
-				Index = relevanceIndex,
-				Instance = record.Instance,
-				Name = record.Name,
-				ClassName = record.ClassName,
-				FullName = record.FullName,
-				Category = category,
-				Family = family,
-				Score = score,
-				Level = level,
-				Signals = relevanceSignals
-			}
-			RelevanceCounts[level] = (RelevanceCounts[level] or 0) + 1
-			table.insert(RelevanceOrder, relevanceIndex)
-			table.sort(RelevanceOrder, function(a, b)
-				local left = RelevanceData[a]
-				local right = RelevanceData[b]
-				if left.Score == right.Score then
-					return left.Name < right.Name
-				end
-				return left.Score > right.Score
-			end)
-
+			-- Coalesce live additions into the existing generation-safe pipeline.
+			-- Rebuilding once for a burst avoids sorting and recommitting family,
+			-- relevance, and relationship data separately for every new instance.
+			PendingClassification[instance] = record
+			ClassificationComplete = false
 			RequestClassificationUIUpdate()
-			RequestFamilyUIUpdate()
-			RequestRelevanceUIUpdate()
-			CommitRelationshipData(ClassificationData)
-			RefreshIntelligenceSummary()
-			UpdateRelationsUI()
+
+			if not ClassificationRunning and not ClassificationScheduled then
+				ClassificationScheduled = true
+				local retryGeneration = CurrentScan
+				task.defer(function()
+					RunClassification(retryGeneration)
+				end)
+			end
 		else
 			PendingClassification[instance] = record
 			ClassificationComplete = false
