@@ -104,12 +104,23 @@
     • access server-only data
     • bypass replication
     • perform arbitrary remote probing
-    • perform anti-detection
+    •     perform anti-detection
 ]]
+
+local __tracebackHandler = function(err)
+    local message = tostring(err)
+    if debug and debug.traceback then
+        return debug.traceback(message, 2)
+    end
+    return message
+end
+
+local __startupOk, __startupError = xpcall(function()
 
 --------------------------------------------------
 -- SERVICES
 --------------------------------------------------
+
 
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
@@ -164,11 +175,7 @@ local RELATION_MAX_SHARED_GROUP = 8
 local AUTO_SCAN = true
 
 local DISPLAY_ORDER = 2147483647
-local BASE_ZINDEX = 1
-
-local function GetZIndex(offset)
-	return math.clamp(BASE_ZINDEX + (offset or 0), 1, 10)
-end
+local BASE_ZINDEX = 100000
 
 --------------------------------------------------
 -- REMOVE OLD GUI
@@ -627,7 +634,7 @@ TitleBar.Name = "TitleBar"
 TitleBar.Size = UDim2.new(1, 0, 0, 32)
 TitleBar.BackgroundColor3 = COLORS.Panel
 TitleBar.BorderSizePixel = 0
-TitleBar.ZIndex = GetZIndex(1)
+TitleBar.ZIndex = BASE_ZINDEX + 1
 TitleBar.Parent = Main
 
 Corner(TitleBar, 9)
@@ -642,7 +649,7 @@ local Title = MakeText(
 
 Title.Position = UDim2.fromOffset(12, 0)
 Title.Size = UDim2.new(1, -75, 1, 0)
-Title.ZIndex = GetZIndex(2)
+Title.ZIndex = BASE_ZINDEX + 2
 
 local CloseButton = MakeButton(
 	TitleBar,
@@ -653,7 +660,7 @@ local CloseButton = MakeButton(
 CloseButton.Size = UDim2.fromOffset(24, 24)
 CloseButton.Position = UDim2.new(1, -29, 0.5, -12)
 CloseButton.BackgroundColor3 = COLORS.Panel3
-CloseButton.ZIndex = GetZIndex(2)
+CloseButton.ZIndex = BASE_ZINDEX + 2
 
 --------------------------------------------------
 -- STATUS HEADER
@@ -666,7 +673,7 @@ StatusHeader.Size = UDim2.new(1, -16, 0, 27)
 StatusHeader.Position = UDim2.fromOffset(8, 36)
 StatusHeader.BackgroundColor3 = COLORS.Panel2
 StatusHeader.BorderSizePixel = 0
-StatusHeader.ZIndex = GetZIndex(1)
+StatusHeader.ZIndex = BASE_ZINDEX + 1
 StatusHeader.Parent = Main
 
 Corner(StatusHeader, 6)
@@ -681,7 +688,7 @@ local OverallStatus = MakeText(
 
 OverallStatus.Position = UDim2.fromOffset(9, 0)
 OverallStatus.Size = UDim2.new(1, -100, 1, 0)
-OverallStatus.ZIndex = GetZIndex(3)
+OverallStatus.ZIndex = BASE_ZINDEX + 3
 
 local ProgressLabel = MakeText(
 	StatusHeader,
@@ -694,7 +701,7 @@ local ProgressLabel = MakeText(
 ProgressLabel.Size = UDim2.fromOffset(58, 27)
 ProgressLabel.Position = UDim2.new(1, -86, 0, 0)
 ProgressLabel.TextXAlignment = Enum.TextXAlignment.Right
-ProgressLabel.ZIndex = GetZIndex(3)
+ProgressLabel.ZIndex = BASE_ZINDEX + 3
 
 local StatusExpand = MakeButton(
 	StatusHeader,
@@ -705,7 +712,7 @@ local StatusExpand = MakeButton(
 StatusExpand.Size = UDim2.fromOffset(20, 20)
 StatusExpand.Position = UDim2.new(1, -26, 0.5, -10)
 StatusExpand.BackgroundTransparency = 1
-StatusExpand.ZIndex = GetZIndex(3)
+StatusExpand.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- STATUS DETAILS
@@ -720,7 +727,7 @@ StatusDetails.BackgroundColor3 = COLORS.Panel2
 StatusDetails.BorderSizePixel = 0
 StatusDetails.ClipsDescendants = true
 StatusDetails.Visible = false
-StatusDetails.ZIndex = GetZIndex(1)
+StatusDetails.ZIndex = BASE_ZINDEX + 1
 StatusDetails.Parent = Main
 
 Corner(StatusDetails, 6)
@@ -748,7 +755,7 @@ for i, name in ipairs(statusNames) do
 	)
 
 	label.Size = UDim2.new(1, -20, 0, 20)
-	label.ZIndex = GetZIndex(3)
+	label.ZIndex = BASE_ZINDEX + 3
 
 	StatusLabels[name] = label
 end
@@ -763,7 +770,7 @@ TabBar.Name = "TabBar"
 TabBar.Size = UDim2.new(1, -16, 0, 22)
 TabBar.Position = UDim2.fromOffset(8, 65)
 TabBar.BackgroundTransparency = 1
-TabBar.ZIndex = GetZIndex(2)
+TabBar.ZIndex = BASE_ZINDEX + 2
 TabBar.Parent = Main
 
 local TabLayout = Instance.new("UIListLayout")
@@ -788,7 +795,7 @@ Content.Position = UDim2.fromOffset(8, 91)
 
 Content.BackgroundColor3 = COLORS.Panel
 Content.BorderSizePixel = 0
-Content.ZIndex = GetZIndex(1)
+Content.ZIndex = BASE_ZINDEX + 1
 Content.Parent = Main
 
 Corner(Content, 6)
@@ -806,7 +813,7 @@ BottomBar.Size = UDim2.new(1, -16, 0, 27)
 BottomBar.Position = UDim2.new(0, 8, 1, -34)
 
 BottomBar.BackgroundTransparency = 1
-BottomBar.ZIndex = GetZIndex(5)
+BottomBar.ZIndex = BASE_ZINDEX + 5
 BottomBar.Parent = Main
 
 --------------------------------------------------
@@ -838,7 +845,7 @@ local function CreatePage(name)
 	page.BackgroundTransparency = 1
 	page.Visible = false
 
-	page.ZIndex = GetZIndex(2)
+	page.ZIndex = BASE_ZINDEX + 2
 	page.Parent = Content
 
 	Pages[name] = page
@@ -862,7 +869,7 @@ for _, name in ipairs(TabNames) do
 	)
 
 	button.BackgroundColor3 = COLORS.Panel3
-	button.ZIndex = GetZIndex(3)
+	button.ZIndex = BASE_ZINDEX + 3
 
 	TabButtons[name] = button
 
@@ -913,7 +920,7 @@ local OverviewTitle = MakeText(
 )
 
 OverviewTitle.Size = UDim2.new(1, 0, 0, 24)
-OverviewTitle.ZIndex = GetZIndex(3)
+OverviewTitle.ZIndex = BASE_ZINDEX + 3
 
 local OverviewHint = MakeText(
 	OverviewPage,
@@ -924,7 +931,7 @@ local OverviewHint = MakeText(
 
 OverviewHint.Position = UDim2.fromOffset(0, 24)
 OverviewHint.Size = UDim2.new(1, 0, 0, 20)
-OverviewHint.ZIndex = GetZIndex(3)
+OverviewHint.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- STAT CARDS
@@ -941,7 +948,7 @@ StatContainer.Size = UDim2.new(1, 0, 0, 78)
 StatContainer.Position = UDim2.fromOffset(0, 50)
 
 StatContainer.BackgroundTransparency = 1
-StatContainer.ZIndex = GetZIndex(2)
+StatContainer.ZIndex = BASE_ZINDEX + 2
 StatContainer.Parent = OverviewPage
 
 local StatLayout = Instance.new("UIGridLayout")
@@ -968,7 +975,7 @@ local function CreateStat(name, initial)
 
 	frame.BackgroundColor3 = COLORS.Panel2
 	frame.BorderSizePixel = 0
-	frame.ZIndex = GetZIndex(2)
+	frame.ZIndex = BASE_ZINDEX + 2
 	frame.Parent = StatContainer
 
 	Corner(frame, 5)
@@ -988,7 +995,7 @@ local function CreateStat(name, initial)
 		13
 	)
 
-	nameLabel.ZIndex = GetZIndex(3)
+	nameLabel.ZIndex = BASE_ZINDEX + 3
 
 	local valueLabel = MakeText(
 		frame,
@@ -1006,7 +1013,7 @@ local function CreateStat(name, initial)
 		17
 	)
 
-	valueLabel.ZIndex = GetZIndex(3)
+	valueLabel.ZIndex = BASE_ZINDEX + 3
 
 	StatLabels[name] = valueLabel
 
@@ -1033,7 +1040,7 @@ local ObjectsTitle = MakeText(
 )
 
 ObjectsTitle.Size = UDim2.new(1, 0, 0, 17)
-ObjectsTitle.ZIndex = GetZIndex(3)
+ObjectsTitle.ZIndex = BASE_ZINDEX + 3
 
 local ObjectsSummary = MakeText(
 	ObjectsPage,
@@ -1044,7 +1051,7 @@ local ObjectsSummary = MakeText(
 
 ObjectsSummary.Position = UDim2.fromOffset(0, 16)
 ObjectsSummary.Size = UDim2.new(1, 0, 0, 12)
-ObjectsSummary.ZIndex = GetZIndex(3)
+ObjectsSummary.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- OBJECT VIEW SWITCH
@@ -1059,7 +1066,7 @@ local ClassificationModeButton = MakeButton(
 ClassificationModeButton.Name = "ClassificationModeButton"
 ClassificationModeButton.Size = UDim2.new(0.25, -3, 0, 18)
 ClassificationModeButton.Position = UDim2.fromOffset(0, 30)
-ClassificationModeButton.ZIndex = GetZIndex(10)
+ClassificationModeButton.ZIndex = BASE_ZINDEX + 10
 
 local StructureModeButton = MakeButton(
 	ObjectsPage,
@@ -1070,7 +1077,7 @@ local StructureModeButton = MakeButton(
 StructureModeButton.Name = "StructureModeButton"
 StructureModeButton.Size = UDim2.new(0.25, -3, 0, 18)
 StructureModeButton.Position = UDim2.new(0.25, 1, 0, 30)
-StructureModeButton.ZIndex = GetZIndex(10)
+StructureModeButton.ZIndex = BASE_ZINDEX + 10
 
 local FamilyModeButton = MakeButton(
 	ObjectsPage,
@@ -1081,7 +1088,7 @@ local FamilyModeButton = MakeButton(
 FamilyModeButton.Name = "FamilyModeButton"
 FamilyModeButton.Size = UDim2.new(0.25, -3, 0, 18)
 FamilyModeButton.Position = UDim2.new(0.50, 2, 0, 30)
-FamilyModeButton.ZIndex = GetZIndex(10)
+FamilyModeButton.ZIndex = BASE_ZINDEX + 10
 
 local RelevanceModeButton = MakeButton(
 	ObjectsPage,
@@ -1092,7 +1099,7 @@ local RelevanceModeButton = MakeButton(
 RelevanceModeButton.Name = "RelevanceModeButton"
 RelevanceModeButton.Size = UDim2.new(0.25, -3, 0, 18)
 RelevanceModeButton.Position = UDim2.new(0.75, 3, 0, 30)
-RelevanceModeButton.ZIndex = GetZIndex(10)
+RelevanceModeButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
 -- STRUCTURE VIEW
@@ -1104,7 +1111,7 @@ StructureFrame.Size = UDim2.new(1, 0, 1, -52)
 StructureFrame.Position = UDim2.fromOffset(0, 52)
 StructureFrame.BackgroundColor3 = COLORS.Panel2
 StructureFrame.BorderSizePixel = 0
-StructureFrame.ZIndex = GetZIndex(2)
+StructureFrame.ZIndex = BASE_ZINDEX + 2
 StructureFrame.Parent = ObjectsPage
 Corner(StructureFrame, 5)
 
@@ -1118,7 +1125,7 @@ local StructureLabel = MakeText(
 
 StructureLabel.Position = UDim2.fromOffset(9, 6)
 StructureLabel.Size = UDim2.new(1, -18, 0, 20)
-StructureLabel.ZIndex = GetZIndex(3)
+StructureLabel.ZIndex = BASE_ZINDEX + 3
 
 local StructureInfo = MakeText(
 	StructureFrame,
@@ -1131,7 +1138,7 @@ StructureInfo.Position = UDim2.fromOffset(9, 30)
 StructureInfo.Size = UDim2.new(1, -18, 1, -36)
 StructureInfo.TextYAlignment = Enum.TextYAlignment.Top
 StructureInfo.TextWrapped = true
-StructureInfo.ZIndex = GetZIndex(3)
+StructureInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- CLASSIFICATION VIEW
@@ -1144,7 +1151,7 @@ ClassificationFrame.Size = UDim2.new(1, 0, 1, -52)
 ClassificationFrame.Position = UDim2.fromOffset(0, 52)
 ClassificationFrame.BackgroundColor3 = COLORS.Panel2
 ClassificationFrame.BorderSizePixel = 0
-ClassificationFrame.ZIndex = GetZIndex(2)
+ClassificationFrame.ZIndex = BASE_ZINDEX + 2
 ClassificationFrame.Parent = ObjectsPage
 
 Corner(ClassificationFrame, 5)
@@ -1159,7 +1166,7 @@ ClassificationScroll.BorderSizePixel = 0
 ClassificationScroll.ScrollBarThickness = 3
 ClassificationScroll.CanvasSize = UDim2.fromOffset(0, 0)
 ClassificationScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-ClassificationScroll.ZIndex = GetZIndex(2)
+ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
 --------------------------------------------------
@@ -1172,7 +1179,7 @@ FamilyFrame.Size = UDim2.new(1, 0, 1, -52)
 FamilyFrame.Position = UDim2.fromOffset(0, 52)
 FamilyFrame.BackgroundColor3 = COLORS.Panel2
 FamilyFrame.BorderSizePixel = 0
-FamilyFrame.ZIndex = GetZIndex(2)
+FamilyFrame.ZIndex = BASE_ZINDEX + 2
 FamilyFrame.Parent = ObjectsPage
 Corner(FamilyFrame, 5)
 
@@ -1185,7 +1192,7 @@ FamilyScroll.BorderSizePixel = 0
 FamilyScroll.ScrollBarThickness = 3
 FamilyScroll.CanvasSize = UDim2.fromOffset(0, 0)
 FamilyScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-FamilyScroll.ZIndex = GetZIndex(2)
+FamilyScroll.ZIndex = BASE_ZINDEX + 2
 FamilyScroll.Parent = FamilyFrame
 
 --------------------------------------------------
@@ -1198,7 +1205,7 @@ RelevanceFrame.Size = UDim2.new(1, 0, 1, -52)
 RelevanceFrame.Position = UDim2.fromOffset(0, 52)
 RelevanceFrame.BackgroundColor3 = COLORS.Panel2
 RelevanceFrame.BorderSizePixel = 0
-RelevanceFrame.ZIndex = GetZIndex(2)
+RelevanceFrame.ZIndex = BASE_ZINDEX + 2
 RelevanceFrame.Parent = ObjectsPage
 Corner(RelevanceFrame, 5)
 
@@ -1211,7 +1218,7 @@ local RelevanceHint = MakeText(
 RelevanceHint.Position = UDim2.fromOffset(6, 4)
 RelevanceHint.Size = UDim2.new(1, -12, 0, 15)
 RelevanceHint.TextTruncate = Enum.TextTruncate.AtEnd
-RelevanceHint.ZIndex = GetZIndex(3)
+RelevanceHint.ZIndex = BASE_ZINDEX + 3
 
 local RelevanceScroll = Instance.new("ScrollingFrame")
 RelevanceScroll.Name = "RelevanceScroll"
@@ -1222,7 +1229,7 @@ RelevanceScroll.BorderSizePixel = 0
 RelevanceScroll.ScrollBarThickness = 3
 RelevanceScroll.CanvasSize = UDim2.fromOffset(0, 0)
 RelevanceScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-RelevanceScroll.ZIndex = GetZIndex(2)
+RelevanceScroll.ZIndex = BASE_ZINDEX + 2
 RelevanceScroll.Parent = RelevanceFrame
 
 -- Rows are positioned manually so the compact mobile layout
@@ -1294,7 +1301,7 @@ local PlayerTitle = MakeText(
 )
 
 PlayerTitle.Size = UDim2.new(1, 0, 0, 24)
-PlayerTitle.ZIndex = GetZIndex(3)
+PlayerTitle.ZIndex = BASE_ZINDEX + 3
 
 local PlayerInfo = MakeText(
 	PlayerPage,
@@ -1307,7 +1314,7 @@ PlayerInfo.Position = UDim2.fromOffset(0, 28)
 PlayerInfo.Size = UDim2.new(1, 0, 1, -28)
 PlayerInfo.TextYAlignment = Enum.TextYAlignment.Top
 PlayerInfo.TextWrapped = true
-PlayerInfo.ZIndex = GetZIndex(3)
+PlayerInfo.ZIndex = BASE_ZINDEX + 3
 
 local function UpdatePlayerInfo()
 
@@ -1386,7 +1393,7 @@ local RelationsTitle = MakeText(
 )
 
 RelationsTitle.Size = UDim2.new(1, 0, 0, 24)
-RelationsTitle.ZIndex = GetZIndex(3)
+RelationsTitle.ZIndex = BASE_ZINDEX + 3
 
 local RelationsInfo = MakeText(
 	RelationsPage,
@@ -1398,7 +1405,7 @@ local RelationsInfo = MakeText(
 RelationsInfo.Position = UDim2.fromOffset(0, 25)
 RelationsInfo.Size = UDim2.new(1, 0, 0, 28)
 RelationsInfo.TextWrapped = true
-RelationsInfo.ZIndex = GetZIndex(3)
+RelationsInfo.ZIndex = BASE_ZINDEX + 3
 
 local RelationsScroll = Instance.new("ScrollingFrame")
 RelationsScroll.Name = "RelationsScroll"
@@ -1409,7 +1416,7 @@ RelationsScroll.BorderSizePixel = 0
 RelationsScroll.ScrollBarThickness = 3
 RelationsScroll.CanvasSize = UDim2.fromOffset(0, 0)
 RelationsScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-RelationsScroll.ZIndex = GetZIndex(2)
+RelationsScroll.ZIndex = BASE_ZINDEX + 2
 RelationsScroll.Parent = RelationsPage
 Corner(RelationsScroll, 5)
 
@@ -1428,7 +1435,7 @@ local BehaviorTitle = MakeText(
 )
 
 BehaviorTitle.Size = UDim2.new(1, 0, 0, 24)
-BehaviorTitle.ZIndex = GetZIndex(3)
+BehaviorTitle.ZIndex = BASE_ZINDEX + 3
 
 local BehaviorInfo = MakeText(
 	BehaviorPage,
@@ -1440,7 +1447,7 @@ local BehaviorInfo = MakeText(
 BehaviorInfo.Position = UDim2.fromOffset(0, 28)
 BehaviorInfo.Size = UDim2.new(1, 0, 0, 40)
 BehaviorInfo.TextWrapped = true
-BehaviorInfo.ZIndex = GetZIndex(3)
+BehaviorInfo.ZIndex = BASE_ZINDEX + 3
 
 local BehaviorScroll = Instance.new("ScrollingFrame")
 BehaviorScroll.Name = "BehaviorScroll"
@@ -1451,7 +1458,7 @@ BehaviorScroll.BorderSizePixel = 0
 BehaviorScroll.ScrollBarThickness = 3
 BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 0)
 BehaviorScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-BehaviorScroll.ZIndex = GetZIndex(2)
+BehaviorScroll.ZIndex = BASE_ZINDEX + 2
 BehaviorScroll.Parent = BehaviorPage
 Corner(BehaviorScroll, 5)
 
@@ -1466,7 +1473,7 @@ BehaviorText.Position = UDim2.fromOffset(8, 8)
 BehaviorText.Size = UDim2.new(1, -16, 0, 54)
 BehaviorText.TextWrapped = true
 BehaviorText.TextYAlignment = Enum.TextYAlignment.Top
-BehaviorText.ZIndex = GetZIndex(3)
+BehaviorText.ZIndex = BASE_ZINDEX + 3
 
 BehaviorScroll.CanvasSize = UDim2.fromOffset(0, 70)
 
@@ -1485,7 +1492,7 @@ local RemotesTitle = MakeText(
 )
 
 RemotesTitle.Size = UDim2.new(1, 0, 0, 24)
-RemotesTitle.ZIndex = GetZIndex(3)
+RemotesTitle.ZIndex = BASE_ZINDEX + 3
 
 local RemotesInfo = MakeText(
 	RemotesPage,
@@ -1497,7 +1504,7 @@ local RemotesInfo = MakeText(
 RemotesInfo.Position = UDim2.fromOffset(0, 28)
 RemotesInfo.Size = UDim2.new(1, 0, 0, 40)
 RemotesInfo.TextWrapped = true
-RemotesInfo.ZIndex = GetZIndex(3)
+RemotesInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- DATA PAGE
@@ -1514,7 +1521,7 @@ local DataTitle = MakeText(
 )
 
 DataTitle.Size = UDim2.new(1, 0, 0, 24)
-DataTitle.ZIndex = GetZIndex(3)
+DataTitle.ZIndex = BASE_ZINDEX + 3
 
 local DataInfo = MakeText(
 	DataPage,
@@ -1527,7 +1534,7 @@ DataInfo.Position = UDim2.fromOffset(0, 28)
 DataInfo.Size = UDim2.new(1, 0, 1, -28)
 DataInfo.TextYAlignment = Enum.TextYAlignment.Top
 DataInfo.TextWrapped = true
-DataInfo.ZIndex = GetZIndex(3)
+DataInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
 -- PHASE 2.6 -- INTELLIGENCE SUMMARY PAGE
@@ -1543,7 +1550,7 @@ local IntelligenceTitle = MakeText(
     Enum.Font.GothamBold
 )
 IntelligenceTitle.Size = UDim2.new(1, 0, 0, 20)
-IntelligenceTitle.ZIndex = GetZIndex(3)
+IntelligenceTitle.ZIndex = BASE_ZINDEX + 3
 
 local IntelligenceStatus = MakeText(
     IntelligencePage,
@@ -1554,7 +1561,7 @@ local IntelligenceStatus = MakeText(
 IntelligenceStatus.Position = UDim2.fromOffset(0, 20)
 IntelligenceStatus.Size = UDim2.new(1, 0, 0, 15)
 IntelligenceStatus.TextTruncate = Enum.TextTruncate.AtEnd
-IntelligenceStatus.ZIndex = GetZIndex(3)
+IntelligenceStatus.ZIndex = BASE_ZINDEX + 3
 
 local IntelligenceScroll = Instance.new("ScrollingFrame")
 IntelligenceScroll.Name = "IntelligenceScroll"
@@ -1566,7 +1573,7 @@ IntelligenceScroll.ScrollBarThickness = 3
 IntelligenceScroll.ScrollingDirection = Enum.ScrollingDirection.Y
 IntelligenceScroll.CanvasSize = UDim2.fromOffset(0, 0)
 IntelligenceScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
-IntelligenceScroll.ZIndex = GetZIndex(2)
+IntelligenceScroll.ZIndex = BASE_ZINDEX + 2
 IntelligenceScroll.Parent = IntelligencePage
 Corner(IntelligenceScroll, 5)
 
@@ -1582,7 +1589,7 @@ IntelligenceText.Position = UDim2.fromOffset(7, 5)
 IntelligenceText.Size = UDim2.new(1, -16, 0, 20)
 IntelligenceText.TextYAlignment = Enum.TextYAlignment.Top
 IntelligenceText.TextWrapped = true
-IntelligenceText.ZIndex = GetZIndex(3)
+IntelligenceText.ZIndex = BASE_ZINDEX + 3
 
 UpdateIntelligenceUI = function()
     if not IntelligenceText or not IntelligenceStatus then
@@ -1669,7 +1676,7 @@ PauseButton.Position = UDim2.new(
 	2
 )
 
-PauseButton.ZIndex = GetZIndex(10)
+PauseButton.ZIndex = BASE_ZINDEX + 10
 
 local RescanButton = MakeButton(
 	BottomBar,
@@ -1687,7 +1694,7 @@ RescanButton.Position = UDim2.new(
 	2
 )
 
-RescanButton.ZIndex = GetZIndex(10)
+RescanButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
 -- FLOATING BUTTON
@@ -1722,7 +1729,7 @@ OpenButton.Font =
 	Enum.Font.GothamBold
 
 OpenButton.ZIndex =
-	GetZIndex(50)
+	BASE_ZINDEX + 50
 
 OpenButton.Parent = Gui
 
@@ -3185,7 +3192,7 @@ local function CreateRelationRow(data, order)
 	row.Position = UDim2.fromOffset(0, (order - 1) * 62)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
-	row.ZIndex = GetZIndex(3)
+	row.ZIndex = BASE_ZINDEX + 3
 	row.Parent = RelationsScroll
 	Corner(row, 4)
 
@@ -3199,7 +3206,7 @@ local function CreateRelationRow(data, order)
 	typeLabel.Position = UDim2.fromOffset(6, 2)
 	typeLabel.Size = UDim2.new(1, -12, 0, 12)
 	typeLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	typeLabel.ZIndex = GetZIndex(4)
+	typeLabel.ZIndex = BASE_ZINDEX + 4
 
 	local namesLabel = MakeText(
 		row,
@@ -3212,7 +3219,7 @@ local function CreateRelationRow(data, order)
 	namesLabel.Position = UDim2.fromOffset(6, 15)
 	namesLabel.Size = UDim2.new(1, -12, 0, 13)
 	namesLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	namesLabel.ZIndex = GetZIndex(4)
+	namesLabel.ZIndex = BASE_ZINDEX + 4
 
 	local pathLabel = MakeText(
 		row,
@@ -3224,7 +3231,7 @@ local function CreateRelationRow(data, order)
 	pathLabel.Position = UDim2.fromOffset(6, 29)
 	pathLabel.Size = UDim2.new(1, -12, 0, 11)
 	pathLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	pathLabel.ZIndex = GetZIndex(4)
+	pathLabel.ZIndex = BASE_ZINDEX + 4
 
 	local detailLabel = MakeText(
 		row,
@@ -3236,7 +3243,7 @@ local function CreateRelationRow(data, order)
 	detailLabel.Position = UDim2.fromOffset(6, 42)
 	detailLabel.Size = UDim2.new(1, -12, 0, 12)
 	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	detailLabel.ZIndex = GetZIndex(4)
+	detailLabel.ZIndex = BASE_ZINDEX + 4
 end
 
 local function BuildRelationDisplayGroups()
@@ -3360,7 +3367,7 @@ local function CreateRelevanceRow(data, order)
 	row.Position = UDim2.fromOffset(0, (order - 1) * 45)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
-	row.ZIndex = GetZIndex(3)
+	row.ZIndex = BASE_ZINDEX + 3
 	row.Parent = RelevanceScroll
 	Corner(row, 4)
 
@@ -3373,7 +3380,7 @@ local function CreateRelevanceRow(data, order)
 	)
 	levelLabel.Position = UDim2.fromOffset(6, 2)
 	levelLabel.Size = UDim2.fromOffset(55, 13)
-	levelLabel.ZIndex = GetZIndex(4)
+	levelLabel.ZIndex = BASE_ZINDEX + 4
 
 	local nameLabel = MakeText(
 		row,
@@ -3385,7 +3392,7 @@ local function CreateRelevanceRow(data, order)
 	nameLabel.Position = UDim2.fromOffset(63, 2)
 	nameLabel.Size = UDim2.new(1, -70, 0, 13)
 	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	nameLabel.ZIndex = GetZIndex(4)
+	nameLabel.ZIndex = BASE_ZINDEX + 4
 
 	local detailLabel = MakeText(
 		row,
@@ -3396,7 +3403,7 @@ local function CreateRelevanceRow(data, order)
 	detailLabel.Position = UDim2.fromOffset(63, 15)
 	detailLabel.Size = UDim2.new(1, -70, 0, 11)
 	detailLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	detailLabel.ZIndex = GetZIndex(4)
+	detailLabel.ZIndex = BASE_ZINDEX + 4
 
 	local pathLabel = MakeText(
 		row,
@@ -3407,7 +3414,7 @@ local function CreateRelevanceRow(data, order)
 	pathLabel.Position = UDim2.fromOffset(63, 28)
 	pathLabel.Size = UDim2.new(1, -70, 0, 10)
 	pathLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	pathLabel.ZIndex = GetZIndex(4)
+	pathLabel.ZIndex = BASE_ZINDEX + 4
 end
 
 local function UpdateRelevanceUI()
@@ -3460,7 +3467,7 @@ local function CreateFamilyRow(family, count, category, order)
 	row.Position = UDim2.fromOffset(0, (order - 1) * 30)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
-	row.ZIndex = GetZIndex(3)
+	row.ZIndex = BASE_ZINDEX + 3
 	row.Parent = FamilyScroll
 	Corner(row, 4)
 
@@ -3468,19 +3475,19 @@ local function CreateFamilyRow(family, count, category, order)
 	familyLabel.Position = UDim2.fromOffset(7, 2)
 	familyLabel.Size = UDim2.new(1, -48, 0, 13)
 	familyLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	familyLabel.ZIndex = GetZIndex(4)
+	familyLabel.ZIndex = BASE_ZINDEX + 4
 
 	local categoryLabel = MakeText(row, category, 7, COLORS.Muted)
 	categoryLabel.Position = UDim2.fromOffset(7, 14)
 	categoryLabel.Size = UDim2.new(1, -48, 0, 11)
 	categoryLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	categoryLabel.ZIndex = GetZIndex(4)
+	categoryLabel.ZIndex = BASE_ZINDEX + 4
 
 	local countLabel = MakeText(row, tostring(count), 10, COLORS.Text, Enum.Font.GothamBold)
 	countLabel.Position = UDim2.new(1, -39, 0, 0)
 	countLabel.Size = UDim2.fromOffset(33, 28)
 	countLabel.TextXAlignment = Enum.TextXAlignment.Right
-	countLabel.ZIndex = GetZIndex(4)
+	countLabel.ZIndex = BASE_ZINDEX + 4
 end
 
 local function UpdateFamilyUI()
@@ -3533,7 +3540,7 @@ local function CreateClassificationRow(category, count, order)
 	row.Size = UDim2.new(0.5, -2, 0, ClassificationRowHeight)
 	row.BackgroundColor3 = COLORS.Panel3
 	row.BorderSizePixel = 0
-	row.ZIndex = GetZIndex(3)
+	row.ZIndex = BASE_ZINDEX + 3
 	row.Parent = ClassificationScroll
 
 	local column = (order - 1) % 2
@@ -3559,7 +3566,7 @@ local function CreateClassificationRow(category, count, order)
 	categoryLabel.Position = UDim2.fromOffset(6, 0)
 	categoryLabel.Size = UDim2.new(1, -34, 1, 0)
 	categoryLabel.TextYAlignment = Enum.TextYAlignment.Center
-	categoryLabel.ZIndex = GetZIndex(4)
+	categoryLabel.ZIndex = BASE_ZINDEX + 4
 
 	local countLabel = MakeText(
 		row,
@@ -3573,7 +3580,7 @@ local function CreateClassificationRow(category, count, order)
 	countLabel.Size = UDim2.fromOffset(25, ClassificationRowHeight)
 	countLabel.TextXAlignment = Enum.TextXAlignment.Right
 	countLabel.TextYAlignment = Enum.TextYAlignment.Center
-	countLabel.ZIndex = GetZIndex(4)
+	countLabel.ZIndex = BASE_ZINDEX + 4
 end
 
 local function UpdateClassificationUI()
@@ -3652,7 +3659,7 @@ local function RunClassification(scanGeneration)
 		localCounts[category] = 0
 	end
 
-	local success, err = pcall(function()
+		local success, err = xpcall(function()
 		local snapshot = table.clone(ScanData)
 		local total = #snapshot
 
@@ -3787,8 +3794,8 @@ local function RunClassification(scanGeneration)
 
 		-- Only report 100% after the pending table has actually drained.
 		ClassificationProgress = 100
-		UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
-	end)
+				UpdateOverallStatus("CLASSIFYING", ClassificationProgress)
+	end, __tracebackHandler)
 
 	-- A cancelled generation must not touch state belonging to the new one.
 	if scanGeneration ~= CurrentScan then
@@ -3917,7 +3924,7 @@ local function RunScan()
 	UpdateOverallStatus("ANALYZING", 0)
 	PauseButton.Text = "Pause"
 
-	local success, err = pcall(function()
+		local success, err = xpcall(function()
 		local descendants = workspace:GetDescendants()
 		local total = #descendants
 
@@ -3986,12 +3993,12 @@ local function RunScan()
 				end
 			end
 
-			if #ScanData >= MAX_RESULTS then
+						if #ScanData >= MAX_RESULTS then
 				break
 			end
 			task.wait(YIELD_TIME)
 		end
-	end)
+	end, __tracebackHandler)
 
 	if thisScan ~= CurrentScan then
 		-- This task was cancelled by a newer generation. It must never touch
@@ -4642,4 +4649,10 @@ if AUTO_SCAN then
 		RunScan()
 
 	end)
+end
+
+end, __tracebackHandler)
+
+if not __startupOk then
+    warn("[Client Game Intelligence Analyzer] Startup error:\n" .. tostring(__startupError))
 end
