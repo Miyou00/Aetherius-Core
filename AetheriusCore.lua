@@ -4469,7 +4469,18 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		if not record then
 			return
 		end
-		UpdateCounters()
+		-- Coalesce counter and relation-list redraws during bursts of live additions.
+		if not IntelligenceSummary.CountersUpdateScheduled then
+			IntelligenceSummary.CountersUpdateScheduled = true
+			task.defer(function()
+				task.wait(0.05)
+				IntelligenceSummary.CountersUpdateScheduled = false
+				if not Gui or not Gui.Parent then
+					return
+				end
+				UpdateCounters()
+			end)
+		end
 
 		-- If this addition is part of a reparent/removal burst, the queued
 		-- structural refresh will rebuild all intelligence from the updated
