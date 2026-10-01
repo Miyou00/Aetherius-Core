@@ -108,6 +108,7 @@
 ]]
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: services")
 -- SERVICES
 --------------------------------------------------
 
@@ -134,6 +135,7 @@ if not PlayerGui or not PlayerGui:IsA("PlayerGui") then
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: configuration")
 -- CONFIGURATION
 --------------------------------------------------
 
@@ -157,6 +159,7 @@ local DISPLAY_ORDER = 2147483647
 local BASE_ZINDEX = 100000
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: old GUI cleanup")
 -- REMOVE OLD GUI
 --------------------------------------------------
 
@@ -167,6 +170,7 @@ if oldGui then
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: colors")
 -- COLORS
 --------------------------------------------------
 
@@ -190,6 +194,7 @@ local COLORS = {
 }
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: GUI creation")
 -- GUI
 --------------------------------------------------
 
@@ -204,6 +209,7 @@ Gui.DisplayOrder = DISPLAY_ORDER
 Gui.Parent = PlayerGui
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: helpers")
 -- HELPERS
 --------------------------------------------------
 
@@ -256,6 +262,7 @@ local function MakeButton(parent, text, size)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: data storage")
 -- DATA STORAGE
 --------------------------------------------------
 
@@ -405,6 +412,7 @@ local ClassificationOrder = {
 }
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: scan data")
 -- SCAN DATA
 --------------------------------------------------
 
@@ -468,6 +476,7 @@ local function SafeTags(instance)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: property setup")
 -- RELEVANT PROPERTIES
 --------------------------------------------------
 
@@ -527,6 +536,7 @@ local function GetRelevantProperties(instance)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: value helpers")
 -- VALUE
 --------------------------------------------------
 
@@ -547,6 +557,7 @@ local function GetValue(instance, isValueBase)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: status setup")
 -- STATUS
 --------------------------------------------------
 
@@ -590,6 +601,7 @@ local function SetStatus(name, status)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: main window creation")
 -- MAIN WINDOW
 --------------------------------------------------
 
@@ -608,6 +620,7 @@ Corner(Main, 9)
 Stroke(Main, COLORS.Border, 1)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: title bar creation")
 -- TITLE BAR
 --------------------------------------------------
 
@@ -646,6 +659,7 @@ CloseButton.BackgroundColor3 = COLORS.Panel3
 CloseButton.ZIndex = BASE_ZINDEX + 2
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: status header creation")
 -- STATUS HEADER
 --------------------------------------------------
 
@@ -698,6 +712,7 @@ StatusExpand.BackgroundTransparency = 1
 StatusExpand.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: status details creation")
 -- STATUS DETAILS
 --------------------------------------------------
 
@@ -744,6 +759,7 @@ for i, name in ipairs(statusNames) do
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: tab bar creation")
 -- TAB BAR
 --------------------------------------------------
 
@@ -765,6 +781,7 @@ TabLayout.Padding = UDim.new(0, 2)
 TabLayout.Parent = TabBar
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: content container creation")
 -- CONTENT
 --------------------------------------------------
 
@@ -784,6 +801,7 @@ Content.Parent = Main
 Corner(Content, 6)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: bottom bar creation")
 -- BOTTOM BAR
 --------------------------------------------------
 
@@ -800,6 +818,7 @@ BottomBar.ZIndex = BASE_ZINDEX + 5
 BottomBar.Parent = Main
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: tab creation")
 -- TABS
 --------------------------------------------------
 
@@ -860,6 +879,7 @@ for _, name in ipairs(TabNames) do
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: page switching setup")
 -- PAGE SWITCHING
 --------------------------------------------------
 
@@ -889,6 +909,7 @@ for name, button in pairs(TabButtons) do
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: overview page creation")
 -- OVERVIEW PAGE
 --------------------------------------------------
 
@@ -917,6 +938,7 @@ OverviewHint.Size = UDim2.new(1, 0, 0, 20)
 OverviewHint.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: stat card creation")
 -- STAT CARDS
 --------------------------------------------------
 
@@ -1009,6 +1031,7 @@ CreateStat("Tags", 0)
 CreateStat("Values", 0)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: objects page creation")
 -- OBJECTS PAGE
 --------------------------------------------------
 
@@ -1037,6 +1060,7 @@ ObjectsSummary.Size = UDim2.new(1, 0, 0, 12)
 ObjectsSummary.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: object view setup")
 -- OBJECT VIEW SWITCH
 --------------------------------------------------
 
@@ -1085,6 +1109,7 @@ RelevanceModeButton.Position = UDim2.new(0.75, 3, 0, 30)
 RelevanceModeButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: structure view creation")
 -- STRUCTURE VIEW
 --------------------------------------------------
 
@@ -1124,6 +1149,7 @@ StructureInfo.TextWrapped = true
 StructureInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: classification view creation")
 -- CLASSIFICATION VIEW
 --------------------------------------------------
 
@@ -1153,6 +1179,7 @@ ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: family view creation")
 -- FAMILY VIEW
 --------------------------------------------------
 
@@ -1179,6 +1206,7 @@ FamilyScroll.ZIndex = BASE_ZINDEX + 2
 FamilyScroll.Parent = FamilyFrame
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: relevance view creation")
 -- RELEVANCE VIEW
 --------------------------------------------------
 
@@ -1270,6 +1298,7 @@ end)
 UpdateObjectsPageMode()
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: player page creation")
 -- PLAYER PAGE
 --------------------------------------------------
 
@@ -1362,6 +1391,7 @@ end
 UpdatePlayerInfo()
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: relations page creation")
 -- RELATIONS PAGE
 --------------------------------------------------
 
@@ -1404,6 +1434,7 @@ RelationsScroll.Parent = RelationsPage
 Corner(RelationsScroll, 5)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: behavior page creation")
 -- BEHAVIOR PAGE
 --------------------------------------------------
 
@@ -1433,6 +1464,7 @@ BehaviorInfo.TextWrapped = true
 BehaviorInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: remotes page creation")
 -- REMOTES PAGE
 --------------------------------------------------
 
@@ -1462,6 +1494,7 @@ RemotesInfo.TextWrapped = true
 RemotesInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: data page creation")
 -- DATA PAGE
 --------------------------------------------------
 
@@ -1612,6 +1645,7 @@ UpdateIntelligenceUI = function()
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: bottom controls creation")
 -- BOTTOM CONTROLS
 --------------------------------------------------
 
@@ -1652,6 +1686,7 @@ RescanButton.Position = UDim2.new(
 RescanButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: floating button creation")
 -- FLOATING BUTTON
 --------------------------------------------------
 
@@ -1691,6 +1726,7 @@ OpenButton.Parent = Gui
 Corner(OpenButton, 23)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: dragging setup")
 -- DRAGGING
 --------------------------------------------------
 
@@ -1755,6 +1791,7 @@ MakeDraggable(Main, TitleBar)
 MakeDraggable(OpenButton, OpenButton)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: status expansion setup")
 -- STATUS EXPANSION
 --------------------------------------------------
 
@@ -1855,6 +1892,7 @@ StatusExpand.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: status functions setup")
 -- OVERALL STATUS
 --------------------------------------------------
 
@@ -1916,6 +1954,7 @@ local function UpdateOverallStatus(status, progress)
 	end
 end
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: counter functions setup")
 -- UPDATE COUNTERS
 --------------------------------------------------
 
@@ -1989,6 +2028,7 @@ local function UpdateCounters()
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: name watcher setup")
 -- LIVE NAME CHANGE WATCHER
 --------------------------------------------------
 
@@ -2022,6 +2062,7 @@ local function WatchInstanceName(instance)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: scan function setup")
 -- SCAN ONE INSTANCE
 --------------------------------------------------
 
@@ -3831,6 +3872,7 @@ local function RunClassification(scanGeneration)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: scan UI throttling setup")
 -- SCAN UI THROTTLING
 --------------------------------------------------
 
@@ -3853,6 +3895,7 @@ local function UpdateScanProgressUI(force)
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: scan runner setup")
 -- RUN SCAN
 --------------------------------------------------
 
@@ -4004,6 +4047,7 @@ local function RunScan()
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: pause controls setup")
 -- PAUSE
 --------------------------------------------------
 
@@ -4032,6 +4076,7 @@ PauseButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: rescan controls setup")
 -- RESCAN
 --------------------------------------------------
 
@@ -4066,6 +4111,7 @@ RescanButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: close control setup")
 -- CLOSE
 --------------------------------------------------
 
@@ -4077,6 +4123,7 @@ CloseButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: open button setup")
 -- OPEN BUTTON
 --------------------------------------------------
 
@@ -4088,6 +4135,7 @@ OpenButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: structural refresh setup")
 -- LIVE STRUCTURAL CHANGE REFRESH
 --------------------------------------------------
 
@@ -4407,6 +4455,7 @@ ScheduleStructuralAnalysisRefresh = function()
 end
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: live detection setup")
 -- LIVE DESCENDANT DETECTION
 --------------------------------------------------
 
@@ -4565,6 +4614,7 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: player update setup")
 -- PLAYER UPDATES
 --------------------------------------------------
 
@@ -4591,6 +4641,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: responsive layout setup")
 -- RESPONSIVE MAIN WIDTH
 --------------------------------------------------
 
@@ -4656,46 +4707,37 @@ Gui.Destroying:Connect(function()
 end)
 
 --------------------------------------------------
--- INITIAL STATE (GUARDED ERROR REPORTING)
+warn("[Analyzer diagnostic] reached: initial UI state")
+-- INITIAL STATE
 --------------------------------------------------
 
-local _initOk, _initError = xpcall(function()
-	ShowPage("Overview")
+ShowPage("Overview")
 
-	UpdateStatusLayout()
-	UpdateMainWidth()
+UpdateStatusLayout()
+UpdateMainWidth()
 
-	UpdateCounters()
-	UpdateClassificationUI()
-	UpdateFamilyUI()
-	UpdateRelevanceUI()
-	UpdateRelationsUI()
-	UpdateIntelligenceUI()
+UpdateCounters()
+UpdateClassificationUI()
+UpdateFamilyUI()
+UpdateRelevanceUI()
+UpdateRelationsUI()
+UpdateIntelligenceUI()
 
-	Main.Visible = true
-	OpenButton.Visible = false
-end, function(err)
-	local message = tostring(err)
-	if debug and type(debug.traceback) == "function" then
-		return debug.traceback(message, 2)
-	end
-	return message
-end)
-
-if not _initOk then
-	warn("[Client Game Intelligence Analyzer] Startup error:\n" .. tostring(_initError))
-end
+Main.Visible = true
+OpenButton.Visible = false
 
 --------------------------------------------------
+warn("[Analyzer diagnostic] reached: automatic scan setup")
 -- AUTO SCAN
 --------------------------------------------------
 
-if AUTO_SCAN and _initOk then
+if AUTO_SCAN then
+
 	task.spawn(function()
+
 		task.wait(0.5)
-		local _scanOk, _scanError = pcall(RunScan)
-		if not _scanOk then
-			warn("[Client Game Intelligence Analyzer] Auto-scan error: " .. tostring(_scanError))
-		end
+
+		RunScan()
+
 	end)
 end
