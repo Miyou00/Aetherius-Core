@@ -4209,14 +4209,14 @@ local function RemoveScannedSubtree(root)
 	return true
 end
 
-local function HasQueuedStructuralAncestor(instance)
+local function HasQueuedStructuralAncestor(instance, queuedChanges)
 	if not instance then
 		return false
 	end
 
 	local current = instance.Parent
 	while current and current ~= workspace do
-		if StructuralChangeQueue[current] then
+		if (queuedChanges or StructuralChangeQueue)[current] then
 			return true
 		end
 		current = current.Parent
@@ -4271,13 +4271,17 @@ ScheduleStructuralAnalysisRefresh = function()
 		local changed = StructuralChangeDetected
 		StructuralChangeDetected = false
 		for instance in pairs(changes) do
-			if instance and instance.Parent and instance:IsDescendantOf(workspace) then
-				if RefreshScannedSubtree(instance) then
-					changed = true
-				end
-			else
-				if RemoveScannedSubtree(instance) then
-					changed = true
+			-- If a queued ancestor will refresh or remove this subtree, skip the
+			-- descendant entry to avoid processing the same objects repeatedly.
+			if not HasQueuedStructuralAncestor(instance, changes) then
+				if instance and instance.Parent and instance:IsDescendantOf(workspace) then
+					if RefreshScannedSubtree(instance) then
+						changed = true
+					end
+				else
+					if RemoveScannedSubtree(instance) then
+						changed = true
+					end
 				end
 			end
 		end
