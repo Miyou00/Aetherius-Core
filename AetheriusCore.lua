@@ -108,7 +108,7 @@
 ]]
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: services")
+print("[AetheriusCore diagnostic] SCRIPT BODY ENTERED / SERVICES")
 -- SERVICES
 --------------------------------------------------
 
@@ -135,7 +135,7 @@ if not PlayerGui or not PlayerGui:IsA("PlayerGui") then
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: configuration")
+print("[AetheriusCore diagnostic] SERVICES COMPLETE / CONFIGURATION")
 -- CONFIGURATION
 --------------------------------------------------
 
@@ -159,7 +159,7 @@ local DISPLAY_ORDER = 2147483647
 local BASE_ZINDEX = 100000
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: old GUI cleanup")
+print("[AetheriusCore diagnostic] CONFIGURATION COMPLETE / OLD GUI CHECK")
 -- REMOVE OLD GUI
 --------------------------------------------------
 
@@ -170,7 +170,6 @@ if oldGui then
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: colors")
 -- COLORS
 --------------------------------------------------
 
@@ -194,7 +193,7 @@ local COLORS = {
 }
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: GUI creation")
+print("[AetheriusCore diagnostic] OLD GUI CHECK COMPLETE / GUI CREATION")
 -- GUI
 --------------------------------------------------
 
@@ -209,7 +208,7 @@ Gui.DisplayOrder = DISPLAY_ORDER
 Gui.Parent = PlayerGui
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: helpers")
+print("[AetheriusCore diagnostic] GUI CREATION COMPLETE / HELPERS")
 -- HELPERS
 --------------------------------------------------
 
@@ -262,7 +261,7 @@ local function MakeButton(parent, text, size)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: data storage")
+print("[AetheriusCore diagnostic] HELPERS COMPLETE / DATA STORAGE")
 -- DATA STORAGE
 --------------------------------------------------
 
@@ -412,7 +411,7 @@ local ClassificationOrder = {
 }
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: scan data")
+print("[AetheriusCore diagnostic] ANALYSIS TABLES COMPLETE / SCAN DATA")
 -- SCAN DATA
 --------------------------------------------------
 
@@ -476,7 +475,6 @@ local function SafeTags(instance)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: property setup")
 -- RELEVANT PROPERTIES
 --------------------------------------------------
 
@@ -536,7 +534,6 @@ local function GetRelevantProperties(instance)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: value helpers")
 -- VALUE
 --------------------------------------------------
 
@@ -557,7 +554,6 @@ local function GetValue(instance, isValueBase)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: status setup")
 -- STATUS
 --------------------------------------------------
 
@@ -601,7 +597,7 @@ local function SetStatus(name, status)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: main window creation")
+print("[AetheriusCore diagnostic] SCAN DATA COMPLETE / MAIN WINDOW UI")
 -- MAIN WINDOW
 --------------------------------------------------
 
@@ -620,7 +616,6 @@ Corner(Main, 9)
 Stroke(Main, COLORS.Border, 1)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: title bar creation")
 -- TITLE BAR
 --------------------------------------------------
 
@@ -659,7 +654,6 @@ CloseButton.BackgroundColor3 = COLORS.Panel3
 CloseButton.ZIndex = BASE_ZINDEX + 2
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: status header creation")
 -- STATUS HEADER
 --------------------------------------------------
 
@@ -712,7 +706,6 @@ StatusExpand.BackgroundTransparency = 1
 StatusExpand.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: status details creation")
 -- STATUS DETAILS
 --------------------------------------------------
 
@@ -759,7 +752,6 @@ for i, name in ipairs(statusNames) do
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: tab bar creation")
 -- TAB BAR
 --------------------------------------------------
 
@@ -781,7 +773,6 @@ TabLayout.Padding = UDim.new(0, 2)
 TabLayout.Parent = TabBar
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: content container creation")
 -- CONTENT
 --------------------------------------------------
 
@@ -801,7 +792,6 @@ Content.Parent = Main
 Corner(Content, 6)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: bottom bar creation")
 -- BOTTOM BAR
 --------------------------------------------------
 
@@ -818,7 +808,7 @@ BottomBar.ZIndex = BASE_ZINDEX + 5
 BottomBar.Parent = Main
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: tab creation")
+print("[AetheriusCore diagnostic] MAIN UI BUILD / TABS")
 -- TABS
 --------------------------------------------------
 
@@ -879,7 +869,7 @@ for _, name in ipairs(TabNames) do
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: page switching setup")
+print("[AetheriusCore diagnostic] TAB BUILD COMPLETE / PAGE SWITCHING")
 -- PAGE SWITCHING
 --------------------------------------------------
 
@@ -909,7 +899,7 @@ for name, button in pairs(TabButtons) do
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: overview page creation")
+print("[AetheriusCore diagnostic] PAGE SWITCHING COMPLETE / OVERVIEW PAGE")
 -- OVERVIEW PAGE
 --------------------------------------------------
 
@@ -938,7 +928,6 @@ OverviewHint.Size = UDim2.new(1, 0, 0, 20)
 OverviewHint.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: stat card creation")
 -- STAT CARDS
 --------------------------------------------------
 
@@ -1031,7 +1020,7 @@ CreateStat("Tags", 0)
 CreateStat("Values", 0)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: objects page creation")
+print("[AetheriusCore diagnostic] OVERVIEW PAGE COMPLETE / OBJECTS PAGE")
 -- OBJECTS PAGE
 --------------------------------------------------
 
@@ -1060,7 +1049,6 @@ ObjectsSummary.Size = UDim2.new(1, 0, 0, 12)
 ObjectsSummary.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: object view setup")
 -- OBJECT VIEW SWITCH
 --------------------------------------------------
 
@@ -1109,7 +1097,6 @@ RelevanceModeButton.Position = UDim2.new(0.75, 3, 0, 30)
 RelevanceModeButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: structure view creation")
 -- STRUCTURE VIEW
 --------------------------------------------------
 
@@ -1149,7 +1136,6 @@ StructureInfo.TextWrapped = true
 StructureInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: classification view creation")
 -- CLASSIFICATION VIEW
 --------------------------------------------------
 
@@ -1179,7 +1165,6 @@ ClassificationScroll.ZIndex = BASE_ZINDEX + 2
 ClassificationScroll.Parent = ClassificationFrame
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: family view creation")
 -- FAMILY VIEW
 --------------------------------------------------
 
@@ -1206,7 +1191,6 @@ FamilyScroll.ZIndex = BASE_ZINDEX + 2
 FamilyScroll.Parent = FamilyFrame
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: relevance view creation")
 -- RELEVANCE VIEW
 --------------------------------------------------
 
@@ -1298,7 +1282,7 @@ end)
 UpdateObjectsPageMode()
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: player page creation")
+print("[AetheriusCore diagnostic] OBJECTS PAGE COMPLETE / PLAYER PAGE")
 -- PLAYER PAGE
 --------------------------------------------------
 
@@ -1391,7 +1375,7 @@ end
 UpdatePlayerInfo()
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: relations page creation")
+print("[AetheriusCore diagnostic] PLAYER PAGE COMPLETE / RELATIONS PAGE")
 -- RELATIONS PAGE
 --------------------------------------------------
 
@@ -1434,7 +1418,7 @@ RelationsScroll.Parent = RelationsPage
 Corner(RelationsScroll, 5)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: behavior page creation")
+print("[AetheriusCore diagnostic] RELATIONS PAGE COMPLETE / BEHAVIOR PAGE")
 -- BEHAVIOR PAGE
 --------------------------------------------------
 
@@ -1464,7 +1448,7 @@ BehaviorInfo.TextWrapped = true
 BehaviorInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: remotes page creation")
+print("[AetheriusCore diagnostic] BEHAVIOR PAGE COMPLETE / REMOTES PAGE")
 -- REMOTES PAGE
 --------------------------------------------------
 
@@ -1494,7 +1478,7 @@ RemotesInfo.TextWrapped = true
 RemotesInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: data page creation")
+print("[AetheriusCore diagnostic] REMOTES PAGE COMPLETE / DATA PAGE")
 -- DATA PAGE
 --------------------------------------------------
 
@@ -1525,6 +1509,7 @@ DataInfo.TextWrapped = true
 DataInfo.ZIndex = BASE_ZINDEX + 3
 
 --------------------------------------------------
+print("[AetheriusCore diagnostic] DATA PAGE COMPLETE / INTELLIGENCE PAGE")
 -- PHASE 2.6 -- INTELLIGENCE SUMMARY PAGE
 --------------------------------------------------
 
@@ -1645,7 +1630,7 @@ UpdateIntelligenceUI = function()
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: bottom controls creation")
+print("[AetheriusCore diagnostic] INTELLIGENCE PAGE COMPLETE / CONTROLS")
 -- BOTTOM CONTROLS
 --------------------------------------------------
 
@@ -1686,7 +1671,6 @@ RescanButton.Position = UDim2.new(
 RescanButton.ZIndex = BASE_ZINDEX + 10
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: floating button creation")
 -- FLOATING BUTTON
 --------------------------------------------------
 
@@ -1726,7 +1710,6 @@ OpenButton.Parent = Gui
 Corner(OpenButton, 23)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: dragging setup")
 -- DRAGGING
 --------------------------------------------------
 
@@ -1791,7 +1774,6 @@ MakeDraggable(Main, TitleBar)
 MakeDraggable(OpenButton, OpenButton)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: status expansion setup")
 -- STATUS EXPANSION
 --------------------------------------------------
 
@@ -1892,7 +1874,6 @@ StatusExpand.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: status functions setup")
 -- OVERALL STATUS
 --------------------------------------------------
 
@@ -1954,7 +1935,6 @@ local function UpdateOverallStatus(status, progress)
 	end
 end
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: counter functions setup")
 -- UPDATE COUNTERS
 --------------------------------------------------
 
@@ -2028,7 +2008,6 @@ local function UpdateCounters()
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: name watcher setup")
 -- LIVE NAME CHANGE WATCHER
 --------------------------------------------------
 
@@ -2062,7 +2041,6 @@ local function WatchInstanceName(instance)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: scan function setup")
 -- SCAN ONE INSTANCE
 --------------------------------------------------
 
@@ -3872,7 +3850,7 @@ local function RunClassification(scanGeneration)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: scan UI throttling setup")
+print("[AetheriusCore diagnostic] UI SETUP COMPLETE / SCAN THROTTLING")
 -- SCAN UI THROTTLING
 --------------------------------------------------
 
@@ -3895,7 +3873,7 @@ local function UpdateScanProgressUI(force)
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: scan runner setup")
+print("[AetheriusCore diagnostic] SCAN THROTTLING COMPLETE / RUN SCAN SETUP")
 -- RUN SCAN
 --------------------------------------------------
 
@@ -4047,7 +4025,7 @@ local function RunScan()
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: pause controls setup")
+print("[AetheriusCore diagnostic] RUN SCAN SETUP COMPLETE / PAUSE HANDLERS")
 -- PAUSE
 --------------------------------------------------
 
@@ -4076,7 +4054,7 @@ PauseButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: rescan controls setup")
+print("[AetheriusCore diagnostic] PAUSE HANDLERS COMPLETE / RESCAN HANDLER")
 -- RESCAN
 --------------------------------------------------
 
@@ -4111,7 +4089,7 @@ RescanButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: close control setup")
+print("[AetheriusCore diagnostic] RESCAN HANDLER COMPLETE / CLOSE HANDLER")
 -- CLOSE
 --------------------------------------------------
 
@@ -4123,7 +4101,7 @@ CloseButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: open button setup")
+print("[AetheriusCore diagnostic] CLOSE HANDLER COMPLETE / OPEN BUTTON")
 -- OPEN BUTTON
 --------------------------------------------------
 
@@ -4135,7 +4113,7 @@ OpenButton.MouseButton1Click:Connect(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: structural refresh setup")
+print("[AetheriusCore diagnostic] OPEN BUTTON COMPLETE / STRUCTURAL LIVE UPDATES")
 -- LIVE STRUCTURAL CHANGE REFRESH
 --------------------------------------------------
 
@@ -4455,7 +4433,7 @@ ScheduleStructuralAnalysisRefresh = function()
 end
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: live detection setup")
+print("[AetheriusCore diagnostic] STRUCTURAL LIVE UPDATES COMPLETE / DESCENDANT EVENTS")
 -- LIVE DESCENDANT DETECTION
 --------------------------------------------------
 
@@ -4614,7 +4592,7 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: player update setup")
+print("[AetheriusCore diagnostic] DESCENDANT EVENTS COMPLETE / PLAYER UPDATES")
 -- PLAYER UPDATES
 --------------------------------------------------
 
@@ -4641,7 +4619,7 @@ task.spawn(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: responsive layout setup")
+print("[AetheriusCore diagnostic] PLAYER UPDATES COMPLETE / RESPONSIVE LAYOUT")
 -- RESPONSIVE MAIN WIDTH
 --------------------------------------------------
 
@@ -4707,7 +4685,7 @@ Gui.Destroying:Connect(function()
 end)
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: initial UI state")
+print("[AetheriusCore diagnostic] RESPONSIVE LAYOUT COMPLETE / INITIAL STATE")
 -- INITIAL STATE
 --------------------------------------------------
 
@@ -4727,7 +4705,7 @@ Main.Visible = true
 OpenButton.Visible = false
 
 --------------------------------------------------
-warn("[Analyzer diagnostic] reached: automatic scan setup")
+print("[AetheriusCore diagnostic] INITIAL STATE COMPLETE / AUTO SCAN")
 -- AUTO SCAN
 --------------------------------------------------
 
@@ -4741,3 +4719,4 @@ if AUTO_SCAN then
 
 	end)
 end
+print("[AetheriusCore diagnostic] SCRIPT SETUP REACHED END")
