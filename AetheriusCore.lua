@@ -4581,6 +4581,14 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 end)
 
 GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(function(instance)
+	-- Removing a Humanoid can change the classification of its containing
+	-- Model and already-scanned descendants. Capture the model while the
+	-- hierarchy is still intact, then refresh that model after the event settles.
+	local humanoidModel
+	if instance and instance:IsA("Humanoid") then
+		humanoidModel = instance:FindFirstAncestorOfClass("Model")
+	end
+
 	local nameConnection = NameWatchConnections[instance]
 	if nameConnection then
 		nameConnection:Disconnect()
@@ -4598,6 +4606,11 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
+	if humanoidModel and ScannedInstances[humanoidModel] then
+		-- The model-level refresh reclassifies its remaining scanned subtree,
+		-- while queue deduplication prevents a redundant Humanoid refresh.
+		IntelligenceSummary.QueueStructuralChange(humanoidModel)
+	end
 	IntelligenceSummary.QueueStructuralChange(instance)
 	StructuralChangeDetected = StructuralChangeDetected or removed
 	if removed and not ScanRunning then
