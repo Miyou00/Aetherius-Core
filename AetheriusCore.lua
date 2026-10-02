@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 5 Combined)
+-- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 6 Final)
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
@@ -8,7 +8,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-print("[AetheriusCore]: Initializing Core Intelligence Analyzer (Phase 5)...")
+print("[AetheriusCore]: Initializing Core Intelligence Analyzer (Phase 6)...")
 
 -- 1. ROBUST UI CONTAINER SETUP (Delta & gethui compatibility)
 local rootParent = CoreGui
@@ -50,7 +50,7 @@ local TitleBar = Instance.new("TextLabel")
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = "  AetheriusCore v0.5 (Phase 5: Remotes)"
+TitleBar.Text = "  AetheriusCore v0.6 (Complete)"
 TitleBar.TextSize = 12
 TitleBar.Font = Enum.Font.GothamBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
@@ -71,7 +71,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- Tab Container Bar (4 Tabs)
+-- Tab Container Bar (5 Tabs including Data)
 local TabBar = Instance.new("Frame")
 TabBar.Size = UDim2.new(1, 0, 0, 28)
 TabBar.Position = UDim2.new(0, 0, 0, 30)
@@ -87,7 +87,7 @@ ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
 -- Tabs & Panels Setup
-local tabs = {"Overview", "Objects", "Remotes", "Behavior"}
+local tabs = {"Overview", "Objects", "Remotes", "Behavior", "Data"}
 local panels = {}
 
 for i, tabName in ipairs(tabs) do
@@ -97,7 +97,7 @@ for i, tabName in ipairs(tabs) do
     btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
     btn.TextColor3 = Color3.fromRGB(180, 180, 180)
     btn.Text = tabName
-    btn.TextSize = 11
+    btn.TextSize = 10
     btn.Font = Enum.Font.GothamMedium
     btn.Parent = TabBar
 
@@ -106,11 +106,10 @@ for i, tabName in ipairs(tabs) do
     panel.Position = UDim2.new(0, 5, 0, 5)
     panel.BackgroundTransparency = 1
     panel.Visible = (tabName == "Overview")
-    panel.CanvasSize = UDim2.new(0, 0, 0, 0) -- Will adjust dynamically
+    panel.CanvasSize = UDim2.new(0, 0, 0, 0)
     panel.ScrollBarThickness = 4
     panel.Parent = ContentArea
     
-    -- Layout inside panels
     local uiList = Instance.new("UIListLayout")
     uiList.SortOrder = Enum.SortOrder.LayoutOrder
     uiList.Padding = UDim.new(0, 4)
@@ -124,7 +123,7 @@ for i, tabName in ipairs(tabs) do
     end)
 end
 
--- Panel Text Containers / Setup
+-- Panel UI Elements Setup
 local overviewText = Instance.new("TextLabel")
 overviewText.Size = UDim2.new(1, 0, 0, 140)
 overviewText.BackgroundTransparency = 1
@@ -135,7 +134,7 @@ overviewText.TextXAlignment = Enum.TextXAlignment.Left
 overviewText.TextYAlignment = Enum.TextYAlignment.Top
 overviewText.LayoutOrder = 1
 overviewText.Parent = panels["Overview"]
-overviewText.Text = "Status: Scanning Workspace & Discovering Remotes..."
+overviewText.Text = "Status: Initializing System..."
 
 local behaviorText = Instance.new("TextLabel")
 behaviorText.Size = UDim2.new(1, 0, 0, 250)
@@ -149,8 +148,32 @@ behaviorText.LayoutOrder = 1
 behaviorText.Parent = panels["Behavior"]
 behaviorText.Text = "Behavior Monitor Active...\nWaiting for runtime events..."
 
+-- Phase 6: Data Management Tab Controls
+local exportStatusLabel = Instance.new("TextLabel")
+exportStatusLabel.Size = UDim2.new(1, 0, 0, 50)
+exportStatusLabel.BackgroundTransparency = 1
+exportStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+exportStatusLabel.TextSize = 11
+exportStatusLabel.Font = Enum.Font.Code
+exportStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+exportStatusLabel.LayoutOrder = 1
+exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/ScanResult.json\nStatus: Pending First Export"
+exportStatusLabel.Parent = panels["Data"]
 
--- 3. CORE SCANNING & PHASE 5 REMOTE DISCOVERY ENGINE
+local clearLogsBtn = Instance.new("TextButton")
+clearLogsBtn.Size = UDim2.new(1, 0, 0, 32)
+clearLogsBtn.BackgroundColor3 = Color3.fromRGB(45, 30, 30)
+clearLogsBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
+clearLogsBtn.TextSize = 11
+clearLogsBtn.Font = Enum.Font.GothamBold
+clearLogsBtn.Text = "Clear Behavior Log History"
+clearLogsBtn.LayoutOrder = 2
+clearLogsBtn.Parent = panels["Data"]
+
+panels["Data"].CanvasSize = UDim2.new(0, 0, 0, 100)
+
+
+-- 3. CORE EXECUTION ENGINE
 local ScanConfig = {
     MaxDepth = 3,
     YieldEvery = 150,
@@ -171,7 +194,6 @@ local function classifyInstance(instance)
     return instance.ClassName
 end
 
--- Event History Buffer (Phase 4)
 local eventHistory = {}
 local maxHistorySize = 20
 
@@ -187,7 +209,13 @@ local function logBehaviorEvent(eventType, itemName, itemClass)
     behaviorText.Text = table.concat(eventHistory, "\n")
 end
 
--- Background Task for Scanning and Remotes Population
+-- Clear Logs Button Logic
+clearLogsBtn.MouseButton1Click:Connect(function()
+    table.clear(eventHistory)
+    behaviorText.Text = "Behavior log history cleared."
+end)
+
+-- Main Background Scan Task
 task.spawn(function()
     local startTime = tick()
     local totalInstances = 0
@@ -203,11 +231,8 @@ task.spawn(function()
         
         local category = classifyInstance(instance)
         
-        -- Phase 5: Collect and Render Remotes dynamically into the Remotes Panel
         if category == "NetworkRemote" then
             remoteCount = remoteCount + 1
-            
-            -- Create a clean entry label in the Remotes scrolling frame
             local remoteLabel = Instance.new("TextLabel")
             remoteLabel.Size = UDim2.new(1, 0, 0, 22)
             remoteLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
@@ -218,7 +243,6 @@ task.spawn(function()
             remoteLabel.TextXAlignment = Enum.TextXAlignment.Left
             remoteLabel.Parent = panels["Remotes"]
             
-            -- Adjust canvas size dynamically based on items added
             panels["Remotes"].CanvasSize = UDim2.new(0, 0, 0, remoteCount * 26)
         end
         
@@ -238,9 +262,7 @@ task.spawn(function()
         return data
     end
     
-    -- Scan Workspace and ReplicatedStorage for comprehensive data
     local scannedWorkspace = scanRecursive(Workspace, 1)
-    
     local elapsedTime = tick() - startTime
     
     overviewText.Text = string.format([[
@@ -250,7 +272,7 @@ task.spawn(function()
  Environment: Delta Mobile
  UI Layer: Protected Framework]], elapsedTime, totalInstances, remoteCount)
 
-    -- Hook up Runtime Listeners (Phase 4)
+    -- Runtime Behavior Listeners
     Workspace.ChildAdded:Connect(function(child)
         logBehaviorEvent("SPAWN", child.Name, child.ClassName)
     end)
@@ -265,8 +287,11 @@ task.spawn(function()
             makefolder("AetheriusCore")
         end
         writefile("AetheriusCore/ScanResult.json", HttpService:JSONEncode(scannedWorkspace))
+        exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/ScanResult.json\nStatus: Successfully Exported to File!"
         print("[AetheriusCore]: Workspace scan exported successfully to workspace/AetheriusCore/ScanResult.json")
+    else
+        exportStatusLabel.Text = "Export Path: N/A\nStatus: writefile not supported by environment."
     end
 end)
 
-print("[AetheriusCore]: Phases 1-5 loaded successfully with interactive Remotes Inspector.")
+print("[AetheriusCore]: All phases loaded successfully. AetheriusCore is ready.")
