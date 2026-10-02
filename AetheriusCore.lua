@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.7 Live Analysis Refresh)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.8 Data Accuracy and Validation)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.7"
+local SCRIPT_VERSION = "0.11.8"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -546,6 +546,9 @@ local instanceByRecord = setmetatable({}, {__mode = "k"})
 local rowByInstance = setmetatable({}, {__mode = "k"})
 local humanoidModelCounted = setmetatable({}, {__mode = "k"})
 local nameChangeConnections = setmetatable({}, {__mode = "k"})
+local valueChangeConnections = setmetatable({}, {__mode = "k"})
+local ancestorNameConnections = setmetatable({}, {__mode = "k"})
+local refreshTrackedPaths
 local scheduleRelationshipRefresh
 local queueLiveUiRefresh
 local scanStarted = 0
@@ -645,6 +648,44 @@ local function familyName(instance)
         cursor = cursor.Parent
     end
     return rootName
+end
+
+-- Refresh paths only when a tracked name/ancestor changes; normal scans do not
+-- repeatedly walk every record. One listener is shared per ancestor instance.
+refreshTrackedPaths = function()
+    if not State.alive then return end
+    for instance, record in pairs(entryByInstance) do
+        if instance and record then
+            record.Name = instance.Name
+            record.Path = fullPath(instance)
+            record.Family = familyName(instance)
+            record.ParentPath = instance.Parent and fullPath(instance.Parent) or ""
+            local row = rowByInstance[instance]
+            if row and row.Parent then
+                local relevanceText = string.format(" R:%d", record.RelevanceScore or 0)
+                local valueText = instance:IsA("ValueBase") and (" = " .. tostring(instance.Value)) or ""
+                row.Text = string.format("  [%s%s] %s%s", record.Category or instance.ClassName, relevanceText, record.Path, valueText)
+            end
+        end
+    end
+    if State.scanComplete and scheduleRelationshipRefresh then scheduleRelationshipRefresh() end
+    queueLiveUiRefresh()
+end
+
+local function registerAncestorNameWatch(instance)
+    local cursor = instance.Parent
+    while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
+        if not ancestorNameConnections[cursor] then
+            local ancestor = cursor
+            local ok, connection = pcall(function()
+                return ancestor:GetPropertyChangedSignal("Name"):Connect(function()
+                    refreshTrackedPaths()
+                end)
+            end)
+            if ok and connection then ancestorNameConnections[ancestor] = connection end
+        end
+        cursor = cursor.Parent
+    end
 end
 
 local function inScanScope(instance)
@@ -757,21 +798,23 @@ local function processInstance(instance)
         table.insert(State.scanEntries, record)
         addExplorerRow(instance, #State.scanEntries, record.Category)
         if not nameChangeConnections[instance] then
-            nameChangeConnections[instance] = instance:GetPropertyChangedSignal("Name"):Connect(function()
-                if not State.alive or not entryByInstance[instance] then return end
+            nameChangeConnections[instance] = instance:GetPropertyChangedSignal("Name"):Connect(refreshTrackedPaths)
+        end
+        registerAncestorNameWatch(instance)
+        if isValue and not valueChangeConnections[instance] then
+            valueChangeConnections[instance] = instance:GetPropertyChangedSignal("Value"):Connect(function()
+                if not State.alive then return end
                 local current = entryByInstance[instance]
-                current.Name = instance.Name
-                current.Path = fullPath(instance)
-                current.Family = familyName(instance)
-                current.ParentPath = instance.Parent and fullPath(instance.Parent) or ""
+                if not current then return end
+                current.Value = tostring(instance.Value)
+                current.RelevanceScore = calculateRelevance(instance, current.Category)
+                current.Relevance = relevanceLabel(current.RelevanceScore)
                 local row = rowByInstance[instance]
                 if row and row.Parent then
-                    local relevanceText = string.format(" R:%d", current.RelevanceScore or 0)
-                    row.Text = string.format("  [%s%s] %s", current.Category or instance.ClassName, relevanceText, current.Path)
+                    row.Text = string.format("  [%s R:%d] %s = %s", current.Category or instance.ClassName,
+                        current.RelevanceScore or 0, current.Path or fullPath(instance), current.Value)
                 end
-                if State.scanComplete and scheduleRelationshipRefresh then
-                    scheduleRelationshipRefresh()
-                end
+                if State.scanComplete and scheduleRelationshipRefresh then scheduleRelationshipRefresh() end
                 queueLiveUiRefresh()
             end)
         end
@@ -811,24 +854,9 @@ local function updateHumanoidModel(model)
             table.insert(State.scanEntries, record)
             addExplorerRow(model, #State.scanEntries, record.Category)
             if not nameChangeConnections[model] then
-                nameChangeConnections[model] = model:GetPropertyChangedSignal("Name"):Connect(function()
-                    if not State.alive or not entryByInstance[model] then return end
-                    local current = entryByInstance[model]
-                    current.Name = model.Name
-                    current.Path = fullPath(model)
-                    current.Family = familyName(model)
-                    current.ParentPath = model.Parent and fullPath(model.Parent) or ""
-                    local row = rowByInstance[model]
-                    if row and row.Parent then
-                        row.Text = string.format("  [%s R:%d] %s", current.Category or model.ClassName,
-                            current.RelevanceScore or 0, current.Path)
-                    end
-                    if State.scanComplete and scheduleRelationshipRefresh then
-                        scheduleRelationshipRefresh()
-                    end
-                    queueLiveUiRefresh()
-                end)
+                nameChangeConnections[model] = model:GetPropertyChangedSignal("Name"):Connect(refreshTrackedPaths)
             end
+            registerAncestorNameWatch(model)
         end
     elseif not hasHumanoid and wasCounted then
         humanoidModelCounted[model] = nil
@@ -871,6 +899,11 @@ local function unprocessInstance(instance)
         pcall(function() nameConnection:Disconnect() end)
         nameChangeConnections[instance] = nil
     end
+    local valueConnection = valueChangeConnections[instance]
+    if valueConnection then
+        pcall(function() valueConnection:Disconnect() end)
+        valueChangeConnections[instance] = nil
+    end
     removeExplorerEntry(instance)
     return true
 end
@@ -884,7 +917,7 @@ local function updateStatus(status, containerName)
         or Color3.fromRGB(70, 205, 125)
     StatusDetailText.Text = "Scan scope: Workspace + ReplicatedStorage\nRemote observer: "
         .. (State.hookInstalled and "Active (passive)" or "Unavailable / initializing")
-        .. "\nLive updates: Descendant add/remove"
+        .. "\nLive updates: add/remove, names, ancestor paths, and ValueBase values"
 
     overviewStatLabels.Objects.Text = tostring(stats.nodes)
     overviewStatLabels.Remotes.Text = tostring(stats.remotes)
@@ -1025,6 +1058,14 @@ local function scan()
     for instance, connection in pairs(nameChangeConnections) do
         pcall(function() connection:Disconnect() end)
         nameChangeConnections[instance] = nil
+    end
+    for instance, connection in pairs(valueChangeConnections) do
+        pcall(function() connection:Disconnect() end)
+        valueChangeConnections[instance] = nil
+    end
+    for instance, connection in pairs(ancestorNameConnections) do
+        pcall(function() connection:Disconnect() end)
+        ancestorNameConnections[instance] = nil
     end
     table.clear(State.analysisRecords)
     table.clear(State.relationshipEdges)
@@ -1292,6 +1333,14 @@ track(CloseBtn.MouseButton1Click:Connect(function()
     for instance, connection in pairs(nameChangeConnections) do
         pcall(function() connection:Disconnect() end)
         nameChangeConnections[instance] = nil
+    end
+    for instance, connection in pairs(valueChangeConnections) do
+        pcall(function() connection:Disconnect() end)
+        valueChangeConnections[instance] = nil
+    end
+    for instance, connection in pairs(ancestorNameConnections) do
+        pcall(function() connection:Disconnect() end)
+        ancestorNameConnections[instance] = nil
     end
     pcall(function() ScreenGui:Destroy() end)
     if env.AetheriusCoreState == State then env.AetheriusCoreState = nil end
