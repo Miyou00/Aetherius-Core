@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 6 Final)
+-- AetheriusCore: Client Game Intelligence Analyzer (Fixed Panels)
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
@@ -8,9 +8,9 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-print("[AetheriusCore]: Initializing Core Intelligence Analyzer (Phase 6)...")
+print("[AetheriusCore]: Initializing Fixed Analyzer...")
 
--- 1. ROBUST UI CONTAINER SETUP (Delta & gethui compatibility)
+-- 1. ROBUST UI CONTAINER SETUP
 local rootParent = CoreGui
 if syn and syn.protect_gui then
     local suc, protected = pcall(syn.protect_gui)
@@ -20,7 +20,6 @@ elseif gethui then
     if suc and res then rootParent = res end
 end
 
--- Cleanup previous instance if it exists
 if rootParent:FindFirstChild("AetheriusCoreUI") then
     rootParent.AetheriusCoreUI:Destroy()
 end
@@ -50,7 +49,7 @@ local TitleBar = Instance.new("TextLabel")
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = "  AetheriusCore v0.6 (Complete)"
+TitleBar.Text = "  AetheriusCore v0.7 (Fixed Inspector)"
 TitleBar.TextSize = 12
 TitleBar.Font = Enum.Font.GothamBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
@@ -71,7 +70,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- Tab Container Bar (5 Tabs including Data)
+-- Tab Container Bar (5 Tabs)
 local TabBar = Instance.new("Frame")
 TabBar.Size = UDim2.new(1, 0, 0, 28)
 TabBar.Position = UDim2.new(0, 0, 0, 30)
@@ -79,14 +78,12 @@ TabBar.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainWindow
 
--- Content Area Frame
 local ContentArea = Instance.new("Frame")
 ContentArea.Size = UDim2.new(1, 0, 1, -58)
 ContentArea.Position = UDim2.new(0, 0, 0, 58)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
--- Tabs & Panels Setup
 local tabs = {"Overview", "Objects", "Remotes", "Behavior", "Data"}
 local panels = {}
 
@@ -134,7 +131,7 @@ overviewText.TextXAlignment = Enum.TextXAlignment.Left
 overviewText.TextYAlignment = Enum.TextYAlignment.Top
 overviewText.LayoutOrder = 1
 overviewText.Parent = panels["Overview"]
-overviewText.Text = "Status: Initializing System..."
+overviewText.Text = "Status: Scanning Containers..."
 
 local behaviorText = Instance.new("TextLabel")
 behaviorText.Size = UDim2.new(1, 0, 0, 250)
@@ -148,7 +145,6 @@ behaviorText.LayoutOrder = 1
 behaviorText.Parent = panels["Behavior"]
 behaviorText.Text = "Behavior Monitor Active...\nWaiting for runtime events..."
 
--- Phase 6: Data Management Tab Controls
 local exportStatusLabel = Instance.new("TextLabel")
 exportStatusLabel.Size = UDim2.new(1, 0, 0, 50)
 exportStatusLabel.BackgroundTransparency = 1
@@ -172,13 +168,7 @@ clearLogsBtn.Parent = panels["Data"]
 
 panels["Data"].CanvasSize = UDim2.new(0, 0, 0, 100)
 
-
--- 3. CORE EXECUTION ENGINE
-local ScanConfig = {
-    MaxDepth = 3,
-    YieldEvery = 150,
-}
-
+-- 3. EXPANDED SCANNING ENGINE (Workspace + ReplicatedStorage)
 local function classifyInstance(instance)
     if instance:IsA("Model") and instance:FindFirstChild("Humanoid") then
         if instance == LocalPlayer.Character then
@@ -200,98 +190,88 @@ local maxHistorySize = 20
 local function logBehaviorEvent(eventType, itemName, itemClass)
     local timestamp = os.date("%H:%M:%S")
     local entry = string.format("[%s] %s: %s (%s)", timestamp, eventType, itemName, itemClass)
-    
     table.insert(eventHistory, 1, entry)
-    if #eventHistory > maxHistorySize then
-        table.remove(eventHistory)
-    end
-    
+    if #eventHistory > maxHistorySize then table.remove(eventHistory) end
     behaviorText.Text = table.concat(eventHistory, "\n")
 end
 
--- Clear Logs Button Logic
 clearLogsBtn.MouseButton1Click:Connect(function()
     table.clear(eventHistory)
     behaviorText.Text = "Behavior log history cleared."
 end)
 
--- Main Background Scan Task
+-- Background Scanning & Panel Population Task
 task.spawn(function()
     local startTime = tick()
     local totalInstances = 0
     local remoteCount = 0
-    
-    local function scanRecursive(instance, currentDepth)
-        if currentDepth > ScanConfig.MaxDepth then return nil end
-        
-        totalInstances = totalInstances + 1
-        if totalInstances % ScanConfig.YieldEvery == 0 then
-            task.wait()
-        end
-        
-        local category = classifyInstance(instance)
-        
-        if category == "NetworkRemote" then
-            remoteCount = remoteCount + 1
-            local remoteLabel = Instance.new("TextLabel")
-            remoteLabel.Size = UDim2.new(1, 0, 0, 22)
-            remoteLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-            remoteLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
-            remoteLabel.TextSize = 10
-            remoteLabel.Font = Enum.Font.Code
-            remoteLabel.Text = string.format(" [%s] %s", instance.ClassName, instance.Name)
-            remoteLabel.TextXAlignment = Enum.TextXAlignment.Left
-            remoteLabel.Parent = panels["Remotes"]
+    local objectCount = 0
+
+    local function processContainer(container)
+        for _, descendant in ipairs(container:GetDescendants()) do
+            totalInstances = totalInstances + 1
+            if totalInstances % 200 == 0 then task.wait() end
             
-            panels["Remotes"].CanvasSize = UDim2.new(0, 0, 0, remoteCount * 26)
-        end
-        
-        local data = {
-            Name = instance.Name,
-            Class = category,
-            Children = {}
-        }
-        
-        for _, child in ipairs(instance:GetChildren()) do
-            local childData = scanRecursive(child, currentDepth + 1)
-            if childData then
-                table.insert(data.Children, childData)
+            local category = classifyInstance(descendant)
+            
+            -- Populate Remotes Tab
+            if category == "NetworkRemote" then
+                remoteCount = remoteCount + 1
+                local remoteLabel = Instance.new("TextLabel")
+                remoteLabel.Size = UDim2.new(1, 0, 0, 22)
+                remoteLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+                remoteLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+                remoteLabel.TextSize = 10
+                remoteLabel.Font = Enum.Font.Code
+                remoteLabel.Text = string.format(" [%s] %s (%s)", descendant.ClassName, descendant.Name, descendant.Parent.Name)
+                remoteLabel.TextXAlignment = Enum.TextXAlignment.Left
+                remoteLabel.Parent = panels["Remotes"]
+                panels["Remotes"].CanvasSize = UDim2.new(0, 0, 0, remoteCount * 26)
+            end
+            
+            -- Populate Objects Tab (Filtering for major items to avoid UI clutter)
+            if category == "Character/NPC" or category == "Tool" or descendant:IsA("Model") or descendant:IsA("Folder") then
+                objectCount = objectCount + 1
+                local objLabel = Instance.new("TextLabel")
+                objLabel.Size = UDim2.new(1, 0, 0, 22)
+                objLabel.BackgroundColor3 = Color3.fromRGB(25, 30, 35)
+                objLabel.TextColor3 = Color3.fromRGB(220, 220, 150)
+                objLabel.TextSize = 10
+                objLabel.Font = Enum.Font.Code
+                objLabel.Text = string.format(" [%s] %s", descendant.ClassName, descendant.Name)
+                objLabel.TextXAlignment = Enum.TextXAlignment.Left
+                objLabel.Parent = panels["Objects"]
+                panels["Objects"].CanvasSize = UDim2.new(0, 0, 0, objectCount * 26)
             end
         end
-        
-        return data
     end
-    
-    local scannedWorkspace = scanRecursive(Workspace, 1)
+
+    -- Scan both Workspace and ReplicatedStorage where game data actually lives!
+    processContainer(Workspace)
+    processContainer(ReplicatedStorage)
+
     local elapsedTime = tick() - startTime
     
     overviewText.Text = string.format([[
- Status: Active & Monitoring (%.2fs)
- Scanned Nodes: %d
- Remotes Mapped: %d
- Environment: Delta Mobile
- UI Layer: Protected Framework]], elapsedTime, totalInstances, remoteCount)
+ Status: Scan Complete (%.2fs)
+ Total Nodes Checked: %d
+ Remotes Found: %d
+ Key Objects Mapped: %d
+ Environment: Delta Mobile]], elapsedTime, totalInstances, remoteCount, objectCount)
 
     -- Runtime Behavior Listeners
     Workspace.ChildAdded:Connect(function(child)
         logBehaviorEvent("SPAWN", child.Name, child.ClassName)
     end)
-
     Workspace.ChildRemoved:Connect(function(child)
         logBehaviorEvent("REMOVE", child.Name, child.ClassName)
     end)
 
-    -- Export file via Delta filesystem
     if writefile then
-        if not isfolder("AetheriusCore") then
-            makefolder("AetheriusCore")
-        end
-        writefile("AetheriusCore/ScanResult.json", HttpService:JSONEncode(scannedWorkspace))
-        exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/ScanResult.json\nStatus: Successfully Exported to File!"
-        print("[AetheriusCore]: Workspace scan exported successfully to workspace/AetheriusCore/ScanResult.json")
-    else
-        exportStatusLabel.Text = "Export Path: N/A\nStatus: writefile not supported by environment."
+        if not isfolder("AetheriusCore") then makefolder("AetheriusCore") end
+        writefile("AetheriusCore/ScanSummary.json", HttpService:JSONEncode({Remotes = remoteCount, Objects = objectCount}))
+        exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/ScanSummary.json\nStatus: Exported Successfully!"
     end
 end)
 
-print("[AetheriusCore]: All phases loaded successfully. AetheriusCore is ready.")
+print("[AetheriusCore]: Fixed inspector running successfully.")
