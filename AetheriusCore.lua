@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.7 Ancestor Listener Cleanup and Transactional Model Updates)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.8 Discord JSON Export)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.7"
+local SCRIPT_VERSION = "0.12.8"
+
+-- Personal-use Discord export. Paste a dedicated Discord webhook URL here.
+-- Anyone with access to this script can read and use the webhook URL.
+local DISCORD_WEBHOOK_URL = "PASTE_DISCORD_WEBHOOK_URL_HERE"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -533,6 +537,22 @@ local clearStroke = Instance.new("UIStroke")
 clearStroke.Color = Color3.fromRGB(117, 66, 75)
 clearStroke.Transparency = 0.4
 clearStroke.Parent = clearBtn
+
+local discordExportBtn = Instance.new("TextButton")
+discordExportBtn.Size = UDim2.new(1, -8, 0, 31)
+discordExportBtn.BackgroundColor3 = Color3.fromRGB(45, 91, 112)
+discordExportBtn.TextColor3 = Color3.fromRGB(230, 246, 255)
+discordExportBtn.Text = "Send JSON to Discord"
+discordExportBtn.TextSize = 11
+discordExportBtn.Font = Enum.Font.GothamBold
+discordExportBtn.Parent = dataPanel
+discordExportBtn.AutoButtonColor = false
+Instance.new("UICorner", discordExportBtn).CornerRadius = UDim.new(0, 7)
+styleButton(discordExportBtn, function() return Color3.fromRGB(45, 91, 112) end, Color3.fromRGB(55, 112, 137), Color3.fromRGB(35, 74, 91))
+local discordExportStroke = Instance.new("UIStroke")
+discordExportStroke.Color = Color3.fromRGB(66, 139, 166)
+discordExportStroke.Transparency = 0.4
+discordExportStroke.Parent = discordExportBtn
 
 track(clearBtn.MouseButton1Click:Connect(function()
     table.clear(State.runtimeHistory)
@@ -1062,6 +1082,21 @@ local function updateStatus(status, containerName)
     overviewStatLabels["Humanoid Models"].Text = tostring(stats.models)
 end
 
+local function buildExportJson()
+    local payload = {
+        Version = SCRIPT_VERSION,
+        Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        Stats = stats,
+        RelationshipCount = #State.relationshipEdges,
+        Relationships = State.relationshipEdges,
+        Entries = {},
+    }
+    for _, item in ipairs(State.scanEntries or {}) do
+        table.insert(payload.Entries, item)
+    end
+    return HttpService:JSONEncode(payload)
+end
+
 local function exportData()
     if type(writefile) ~= "function" then
         exportText.Text = "Export: writefile unavailable in this executor"
@@ -1073,22 +1108,93 @@ local function exportData()
         elseif type(makefolder) == "function" then
             pcall(makefolder, "AetheriusCore")
         end
-        local payload = {
-            Version = SCRIPT_VERSION,
-            Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-            Stats = stats,
-            RelationshipCount = #State.relationshipEdges,
-            Relationships = State.relationshipEdges,
-            Entries = {},
-        }
-        for _, item in ipairs(State.scanEntries or {}) do
-            table.insert(payload.Entries, item)
-        end
-        writefile("AetheriusCore/CoreData.json", HttpService:JSONEncode(payload))
+        writefile("AetheriusCore/CoreData.json", buildExportJson())
     end)
     exportText.Text = ok and "Export: successful (AetheriusCore/CoreData.json)"
         or ("Export: failed - " .. tostring(err))
 end
+
+local function resolveHttpRequest()
+    if type(syn) == "table" and type(syn.request) == "function" then
+        return syn.request
+    end
+    if type(http_request) == "function" then return http_request end
+    if type(request) == "function" then return request end
+    if type(http) == "table" and type(http.request) == "function" then
+        return http.request
+    end
+    return nil
+end
+
+local function sendJsonToDiscord()
+    if State.webhookSending then
+        exportText.Text = "Discord export: already sending..."
+        return
+    end
+    if type(DISCORD_WEBHOOK_URL) ~= "string"
+        or DISCORD_WEBHOOK_URL == ""
+        or string.find(DISCORD_WEBHOOK_URL, "PASTE_DISCORD_WEBHOOK_URL_HERE", 1, true) then
+        exportText.Text = "Discord export: configure webhook URL in script"
+        return
+    end
+    local httpRequest = resolveHttpRequest()
+    if not httpRequest then
+        exportText.Text = "Discord export: executor HTTP request unavailable"
+        return
+    end
+
+    State.webhookSending = true
+    discordExportBtn.Text = "Sending to Discord..."
+    task.spawn(function()
+        local ok, result = pcall(function()
+            local json = buildExportJson()
+            local boundary = "----AetheriusCore" .. HttpService:GenerateGUID(false):gsub("-", "")
+            local payloadJson = HttpService:JSONEncode({
+                content = "AetheriusCore JSON export | v" .. SCRIPT_VERSION
+                    .. " | " .. tostring(#(State.scanEntries or {})) .. " records",
+            })
+            local body = table.concat({
+                "--" .. boundary .. "\r\n",
+                'Content-Disposition: form-data; name="payload_json"\r\n',
+                "Content-Type: application/json\r\n\r\n",
+                payloadJson .. "\r\n",
+                "--" .. boundary .. "\r\n",
+                'Content-Disposition: form-data; name="files[0]"; filename="AetheriusCore_CoreData.json"\r\n',
+                "Content-Type: application/json\r\n\r\n",
+                json .. "\r\n",
+                "--" .. boundary .. "--\r\n",
+            })
+            local response = httpRequest({
+                Url = DISCORD_WEBHOOK_URL,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "multipart/form-data; boundary=" .. boundary },
+                Body = body,
+            })
+            if type(response) ~= "table" then
+                error("HTTP request returned no response details")
+            end
+            local statusCode = tonumber(response.StatusCode or response.Status or 0) or 0
+            if statusCode < 200 or statusCode >= 300 then
+                error("Discord returned HTTP " .. tostring(statusCode)
+                    .. (response.Body and (": " .. string.sub(tostring(response.Body), 1, 240)) or ""))
+            end
+            return statusCode
+        end)
+        State.webhookSending = false
+        if discordExportBtn and discordExportBtn.Parent then
+            discordExportBtn.Text = "Send JSON to Discord"
+        end
+        if ok then
+            exportText.Text = "Discord export: sent successfully (HTTP " .. tostring(result) .. ")"
+            logRuntime("JSON export sent to Discord webhook")
+        else
+            exportText.Text = "Discord export: failed - " .. tostring(result)
+            logRuntime("Discord JSON export failed: " .. tostring(result))
+        end
+    end)
+end
+
+track(discordExportBtn.MouseButton1Click:Connect(sendJsonToDiscord))
 
 -- Build a capped, deduplicated hierarchy map after the instance scan. Each
 -- relevant object links only to its nearest relevant ancestor, preventing the
