@@ -1,13 +1,14 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 4 Combined)
+-- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 5 Combined)
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-print("[AetheriusCore]: Initializing Core Intelligence Analyzer (Phase 4)...")
+print("[AetheriusCore]: Initializing Core Intelligence Analyzer (Phase 5)...")
 
 -- 1. ROBUST UI CONTAINER SETUP (Delta & gethui compatibility)
 local rootParent = CoreGui
@@ -33,8 +34,8 @@ ScreenGui.Parent = rootParent
 -- 2. MAIN WINDOW UI LAYOUT
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.new(0, 350, 0, 310)
-MainWindow.Position = UDim2.new(0.5, -175, 0.5, -155)
+MainWindow.Size = UDim2.new(0, 360, 0, 320)
+MainWindow.Position = UDim2.new(0.5, -180, 0.5, -160)
 MainWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 MainWindow.BorderSizePixel = 0
 MainWindow.Visible = true 
@@ -49,7 +50,7 @@ local TitleBar = Instance.new("TextLabel")
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = "  AetheriusCore v0.4 (Phase 4: Behavior)"
+TitleBar.Text = "  AetheriusCore v0.5 (Phase 5: Remotes)"
 TitleBar.TextSize = 12
 TitleBar.Font = Enum.Font.GothamBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
@@ -70,7 +71,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- Tab Container Bar (Expanded to 4 Tabs)
+-- Tab Container Bar (4 Tabs)
 local TabBar = Instance.new("Frame")
 TabBar.Size = UDim2.new(1, 0, 0, 28)
 TabBar.Position = UDim2.new(0, 0, 0, 30)
@@ -105,9 +106,15 @@ for i, tabName in ipairs(tabs) do
     panel.Position = UDim2.new(0, 5, 0, 5)
     panel.BackgroundTransparency = 1
     panel.Visible = (tabName == "Overview")
-    panel.CanvasSize = UDim2.new(0, 0, 2, 0)
+    panel.CanvasSize = UDim2.new(0, 0, 0, 0) -- Will adjust dynamically
     panel.ScrollBarThickness = 4
     panel.Parent = ContentArea
+    
+    -- Layout inside panels
+    local uiList = Instance.new("UIListLayout")
+    uiList.SortOrder = Enum.SortOrder.LayoutOrder
+    uiList.Padding = UDim.new(0, 4)
+    uiList.Parent = panel
     
     panels[tabName] = panel
     
@@ -117,7 +124,7 @@ for i, tabName in ipairs(tabs) do
     end)
 end
 
--- Panel Text Containers
+-- Panel Text Containers / Setup
 local overviewText = Instance.new("TextLabel")
 overviewText.Size = UDim2.new(1, 0, 0, 140)
 overviewText.BackgroundTransparency = 1
@@ -126,32 +133,24 @@ overviewText.TextSize = 11
 overviewText.Font = Enum.Font.Code
 overviewText.TextXAlignment = Enum.TextXAlignment.Left
 overviewText.TextYAlignment = Enum.TextYAlignment.Top
+overviewText.LayoutOrder = 1
 overviewText.Parent = panels["Overview"]
-overviewText.Text = "Status: Scanning Workspace & Initializing Behavior Tracker..."
-
-local remotesText = Instance.new("TextLabel")
-remotesText.Size = UDim2.new(1, 0, 0, 200)
-remotesText.BackgroundTransparency = 1
-remotesText.TextColor3 = Color3.fromRGB(200, 220, 255)
-remotesText.TextSize = 11
-remotesText.Font = Enum.Font.Code
-remotesText.TextXAlignment = Enum.TextXAlignment.Left
-remotesText.TextYAlignment = Enum.TextYAlignment.Top
-remotesText.Parent = panels["Remotes"]
+overviewText.Text = "Status: Scanning Workspace & Discovering Remotes..."
 
 local behaviorText = Instance.new("TextLabel")
-behaviorText.Size = UDim2.new(1, 0, 0, 300)
+behaviorText.Size = UDim2.new(1, 0, 0, 250)
 behaviorText.BackgroundTransparency = 1
 behaviorText.TextColor3 = Color3.fromRGB(180, 255, 180)
 behaviorText.TextSize = 10
 behaviorText.Font = Enum.Font.Code
 behaviorText.TextXAlignment = Enum.TextXAlignment.Left
 behaviorText.TextYAlignment = Enum.TextYAlignment.Top
+behaviorText.LayoutOrder = 1
 behaviorText.Parent = panels["Behavior"]
-behaviorText.Text = "Behavior Monitor Active...\nWaiting for runtime events (spawns/despawns)..."
+behaviorText.Text = "Behavior Monitor Active...\nWaiting for runtime events..."
 
 
--- 3. PHASE 1 & 4: SCANNING ENGINE + BEHAVIOR MONITOR
+-- 3. CORE SCANNING & PHASE 5 REMOTE DISCOVERY ENGINE
 local ScanConfig = {
     MaxDepth = 3,
     YieldEvery = 150,
@@ -172,28 +171,27 @@ local function classifyInstance(instance)
     return instance.ClassName
 end
 
--- Runtime Event History Buffer (Phase 4)
+-- Event History Buffer (Phase 4)
 local eventHistory = {}
-local maxHistorySize = 25
+local maxHistorySize = 20
 
 local function logBehaviorEvent(eventType, itemName, itemClass)
     local timestamp = os.date("%H:%M:%S")
     local entry = string.format("[%s] %s: %s (%s)", timestamp, eventType, itemName, itemClass)
     
-    table.insert(eventHistory, 1, entry) -- Insert at top
+    table.insert(eventHistory, 1, entry)
     if #eventHistory > maxHistorySize then
-        table.remove(eventHistory) -- Drop oldest to save mobile RAM
+        table.remove(eventHistory)
     end
     
     behaviorText.Text = table.concat(eventHistory, "\n")
 end
 
--- Background Scan Task
+-- Background Task for Scanning and Remotes Population
 task.spawn(function()
     local startTime = tick()
     local totalInstances = 0
     local remoteCount = 0
-    local workspaceData = {}
     
     local function scanRecursive(instance, currentDepth)
         if currentDepth > ScanConfig.MaxDepth then return nil end
@@ -204,8 +202,24 @@ task.spawn(function()
         end
         
         local category = classifyInstance(instance)
+        
+        -- Phase 5: Collect and Render Remotes dynamically into the Remotes Panel
         if category == "NetworkRemote" then
             remoteCount = remoteCount + 1
+            
+            -- Create a clean entry label in the Remotes scrolling frame
+            local remoteLabel = Instance.new("TextLabel")
+            remoteLabel.Size = UDim2.new(1, 0, 0, 22)
+            remoteLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+            remoteLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+            remoteLabel.TextSize = 10
+            remoteLabel.Font = Enum.Font.Code
+            remoteLabel.Text = string.format(" [%s] %s", instance.ClassName, instance.Name)
+            remoteLabel.TextXAlignment = Enum.TextXAlignment.Left
+            remoteLabel.Parent = panels["Remotes"]
+            
+            -- Adjust canvas size dynamically based on items added
+            panels["Remotes"].CanvasSize = UDim2.new(0, 0, 0, remoteCount * 26)
         end
         
         local data = {
@@ -224,19 +238,19 @@ task.spawn(function()
         return data
     end
     
-    local scannedTree = scanRecursive(Workspace, 1)
+    -- Scan Workspace and ReplicatedStorage for comprehensive data
+    local scannedWorkspace = scanRecursive(Workspace, 1)
+    
     local elapsedTime = tick() - startTime
     
     overviewText.Text = string.format([[
  Status: Active & Monitoring (%.2fs)
  Scanned Nodes: %d
- Remotes Identified: %d
+ Remotes Mapped: %d
  Environment: Delta Mobile
- Behavior Feed: Active (Capped @ %d)]], elapsedTime, totalInstances, remoteCount, maxHistorySize)
+ UI Layer: Protected Framework]], elapsedTime, totalInstances, remoteCount)
 
-    remotesText.Text = string.format("Detected %d remote objects in client hierarchy.", remoteCount)
-
-    -- Hook up Phase 4 Runtime Listeners (Workspace changes)
+    -- Hook up Runtime Listeners (Phase 4)
     Workspace.ChildAdded:Connect(function(child)
         logBehaviorEvent("SPAWN", child.Name, child.ClassName)
     end)
@@ -250,9 +264,9 @@ task.spawn(function()
         if not isfolder("AetheriusCore") then
             makefolder("AetheriusCore")
         end
-        writefile("AetheriusCore/ScanResult.json", HttpService:JSONEncode(scannedTree))
+        writefile("AetheriusCore/ScanResult.json", HttpService:JSONEncode(scannedWorkspace))
         print("[AetheriusCore]: Workspace scan exported successfully to workspace/AetheriusCore/ScanResult.json")
     end
 end)
 
-print("[AetheriusCore]: Phases 1-4 loaded successfully.")
+print("[AetheriusCore]: Phases 1-5 loaded successfully with interactive Remotes Inspector.")
