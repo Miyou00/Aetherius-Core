@@ -86,9 +86,9 @@ State.gui = ScreenGui
 
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.fromOffset(300, 230)
-MainWindow.Position = UDim2.new(0.5, -150, 0.5, -115)
-MainWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainWindow.Size = UDim2.fromOffset(345, 293)
+MainWindow.Position = UDim2.new(0.5, -172, 0.5, -146)
+MainWindow.BackgroundColor3 = Color3.fromRGB(18, 20, 27)
 MainWindow.BorderSizePixel = 0
 MainWindow.Parent = ScreenGui
 Instance.new("UICorner", MainWindow).CornerRadius = UDim.new(0, 9)
@@ -99,8 +99,8 @@ windowStroke.Transparency = 0.15
 windowStroke.Parent = MainWindow
 
 local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, 0, 0, 25)
-TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = Color3.fromRGB(27, 30, 40)
 TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainWindow
 Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 9)
@@ -111,6 +111,66 @@ headerAccent.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
 headerAccent.BorderSizePixel = 0
 headerAccent.Parent = TitleBar
 Instance.new("UICorner", headerAccent).CornerRadius = UDim.new(1, 0)
+
+-- Compact live status strip, matching the supplied reference layout.
+local StatusHeader = Instance.new("Frame")
+StatusHeader.Name = "StatusHeader"
+StatusHeader.Size = UDim2.new(1, -16, 0, 27)
+StatusHeader.Position = UDim2.fromOffset(8, 36)
+StatusHeader.BackgroundColor3 = Color3.fromRGB(32, 35, 46)
+StatusHeader.BorderSizePixel = 0
+StatusHeader.Parent = MainWindow
+Instance.new("UICorner", StatusHeader).CornerRadius = UDim.new(0, 6)
+
+local StatusText = Instance.new("TextLabel")
+StatusText.Name = "OverallStatus"
+StatusText.Size = UDim2.new(1, -38, 1, 0)
+StatusText.Position = UDim2.fromOffset(9, 0)
+StatusText.BackgroundTransparency = 1
+StatusText.Text = "● STARTING"
+StatusText.TextColor3 = Color3.fromRGB(70, 205, 125)
+StatusText.TextSize = 9
+StatusText.Font = Enum.Font.GothamBold
+StatusText.TextXAlignment = Enum.TextXAlignment.Left
+StatusText.TextTruncate = Enum.TextTruncate.AtEnd
+StatusText.Parent = StatusHeader
+
+local StatusExpand = Instance.new("TextButton")
+StatusExpand.Name = "StatusExpand"
+StatusExpand.Size = UDim2.fromOffset(20, 20)
+StatusExpand.Position = UDim2.new(1, -26, 0.5, -10)
+StatusExpand.BackgroundTransparency = 1
+StatusExpand.Text = "▼"
+StatusExpand.TextColor3 = Color3.fromRGB(155, 162, 178)
+StatusExpand.TextSize = 9
+StatusExpand.Font = Enum.Font.GothamBold
+StatusExpand.Parent = StatusHeader
+
+local StatusDetails = Instance.new("Frame")
+StatusDetails.Name = "StatusDetails"
+StatusDetails.Size = UDim2.new(1, -16, 0, 58)
+StatusDetails.Position = UDim2.fromOffset(8, 66)
+StatusDetails.BackgroundColor3 = Color3.fromRGB(32, 35, 46)
+StatusDetails.BorderSizePixel = 0
+StatusDetails.ClipsDescendants = true
+StatusDetails.Visible = false
+StatusDetails.Parent = MainWindow
+Instance.new("UICorner", StatusDetails).CornerRadius = UDim.new(0, 6)
+
+local StatusDetailText = Instance.new("TextLabel")
+StatusDetailText.Name = "StatusDetailText"
+StatusDetailText.Size = UDim2.new(1, -18, 1, -8)
+StatusDetailText.Position = UDim2.fromOffset(9, 4)
+StatusDetailText.BackgroundTransparency = 1
+StatusDetailText.Text = "Scan scope: Workspace + ReplicatedStorage\nRemote observer: Initializing\nLive updates: Enabled"
+StatusDetailText.TextColor3 = Color3.fromRGB(155, 162, 178)
+StatusDetailText.TextSize = 9
+StatusDetailText.Font = Enum.Font.GothamMedium
+StatusDetailText.TextXAlignment = Enum.TextXAlignment.Left
+StatusDetailText.TextYAlignment = Enum.TextYAlignment.Center
+StatusDetailText.Parent = StatusDetails
+
+local statusDetailsExpanded = false
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -70, 1, 0)
@@ -137,28 +197,40 @@ local function makeTitleButton(text, xOffset, color)
 end
 
 local MinimizeBtn = makeTitleButton("−", -54, Color3.fromRGB(230, 205, 120))
-MinimizeBtn.Size = UDim2.fromOffset(18, 18)
-MinimizeBtn.Position = UDim2.new(1, -51, 0, 3)
+MinimizeBtn.Size = UDim2.fromOffset(20, 20)
+MinimizeBtn.Position = UDim2.new(1, -55, 0, 6)
 MinimizeBtn.BackgroundTransparency = 0
 MinimizeBtn.BackgroundColor3 = Color3.fromRGB(43, 44, 48)
 MinimizeBtn.AutoButtonColor = true
 Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 5)
 
 local CloseBtn = makeTitleButton("×", -25, Color3.fromRGB(235, 115, 115))
-CloseBtn.Size = UDim2.fromOffset(22, 25)
+CloseBtn.Size = UDim2.fromOffset(24, 24)
+CloseBtn.Position = UDim2.new(1, -29, 0, 4)
 
 local TabBar = Instance.new("Frame")
-TabBar.Position = UDim2.fromOffset(0, 25)
-TabBar.Size = UDim2.new(1, 0, 0, 22)
-TabBar.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+TabBar.Position = UDim2.fromOffset(8, 65)
+TabBar.Size = UDim2.new(1, -16, 0, 22)
+TabBar.BackgroundTransparency = 1
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainWindow
 
 local ContentArea = Instance.new("Frame")
-ContentArea.Position = UDim2.fromOffset(8, 52)
-ContentArea.Size = UDim2.new(1, -16, 1, -60)
-ContentArea.BackgroundTransparency = 1
+ContentArea.Position = UDim2.fromOffset(8, 91)
+ContentArea.Size = UDim2.new(1, -16, 1, -100)
+ContentArea.BackgroundColor3 = Color3.fromRGB(27, 30, 40)
+ContentArea.BorderSizePixel = 0
 ContentArea.Parent = MainWindow
+Instance.new("UICorner", ContentArea).CornerRadius = UDim.new(0, 6)
+
+StatusExpand.MouseButton1Click:Connect(function()
+    statusDetailsExpanded = not statusDetailsExpanded
+    StatusDetails.Visible = statusDetailsExpanded
+    StatusExpand.Text = statusDetailsExpanded and "▲" or "▼"
+    TabBar.Position = UDim2.fromOffset(8, statusDetailsExpanded and 128 or 65)
+    ContentArea.Position = UDim2.fromOffset(8, statusDetailsExpanded and 154 or 91)
+    ContentArea.Size = UDim2.new(1, -16, 1, statusDetailsExpanded and -163 or -100)
+end)
 
 local tabs = {"Overview", "Explorer", "Runtime", "Data"}
 local panels, tabButtons, tabIndicators = {}, {}, {}
@@ -192,7 +264,8 @@ for i, tabName in ipairs(tabs) do
 
     local panel = Instance.new("ScrollingFrame")
     panel.Name = tabName .. "Panel"
-    panel.Size = UDim2.fromScale(1, 1)
+    panel.Size = UDim2.new(1, -12, 1, -12)
+    panel.Position = UDim2.fromOffset(6, 6)
     panel.BackgroundTransparency = 1
     panel.BorderSizePixel = 0
     panel.ScrollBarThickness = 4
@@ -256,27 +329,83 @@ local function makeLabel(parent, text, height, size, color)
     return label
 end
 
--- Compact overview summary, following the supplied simple text-based layout.
+-- Overview uses the reference layout: heading, hint, and compact stat tiles.
 local overviewPanel = panels.Overview
-local overviewText = Instance.new("TextLabel")
-overviewText.Name = "OverviewSummary"
-overviewText.Size = UDim2.new(1, -8, 0, 116)
-overviewText.Position = UDim2.fromOffset(0, 0)
-overviewText.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-overviewText.BorderSizePixel = 0
-overviewText.TextColor3 = Color3.fromRGB(220, 224, 233)
-overviewText.TextSize = 9
-overviewText.Font = Enum.Font.Code
-overviewText.TextXAlignment = Enum.TextXAlignment.Left
-overviewText.TextYAlignment = Enum.TextYAlignment.Top
-overviewText.TextWrapped = true
-overviewText.Text = "Status: Preparing scan...\n\nNodes: 0\nRemotes: 0\nValues: 0\nTools: 0\nHumanoid Models: 0"
-overviewText.Parent = overviewPanel
-Instance.new("UICorner", overviewText).CornerRadius = UDim.new(0, 6)
-local overviewPadding = Instance.new("UIPadding")
-overviewPadding.PaddingLeft = UDim.new(0, 9)
-overviewPadding.PaddingTop = UDim.new(0, 7)
-overviewPadding.Parent = overviewText
+local overviewTitle = Instance.new("TextLabel")
+overviewTitle.Name = "OverviewTitle"
+overviewTitle.Size = UDim2.new(1, 0, 0, 24)
+overviewTitle.BackgroundTransparency = 1
+overviewTitle.Text = "Scan Overview"
+overviewTitle.TextColor3 = Color3.fromRGB(240, 243, 250)
+overviewTitle.TextSize = 13
+overviewTitle.Font = Enum.Font.GothamBold
+overviewTitle.TextXAlignment = Enum.TextXAlignment.Left
+overviewTitle.Parent = overviewPanel
+
+local overviewHint = Instance.new("TextLabel")
+overviewHint.Name = "OverviewHint"
+overviewHint.Position = UDim2.fromOffset(0, 24)
+overviewHint.Size = UDim2.new(1, 0, 0, 20)
+overviewHint.BackgroundTransparency = 1
+overviewHint.Text = "Client-visible data collected during the scan."
+overviewHint.TextColor3 = Color3.fromRGB(155, 162, 178)
+overviewHint.TextSize = 10
+overviewHint.Font = Enum.Font.GothamMedium
+overviewHint.TextXAlignment = Enum.TextXAlignment.Left
+overviewHint.Parent = overviewPanel
+
+local statContainer = Instance.new("Frame")
+statContainer.Name = "StatContainer"
+statContainer.Position = UDim2.fromOffset(0, 50)
+statContainer.Size = UDim2.new(1, 0, 0, 117)
+statContainer.BackgroundTransparency = 1
+statContainer.Parent = overviewPanel
+
+local statLayout = Instance.new("UIGridLayout")
+statLayout.CellSize = UDim2.new(0.5, -4, 0, 35)
+statLayout.CellPadding = UDim2.fromOffset(8, 6)
+statLayout.SortOrder = Enum.SortOrder.LayoutOrder
+statLayout.Parent = statContainer
+
+local overviewStatLabels = {}
+local function createOverviewStat(name, order)
+    local tile = Instance.new("Frame")
+    tile.Name = name:gsub("%s+", "") .. "Stat"
+    tile.BackgroundColor3 = Color3.fromRGB(32, 35, 46)
+    tile.BorderSizePixel = 0
+    tile.LayoutOrder = order
+    tile.Parent = statContainer
+    Instance.new("UICorner", tile).CornerRadius = UDim.new(0, 5)
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -16, 0, 13)
+    label.Position = UDim2.fromOffset(8, 2)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(155, 162, 178)
+    label.TextSize = 9
+    label.Font = Enum.Font.GothamMedium
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = tile
+
+    local value = Instance.new("TextLabel")
+    value.Size = UDim2.new(1, -16, 0, 17)
+    value.Position = UDim2.fromOffset(8, 15)
+    value.BackgroundTransparency = 1
+    value.Text = "0"
+    value.TextColor3 = Color3.fromRGB(240, 243, 250)
+    value.TextSize = 12
+    value.Font = Enum.Font.GothamBold
+    value.TextXAlignment = Enum.TextXAlignment.Left
+    value.Parent = tile
+    overviewStatLabels[name] = value
+end
+
+createOverviewStat("Objects", 1)
+createOverviewStat("Remotes", 2)
+createOverviewStat("Values", 3)
+createOverviewStat("Tools", 4)
+createOverviewStat("Humanoid Models", 5)
 
 local explorerPanel = panels.Explorer
 local runtimePanel = panels.Runtime
@@ -436,12 +565,20 @@ end
 
 local function updateStatus(status, containerName)
     if not State.alive then return end
-    Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [" .. status .. "]"
+    Title.Text = "AetheriusCore v" .. SCRIPT_VERSION
+    StatusText.Text = "● " .. string.upper(tostring(status)) .. "  •  " .. tostring(containerName or "CLIENT SCAN")
+    StatusText.TextColor3 = (string.find(string.upper(tostring(status)), "ERROR", 1, true) and Color3.fromRGB(235, 85, 85))
+        or (string.find(string.upper(tostring(status)), "PAUS", 1, true) and Color3.fromRGB(245, 180, 70))
+        or Color3.fromRGB(70, 205, 125)
+    StatusDetailText.Text = "Scan scope: Workspace + ReplicatedStorage\nRemote observer: "
+        .. (State.hookInstalled and "Active (passive)" or "Unavailable / initializing")
+        .. "\nLive updates: Enabled"
 
-    overviewText.Text = string.format(
-        "Status: %s\nContainer: %s\n\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d",
-        status, tostring(containerName or "-"), stats.nodes, stats.remotes, stats.values, stats.tools, stats.models
-    )
+    overviewStatLabels.Objects.Text = tostring(stats.nodes)
+    overviewStatLabels.Remotes.Text = tostring(stats.remotes)
+    overviewStatLabels.Values.Text = tostring(stats.values)
+    overviewStatLabels.Tools.Text = tostring(stats.tools)
+    overviewStatLabels["Humanoid Models"].Text = tostring(stats.models)
 end
 
 local function exportData()
@@ -644,6 +781,8 @@ track(MinimizeBtn.MouseButton1Click:Connect(function()
         -- Collapse the full panel into a compact floating square button.
         ContentArea.Visible = false
         TabBar.Visible = false
+        StatusHeader.Visible = false
+        StatusDetails.Visible = false
         Title.Visible = false
         CloseBtn.Visible = false
         headerAccent.Visible = false
@@ -655,16 +794,21 @@ track(MinimizeBtn.MouseButton1Click:Connect(function()
         MinimizeBtn.Text = "+"
     else
         -- Restore the original panel layout and controls.
-        MainWindow.Size = UDim2.fromOffset(300, 230)
-        TitleBar.Size = UDim2.new(1, 0, 0, 25)
+        MainWindow.Size = UDim2.fromOffset(345, 293)
+        TitleBar.Size = UDim2.new(1, 0, 0, 32)
         ContentArea.Visible = true
         TabBar.Visible = true
+        StatusHeader.Visible = true
+        StatusDetails.Visible = statusDetailsExpanded
+        TabBar.Position = UDim2.fromOffset(8, statusDetailsExpanded and 128 or 65)
+        ContentArea.Position = UDim2.fromOffset(8, statusDetailsExpanded and 154 or 91)
+        ContentArea.Size = UDim2.new(1, -16, 1, statusDetailsExpanded and -163 or -100)
         Title.Visible = true
         CloseBtn.Visible = true
         headerAccent.Visible = true
 
-        MinimizeBtn.Size = UDim2.fromOffset(18, 18)
-        MinimizeBtn.Position = UDim2.new(1, -51, 0, 3)
+        MinimizeBtn.Size = UDim2.fromOffset(20, 20)
+        MinimizeBtn.Position = UDim2.new(1, -55, 0, 6)
         MinimizeBtn.Text = "−"
     end
 end))
