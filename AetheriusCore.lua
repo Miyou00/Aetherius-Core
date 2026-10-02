@@ -2109,9 +2109,17 @@ end
 
 -- Data changes reuse the existing queued structural refresh, which updates
 -- the record and rebuilds dependent classification/relationship summaries.
+local DataWatcherDiagnosticPrinted = false
+
 local function WatchInstanceData(instance)
 	if not instance or DataWatchConnections[instance] then
 		return
+	end
+
+	local showWatcherDiagnostics = not DataWatcherDiagnosticPrinted
+	if showWatcherDiagnostics then
+		DataWatcherDiagnosticPrinted = true
+		print("[AetheriusCore diagnostic] DATA WATCHER ENTERED / " .. tostring(instance.ClassName))
 	end
 
 	local connections = {}
@@ -2133,6 +2141,11 @@ local function WatchInstanceData(instance)
 	end)
 	if success and attributeConnection then
 		table.insert(connections, attributeConnection)
+	elseif not success then
+		warn("[AetheriusCore diagnostic] Attribute listener error: " .. tostring(attributeConnection))
+	end
+	if showWatcherDiagnostics then
+		print("[AetheriusCore diagnostic] ATTRIBUTE LISTENER CHECK COMPLETE")
 	end
 
 	if instance:IsA("ValueBase") then
@@ -2141,7 +2154,12 @@ local function WatchInstanceData(instance)
 		end)
 		if valueSuccess and valueConnection then
 			table.insert(connections, valueConnection)
+		elseif not valueSuccess then
+			warn("[AetheriusCore diagnostic] Value listener error: " .. tostring(valueConnection))
 		end
+	end
+	if showWatcherDiagnostics then
+		print("[AetheriusCore diagnostic] VALUE LISTENER CHECK COMPLETE")
 	end
 
 	-- Watch only relatively stable properties already captured by the record.
@@ -2169,10 +2187,18 @@ local function WatchInstanceData(instance)
 		end)
 		if propertySuccess and propertyConnection then
 			table.insert(connections, propertyConnection)
+		elseif not propertySuccess then
+			warn("[AetheriusCore diagnostic] Property listener error for "
+				.. tostring(instance.ClassName) .. "." .. tostring(propertyName)
+				.. ": " .. tostring(propertyConnection))
 		end
 	end
 
 	DataWatchConnections[instance] = connections
+	if showWatcherDiagnostics then
+		print("[AetheriusCore diagnostic] PROPERTY LISTENER CHECK COMPLETE / " .. tostring(#connections) .. " CONNECTIONS")
+		print("[AetheriusCore diagnostic] DATA WATCHER COMPLETE")
+	end
 end
 
 local function DisconnectInstanceData(instance)
