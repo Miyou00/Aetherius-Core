@@ -86,8 +86,8 @@ State.gui = ScreenGui
 
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.fromOffset(360, 310)
-MainWindow.Position = UDim2.new(0.5, -180, 0.5, -155)
+MainWindow.Size = UDim2.fromOffset(300, 230)
+MainWindow.Position = UDim2.new(0.5, -150, 0.5, -115)
 MainWindow.BackgroundColor3 = Color3.fromRGB(17, 20, 27)
 MainWindow.BorderSizePixel = 0
 MainWindow.Parent = ScreenGui
@@ -608,7 +608,7 @@ track(MinimizeBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     ContentArea.Visible = not minimized
     TabBar.Visible = not minimized
-    MainWindow.Size = minimized and UDim2.fromOffset(360, 34) or UDim2.fromOffset(360, 310)
+    MainWindow.Size = minimized and UDim2.fromOffset(300, 34) or UDim2.fromOffset(300, 230)
     MinimizeBtn.Text = minimized and "+" or "-"
 end))
 
