@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.0)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.2 Refined UI)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.0"
+local SCRIPT_VERSION = "0.11.2"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -86,34 +86,46 @@ State.gui = ScreenGui
 
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.fromOffset(300, 230)
-MainWindow.Position = UDim2.new(0.5, -150, 0.5, -115)
-MainWindow.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
+MainWindow.Size = UDim2.fromOffset(360, 310)
+MainWindow.Position = UDim2.new(0.5, -180, 0.5, -155)
+MainWindow.BackgroundColor3 = Color3.fromRGB(17, 20, 27)
 MainWindow.BorderSizePixel = 0
 MainWindow.Parent = ScreenGui
-Instance.new("UICorner", MainWindow).CornerRadius = UDim.new(0, 7)
+Instance.new("UICorner", MainWindow).CornerRadius = UDim.new(0, 12)
+local windowStroke = Instance.new("UIStroke")
+windowStroke.Color = Color3.fromRGB(55, 65, 82)
+windowStroke.Thickness = 1
+windowStroke.Transparency = 0.15
+windowStroke.Parent = MainWindow
 
 local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, 0, 0, 26)
-TitleBar.BackgroundColor3 = Color3.fromRGB(31, 34, 42)
+TitleBar.Size = UDim2.new(1, 0, 0, 34)
+TitleBar.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
 TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainWindow
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 7)
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
+local headerAccent = Instance.new("Frame")
+headerAccent.Size = UDim2.new(1, -20, 0, 2)
+headerAccent.Position = UDim2.new(0, 10, 1, -2)
+headerAccent.BackgroundColor3 = Color3.fromRGB(73, 139, 255)
+headerAccent.BorderSizePixel = 0
+headerAccent.Parent = TitleBar
+Instance.new("UICorner", headerAccent).CornerRadius = UDim.new(1, 0)
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -68, 1, 0)
-Title.Position = UDim2.fromOffset(8, 0)
+Title.Size = UDim2.new(1, -72, 1, 0)
+Title.Position = UDim2.fromOffset(12, 0)
 Title.BackgroundTransparency = 1
 Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [Starting]"
 Title.TextColor3 = Color3.fromRGB(235, 238, 245)
-Title.TextSize = 10
+Title.TextSize = 12
 Title.Font = Enum.Font.GothamBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TitleBar
 
 local function makeTitleButton(text, xOffset, color)
     local button = Instance.new("TextButton")
-    button.Size = UDim2.fromOffset(26, 26)
+    button.Size = UDim2.fromOffset(28, 30)
     button.Position = UDim2.new(1, xOffset, 0, 0)
     button.BackgroundTransparency = 1
     button.Text = text
@@ -124,53 +136,72 @@ local function makeTitleButton(text, xOffset, color)
     return button
 end
 
-local MinimizeBtn = makeTitleButton("-", -52, Color3.fromRGB(230, 205, 120))
-local CloseBtn = makeTitleButton("×", -26, Color3.fromRGB(235, 115, 115))
+local MinimizeBtn = makeTitleButton("−", -56, Color3.fromRGB(230, 205, 120))
+local CloseBtn = makeTitleButton("×", -28, Color3.fromRGB(235, 115, 115))
 
 local TabBar = Instance.new("Frame")
-TabBar.Position = UDim2.fromOffset(0, 26)
-TabBar.Size = UDim2.new(1, 0, 0, 25)
-TabBar.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
+TabBar.Position = UDim2.fromOffset(0, 34)
+TabBar.Size = UDim2.new(1, 0, 0, 30)
+TabBar.BackgroundColor3 = Color3.fromRGB(21, 25, 33)
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainWindow
 
 local ContentArea = Instance.new("Frame")
-ContentArea.Position = UDim2.fromOffset(7, 56)
-ContentArea.Size = UDim2.new(1, -14, 1, -63)
+ContentArea.Position = UDim2.fromOffset(10, 72)
+ContentArea.Size = UDim2.new(1, -20, 1, -82)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
 local tabs = {"Overview", "Explorer", "Runtime", "Data"}
-local panels, tabButtons = {}, {}
+local panels, tabButtons, tabIndicators = {}, {}, {}
 local activeTab = "Overview"
 
 for i, tabName in ipairs(tabs) do
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1 / #tabs, 0, 1, 0)
     btn.Position = UDim2.new((i - 1) / #tabs, 0, 0, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
-    btn.TextColor3 = Color3.fromRGB(175, 181, 194)
+    btn.BackgroundColor3 = Color3.fromRGB(21, 25, 33)
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    btn.TextColor3 = Color3.fromRGB(145, 156, 175)
     btn.Text = tabName
-    btn.TextSize = 9
-    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 11
+    btn.Font = Enum.Font.GothamSemibold
     btn.Parent = TabBar
     tabButtons[tabName] = btn
+
+    local indicator = Instance.new("Frame")
+    indicator.Name = "ActiveIndicator"
+    indicator.AnchorPoint = Vector2.new(0.5, 1)
+    indicator.Position = UDim2.new(0.5, 0, 1, 0)
+    indicator.Size = UDim2.new(0.58, 0, 0, 2)
+    indicator.BackgroundColor3 = Color3.fromRGB(91, 151, 255)
+    indicator.BorderSizePixel = 0
+    indicator.Visible = tabName == activeTab
+    indicator.Parent = btn
+    Instance.new("UICorner", indicator).CornerRadius = UDim.new(1, 0)
+    tabIndicators[tabName] = indicator
 
     local panel = Instance.new("ScrollingFrame")
     panel.Name = tabName .. "Panel"
     panel.Size = UDim2.fromScale(1, 1)
     panel.BackgroundTransparency = 1
     panel.BorderSizePixel = 0
-    panel.ScrollBarThickness = 3
+    panel.ScrollBarThickness = 4
     panel.CanvasSize = UDim2.new()
     panel.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    panel.ScrollBarImageColor3 = Color3.fromRGB(91, 111, 145)
     panel.Visible = tabName == activeTab
     panel.Parent = ContentArea
     local layout = Instance.new("UIListLayout")
     layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 3)
+    layout.Padding = UDim.new(0, 5)
     layout.Parent = panel
     panels[tabName] = panel
+    if tabName == activeTab then
+        btn.BackgroundColor3 = Color3.fromRGB(30, 36, 48)
+        btn.TextColor3 = Color3.fromRGB(242, 246, 255)
+    end
 
     track(btn.MouseButton1Click:Connect(function()
         if not State.alive then return end
@@ -178,23 +209,37 @@ for i, tabName in ipairs(tabs) do
         for name, p in pairs(panels) do
             p.Visible = name == activeTab
             tabButtons[name].BackgroundColor3 = name == activeTab
-                and Color3.fromRGB(48, 53, 66) or Color3.fromRGB(25, 27, 34)
+                and Color3.fromRGB(30, 36, 48) or Color3.fromRGB(21, 25, 33)
             tabButtons[name].TextColor3 = name == activeTab
-                and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(175, 181, 194)
+                and Color3.fromRGB(242, 246, 255) or Color3.fromRGB(145, 156, 175)
+            tabIndicators[name].Visible = name == activeTab
         end
     end))
 end
 
 local function makeLabel(parent, text, height, size, color)
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -6, 0, height)
-    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, -8, 0, height)
+    label.BackgroundColor3 = Color3.fromRGB(26, 31, 41)
+    label.BackgroundTransparency = 0
     label.TextColor3 = color or Color3.fromRGB(220, 224, 233)
-    label.TextSize = size or 9
-    label.Font = Enum.Font.Code
+    label.TextSize = size or 10
+    label.Font = Enum.Font.GothamMedium
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.TextYAlignment = Enum.TextYAlignment.Top
     label.TextWrapped = true
+    Instance.new("UICorner", label).CornerRadius = UDim.new(0, 7)
+    local labelPadding = Instance.new("UIPadding")
+    labelPadding.PaddingLeft = UDim.new(0, 9)
+    labelPadding.PaddingTop = UDim.new(0, 6)
+    labelPadding.PaddingRight = UDim.new(0, 7)
+    labelPadding.Parent = label
+    -- Keep a subtle inset border on information cards.
+    local labelStroke = Instance.new("UIStroke")
+    labelStroke.Color = Color3.fromRGB(43, 51, 65)
+    labelStroke.Transparency = 0.45
+    labelStroke.Thickness = 1
+    labelStroke.Parent = label
     label.Text = text
     label.Parent = parent
     return label
@@ -208,14 +253,20 @@ local dataPanel = panels.Data
 local runtimePaused = false
 local runtimeTextRows = {}
 local pauseBtn = Instance.new("TextButton")
-pauseBtn.Size = UDim2.new(1, -6, 0, 23)
-pauseBtn.BackgroundColor3 = Color3.fromRGB(39, 43, 54)
+pauseBtn.Size = UDim2.new(1, -8, 0, 31)
+pauseBtn.BackgroundColor3 = Color3.fromRGB(35, 44, 60)
 pauseBtn.TextColor3 = Color3.fromRGB(255, 210, 125)
 pauseBtn.Text = "Pause Log Stream"
-pauseBtn.TextSize = 9
+pauseBtn.TextSize = 11
 pauseBtn.Font = Enum.Font.GothamBold
 pauseBtn.LayoutOrder = 0
 pauseBtn.Parent = runtimePanel
+pauseBtn.AutoButtonColor = false
+Instance.new("UICorner", pauseBtn).CornerRadius = UDim.new(0, 7)
+local pauseStroke = Instance.new("UIStroke")
+pauseStroke.Color = Color3.fromRGB(62, 76, 98)
+pauseStroke.Transparency = 0.35
+pauseStroke.Parent = pauseBtn
 
 local function renderRuntime()
     for _, row in ipairs(runtimeTextRows) do
@@ -248,22 +299,34 @@ end))
 local dataText = makeLabel(dataPanel, "Scan data will appear here.", 75, 9)
 local exportText = makeLabel(dataPanel, "Export: waiting", 35, 9, Color3.fromRGB(180, 205, 220))
 local rescanBtn = Instance.new("TextButton")
-rescanBtn.Size = UDim2.new(1, -6, 0, 24)
-rescanBtn.BackgroundColor3 = Color3.fromRGB(42, 54, 72)
+rescanBtn.Size = UDim2.new(1, -8, 0, 31)
+rescanBtn.BackgroundColor3 = Color3.fromRGB(48, 91, 155)
 rescanBtn.TextColor3 = Color3.fromRGB(235, 240, 250)
 rescanBtn.Text = "Rescan"
-rescanBtn.TextSize = 9
+rescanBtn.TextSize = 11
 rescanBtn.Font = Enum.Font.GothamBold
 rescanBtn.Parent = dataPanel
+rescanBtn.AutoButtonColor = false
+Instance.new("UICorner", rescanBtn).CornerRadius = UDim.new(0, 7)
+local rescanStroke = Instance.new("UIStroke")
+rescanStroke.Color = Color3.fromRGB(86, 132, 201)
+rescanStroke.Transparency = 0.35
+rescanStroke.Parent = rescanBtn
 
 local clearBtn = Instance.new("TextButton")
-clearBtn.Size = UDim2.new(1, -6, 0, 24)
-clearBtn.BackgroundColor3 = Color3.fromRGB(55, 37, 39)
+clearBtn.Size = UDim2.new(1, -8, 0, 31)
+clearBtn.BackgroundColor3 = Color3.fromRGB(65, 39, 45)
 clearBtn.TextColor3 = Color3.fromRGB(255, 165, 165)
 clearBtn.Text = "Clear Runtime History"
-clearBtn.TextSize = 9
+clearBtn.TextSize = 11
 clearBtn.Font = Enum.Font.GothamBold
 clearBtn.Parent = dataPanel
+clearBtn.AutoButtonColor = false
+Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 7)
+local clearStroke = Instance.new("UIStroke")
+clearStroke.Color = Color3.fromRGB(117, 66, 75)
+clearStroke.Transparency = 0.4
+clearStroke.Parent = clearBtn
 
 track(clearBtn.MouseButton1Click:Connect(function()
     table.clear(State.runtimeHistory)
@@ -297,13 +360,13 @@ end
 local function addExplorerRow(instance, order)
     if #explorerRows >= MAX_EXPLORER_ROWS then return end
     local row = Instance.new("TextButton")
-    row.Size = UDim2.new(1, -6, 0, 23)
-    row.BackgroundColor3 = Color3.fromRGB(31, 34, 42)
+    row.Size = UDim2.new(1, -8, 0, 27)
+    row.BackgroundColor3 = Color3.fromRGB(27, 32, 42)
     row.BorderSizePixel = 0
     local isRemote = instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction")
     row.TextColor3 = isRemote and Color3.fromRGB(150, 195, 255)
         or Color3.fromRGB(215, 220, 230)
-    row.TextSize = 8
+    row.TextSize = 9
     row.Font = Enum.Font.Code
     row.TextXAlignment = Enum.TextXAlignment.Left
     row.TextTruncate = Enum.TextTruncate.AtEnd
@@ -312,6 +375,12 @@ local function addExplorerRow(instance, order)
         info ..= " = " .. tostring(instance.Value)
     end
     row.Text = info
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+    local rowStroke = Instance.new("UIStroke")
+    rowStroke.Color = Color3.fromRGB(46, 55, 70)
+    rowStroke.Transparency = 0.55
+    rowStroke.Thickness = 1
+    rowStroke.Parent = row
     row.LayoutOrder = order
     row.Parent = explorerPanel
     table.insert(explorerRows, row)
@@ -539,7 +608,7 @@ track(MinimizeBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     ContentArea.Visible = not minimized
     TabBar.Visible = not minimized
-    MainWindow.Size = minimized and UDim2.fromOffset(300, 26) or UDim2.fromOffset(300, 230)
+    MainWindow.Size = minimized and UDim2.fromOffset(360, 34) or UDim2.fromOffset(360, 310)
     MinimizeBtn.Text = minimized and "+" or "-"
 end))
 
