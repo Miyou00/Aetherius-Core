@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.6 Button UI Refinement)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.7 Live Analysis Refresh)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.6"
+local SCRIPT_VERSION = "0.11.7"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -545,6 +545,9 @@ local entryByInstance = setmetatable({}, {__mode = "k"})
 local instanceByRecord = setmetatable({}, {__mode = "k"})
 local rowByInstance = setmetatable({}, {__mode = "k"})
 local humanoidModelCounted = setmetatable({}, {__mode = "k"})
+local nameChangeConnections = setmetatable({}, {__mode = "k"})
+local scheduleRelationshipRefresh
+local queueLiveUiRefresh
 local scanStarted = 0
 
 local function clearExplorer()
@@ -753,6 +756,25 @@ local function processInstance(instance)
         instanceByRecord[record] = instance
         table.insert(State.scanEntries, record)
         addExplorerRow(instance, #State.scanEntries, record.Category)
+        if not nameChangeConnections[instance] then
+            nameChangeConnections[instance] = instance:GetPropertyChangedSignal("Name"):Connect(function()
+                if not State.alive or not entryByInstance[instance] then return end
+                local current = entryByInstance[instance]
+                current.Name = instance.Name
+                current.Path = fullPath(instance)
+                current.Family = familyName(instance)
+                current.ParentPath = instance.Parent and fullPath(instance.Parent) or ""
+                local row = rowByInstance[instance]
+                if row and row.Parent then
+                    local relevanceText = string.format(" R:%d", current.RelevanceScore or 0)
+                    row.Text = string.format("  [%s%s] %s", current.Category or instance.ClassName, relevanceText, current.Path)
+                end
+                if State.scanComplete and scheduleRelationshipRefresh then
+                    scheduleRelationshipRefresh()
+                end
+                queueLiveUiRefresh()
+            end)
+        end
     end
 
     return true
@@ -788,6 +810,25 @@ local function updateHumanoidModel(model)
             instanceByRecord[record] = model
             table.insert(State.scanEntries, record)
             addExplorerRow(model, #State.scanEntries, record.Category)
+            if not nameChangeConnections[model] then
+                nameChangeConnections[model] = model:GetPropertyChangedSignal("Name"):Connect(function()
+                    if not State.alive or not entryByInstance[model] then return end
+                    local current = entryByInstance[model]
+                    current.Name = model.Name
+                    current.Path = fullPath(model)
+                    current.Family = familyName(model)
+                    current.ParentPath = model.Parent and fullPath(model.Parent) or ""
+                    local row = rowByInstance[model]
+                    if row and row.Parent then
+                        row.Text = string.format("  [%s R:%d] %s", current.Category or model.ClassName,
+                            current.RelevanceScore or 0, current.Path)
+                    end
+                    if State.scanComplete and scheduleRelationshipRefresh then
+                        scheduleRelationshipRefresh()
+                    end
+                    queueLiveUiRefresh()
+                end)
+            end
         end
     elseif not hasHumanoid and wasCounted then
         humanoidModelCounted[model] = nil
@@ -825,6 +866,11 @@ local function unprocessInstance(instance)
         stats.models = math.max(0, stats.models - 1)
     end
 
+    local nameConnection = nameChangeConnections[instance]
+    if nameConnection then
+        pcall(function() nameConnection:Disconnect() end)
+        nameChangeConnections[instance] = nil
+    end
     removeExplorerEntry(instance)
     return true
 end
@@ -930,6 +976,42 @@ local function analyzeRelationships(generation)
     return true
 end
 
+-- Coalesce bursts of live changes into one asynchronous relationship refresh.
+-- A pending request is remembered if changes arrive while a refresh is running.
+local relationshipRefreshRunning = false
+local relationshipRefreshRequested = false
+scheduleRelationshipRefresh = function()
+    if not State.alive or not State.scanComplete then return end
+    relationshipRefreshRequested = true
+    if relationshipRefreshRunning then return end
+    relationshipRefreshRunning = true
+    task.spawn(function()
+        while State.alive and relationshipRefreshRequested do
+            relationshipRefreshRequested = false
+            local generation = State.scanGeneration
+            local ok, result = pcall(analyzeRelationships, generation)
+            if not ok then
+                relationshipRefreshRequested = false
+                logRuntime("Relationship refresh failed: " .. tostring(result))
+                break
+            end
+            if not result or generation ~= State.scanGeneration then break end
+            if State.scanComplete then
+                dataText.Text = string.format(
+                    "Live analysis refreshed\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified records: %d\nRelationships: %d / %d",
+                    stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
+                    #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS
+                )
+                exportText.Text = "Live analysis refreshed; export to save current data."
+            end
+        end
+        relationshipRefreshRunning = false
+        if State.alive and relationshipRefreshRequested then
+            scheduleRelationshipRefresh()
+        end
+    end)
+end
+
 local function scan()
     if not State.alive then return end
     State.scanGeneration += 1
@@ -940,6 +1022,10 @@ local function scan()
     table.clear(entryByInstance)
     table.clear(instanceByRecord)
     table.clear(humanoidModelCounted)
+    for instance, connection in pairs(nameChangeConnections) do
+        pcall(function() connection:Disconnect() end)
+        nameChangeConnections[instance] = nil
+    end
     table.clear(State.analysisRecords)
     table.clear(State.relationshipEdges)
     State.scanEntries = {}
@@ -1033,7 +1119,7 @@ end
 -- Live descendant updates are deduplicated against the initial scan snapshot.
 -- UI refreshes are coalesced to avoid redrawing for every instance in a burst.
 local liveUiRefreshQueued = false
-local function queueLiveUiRefresh()
+queueLiveUiRefresh = function()
     if liveUiRefreshQueued then return end
     liveUiRefreshQueued = true
     task.delay(0.1, function()
@@ -1061,6 +1147,9 @@ local function onDescendantAdded(instance, containerName)
             logRuntime("[" .. containerName .. " +] " .. instance.Name .. " (" .. instance.ClassName .. ")")
         end
         refreshHumanoidAncestors(instance)
+        if State.scanComplete and scheduleRelationshipRefresh then
+            scheduleRelationshipRefresh()
+        end
         queueLiveUiRefresh()
     end
 end
@@ -1084,6 +1173,9 @@ local function onDescendantRemoving(instance, containerName)
             if not State.alive then return end
             for _, model in ipairs(affectedModels) do
                 updateHumanoidModel(model)
+            end
+            if State.scanComplete and scheduleRelationshipRefresh then
+                scheduleRelationshipRefresh()
             end
             queueLiveUiRefresh()
         end)
@@ -1197,6 +1289,10 @@ track(CloseBtn.MouseButton1Click:Connect(function()
     State.alive = false
     State.scanGeneration += 1 -- invalidate an in-progress scan
     safeDisconnectAll()
+    for instance, connection in pairs(nameChangeConnections) do
+        pcall(function() connection:Disconnect() end)
+        nameChangeConnections[instance] = nil
+    end
     pcall(function() ScreenGui:Destroy() end)
     if env.AetheriusCoreState == State then env.AetheriusCoreState = nil end
 end))
