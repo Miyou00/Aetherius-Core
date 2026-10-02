@@ -613,10 +613,34 @@ end))
 local minimized = false
 track(MinimizeBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
-    ContentArea.Visible = not minimized
-    TabBar.Visible = not minimized
-    MainWindow.Size = minimized and UDim2.fromOffset(300, 34) or UDim2.fromOffset(300, 230)
-    MinimizeBtn.Text = minimized and "+" or "-"
+
+    if minimized then
+        -- Collapse the full panel into a compact floating square button.
+        ContentArea.Visible = false
+        TabBar.Visible = false
+        Title.Visible = false
+        CloseBtn.Visible = false
+        headerAccent.Visible = false
+
+        MainWindow.Size = UDim2.fromOffset(36, 36)
+        TitleBar.Size = UDim2.fromOffset(36, 36)
+        MinimizeBtn.Size = UDim2.fromOffset(24, 24)
+        MinimizeBtn.Position = UDim2.fromOffset(6, 6)
+        MinimizeBtn.Text = "+"
+    else
+        -- Restore the original panel layout and controls.
+        MainWindow.Size = UDim2.fromOffset(300, 230)
+        TitleBar.Size = UDim2.new(1, 0, 0, 34)
+        ContentArea.Visible = true
+        TabBar.Visible = true
+        Title.Visible = true
+        CloseBtn.Visible = true
+        headerAccent.Visible = true
+
+        MinimizeBtn.Size = UDim2.fromOffset(20, 20)
+        MinimizeBtn.Position = UDim2.new(1, -54, 0, 7)
+        MinimizeBtn.Text = "−"
+    end
 end))
 
 track(CloseBtn.MouseButton1Click:Connect(function()
