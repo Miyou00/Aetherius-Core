@@ -352,6 +352,23 @@ local IntelligenceSummary = {
     MostConnected = nil
 }
 
+-- Coalesce live-event Intelligence UI refreshes into one deferred update.
+-- This is stored on the existing table to avoid another top-level local.
+IntelligenceSummary.UIUpdateScheduled = false
+IntelligenceSummary.ScheduleUIUpdate = function()
+    if IntelligenceSummary.UIUpdateScheduled then
+        return
+    end
+
+    IntelligenceSummary.UIUpdateScheduled = true
+    task.defer(function()
+        IntelligenceSummary.UIUpdateScheduled = false
+        if UpdateIntelligenceUI then
+            UpdateIntelligenceUI()
+        end
+    end)
+end
+
 local ClassificationCounts = {
 	Character = 0,
 	NPC = 0,
@@ -2008,9 +2025,54 @@ local function UpdateCounters()
 end
 
 --------------------------------------------------
+-- STRUCTURAL CHANGE QUEUE HELPERS
+--------------------------------------------------
+
+local function HasQueuedStructuralAncestor(instance, queuedChanges)
+	if not instance then
+		return false
+	end
+
+	local queue = queuedChanges or StructuralChangeQueue
+	local current = instance.Parent
+	-- Most duplicate events are caused by an immediately queued parent. Check
+	-- it first, then continue walking only when the direct parent is not queued.
+	if current and current ~= workspace and queue[current] then
+		return true
+	end
+	current = current and current.Parent
+	while current and current ~= workspace do
+		if queue[current] then
+			return true
+		end
+		current = current.Parent
+	end
+	return false
+end
+
+-- Store this helper on the existing summary table to avoid another top-level
+-- local (the script is close to Luau's local-register limit).
+IntelligenceSummary.QueueStructuralChange = function(instance)
+	if not instance or HasQueuedStructuralAncestor(instance) then
+		return false
+	end
+
+	for queuedInstance in pairs(StructuralChangeQueue) do
+		if queuedInstance ~= instance and queuedInstance
+			and queuedInstance:IsDescendantOf(instance) then
+			StructuralChangeQueue[queuedInstance] = nil
+		end
+	end
+
+	StructuralChangeQueue[instance] = true
+	return true
+end
+
+--------------------------------------------------
 -- LIVE NAME CHANGE WATCHER
 --------------------------------------------------
 
+-- HasQueuedStructuralAncestor is defined above, so its local binding is in scope here.
 local function WatchInstanceName(instance)
 	if not instance or NameWatchConnections[instance] then
 		return
@@ -2027,10 +2089,8 @@ local function WatchInstanceName(instance)
 			return
 		end
 
-		-- A queued ancestor refresh already covers this instance's subtree.
-		if not HasQueuedStructuralAncestor(instance) then
-			StructuralChangeQueue[instance] = true
-		end
+		-- Queue once; a higher queued ancestor covers this subtree.
+		IntelligenceSummary.QueueStructuralChange(instance)
 		StructuralChangeDetected = true
 		if ScheduleStructuralAnalysisRefresh then
 			ScheduleStructuralAnalysisRefresh()
@@ -4299,28 +4359,6 @@ local function RemoveScannedSubtree(root)
 	return true
 end
 
-local function HasQueuedStructuralAncestor(instance, queuedChanges)
-	if not instance then
-		return false
-	end
-
-	local queue = queuedChanges or StructuralChangeQueue
-	local current = instance.Parent
-	-- Most duplicate events are caused by an immediately queued parent. Check
-	-- it first, then continue walking only when the direct parent is not queued.
-	if current and current ~= workspace and queue[current] then
-		return true
-	end
-	current = current and current.Parent
-	while current and current ~= workspace do
-		if queue[current] then
-			return true
-		end
-		current = current.Parent
-	end
-	return false
-end
-
 ScheduleStructuralAnalysisRefresh = function()
 	if ScanRunning then
 		StructuralRefreshPending = true
@@ -4458,15 +4496,7 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		end
 
 		IntelligenceSummary.Status = "UPDATING"
-        if not IntelligenceSummary.UIUpdateScheduled then
-            IntelligenceSummary.UIUpdateScheduled = true
-            task.defer(function()
-                IntelligenceSummary.UIUpdateScheduled = false
-                if UpdateIntelligenceUI then
-                    UpdateIntelligenceUI()
-                end
-            end)
-        end
+        IntelligenceSummary.ScheduleUIUpdate()
 		InvalidateHierarchyCaches(instance)
 
 		-- Adding a Humanoid can change the classification of the existing
@@ -4475,10 +4505,8 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		if instance:IsA("Humanoid") then
 			local humanoidModel = instance:FindFirstAncestorOfClass("Model")
 			if humanoidModel and ScannedInstances[humanoidModel] then
-				-- Avoid queueing a model already covered by a higher ancestor.
-				if not HasQueuedStructuralAncestor(humanoidModel) then
-					StructuralChangeQueue[humanoidModel] = true
-				end
+				-- The model refresh also covers its scanned descendants.
+				IntelligenceSummary.QueueStructuralChange(humanoidModel)
 				StructuralChangeDetected = true
 			end
 		end
@@ -4491,9 +4519,7 @@ GlobalConnections.DescendantAdded = workspace.DescendantAdded:Connect(function(i
 		-- An already-scanned instance being added again means its hierarchy may
 		-- have changed. Refresh it instead of silently ignoring the event.
 		if ScannedInstances[instance] then
-			if not HasQueuedStructuralAncestor(instance) then
-				StructuralChangeQueue[instance] = true
-			end
+			IntelligenceSummary.QueueStructuralChange(instance)
 			StructuralChangeDetected = true
 			ScheduleStructuralAnalysisRefresh()
 			return
@@ -4568,21 +4594,11 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 	local removed = RemoveScannedSubtree(instance)
 	if removed then
 		IntelligenceSummary.Status = "UPDATING"
-        if not IntelligenceSummary.UIUpdateScheduled then
-            IntelligenceSummary.UIUpdateScheduled = true
-            task.defer(function()
-                IntelligenceSummary.UIUpdateScheduled = false
-                if UpdateIntelligenceUI then
-                    UpdateIntelligenceUI()
-                end
-            end)
-        end
+        IntelligenceSummary.ScheduleUIUpdate()
 	end
 	PendingInstances[instance] = nil
 	PendingClassification[instance] = nil
-	if not HasQueuedStructuralAncestor(instance) then
-		StructuralChangeQueue[instance] = true
-	end
+	IntelligenceSummary.QueueStructuralChange(instance)
 	StructuralChangeDetected = StructuralChangeDetected or removed
 	if removed and not ScanRunning then
 		StructuralRefreshPending = true
