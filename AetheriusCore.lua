@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.3 Relationship Progress Stability)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.4 Scan Integrity and Lifecycle Fixes)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.3"
+local SCRIPT_VERSION = "0.12.4"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -42,7 +42,7 @@ local State = {
     scanGeneration = 0,
     runtimePaused = false,
     runtimeHistory = {},
-    hookInstalled = false,
+    hookInstalled = env.AetheriusCoreHookInstalled == true,
     analysisRecords = {},
     relationshipEdges = {},
     scanComplete = false,
@@ -51,6 +51,7 @@ local State = {
     previousScanSummary = nil, -- Only the last completed scan is retained for comparison.
 }
 env.AetheriusCoreState = State
+env.AetheriusCoreHookState = State -- Shared dispatcher target for the one persistent wrapper.
 
 local function track(connection)
     table.insert(State.connections, connection)
@@ -85,11 +86,6 @@ local function styleButton(button, getBaseColor, hoverColor, pressedColor)
     button.MouseButton1Up:Connect(function()
         setColor(hoverColor)
     end)
-end
-
-local function safeCall(fn, ...)
-    if type(fn) ~= "function" then return false, "API unavailable" end
-    return pcall(fn, ...)
 end
 
 -- Executor-specific UI parent selection.
@@ -455,7 +451,6 @@ local explorerPanel = panels.Explorer
 local runtimePanel = panels.Runtime
 local dataPanel = panels.Data
 
-local runtimePaused = false
 local runtimeTextRows = {}
 local pauseBtn = Instance.new("TextButton")
 pauseBtn.Size = UDim2.new(1, -8, 0, 31)
@@ -493,6 +488,9 @@ local function logRuntime(message)
         table.remove(State.runtimeHistory)
     end
     renderRuntime() -- Keep the Runtime tab populated even when it is not active.
+end
+State.remoteLog = function(message)
+    if State.alive then logRuntime(message) end
 end
 
 track(pauseBtn.MouseButton1Click:Connect(function()
@@ -605,10 +603,12 @@ local function addExplorerRow(instance, order, category)
     rowStroke.Parent = row
     row.LayoutOrder = order
     row.Parent = explorerPanel
-    styleButton(row, function() return Color3.fromRGB(32, 35, 46) end,
-        Color3.fromRGB(43, 49, 64), Color3.fromRGB(36, 42, 56))
+    -- Register the row before styling/connections so a later processing error
+    -- can find and remove this partially-created UI element during rollback.
     table.insert(explorerRows, row)
     rowByInstance[instance] = row
+    styleButton(row, function() return Color3.fromRGB(32, 35, 46) end,
+        Color3.fromRGB(43, 49, 64), Color3.fromRGB(36, 42, 56))
     track(row.MouseButton1Click:Connect(function()
         if not State.alive then return end
         if type(setclipboard) == "function" then
@@ -757,7 +757,7 @@ local function relevanceLabel(score)
     return "Low"
 end
 
-local function processInstance(instance)
+local function processInstanceUnsafe(instance)
     if not State.alive or not inScanScope(instance) or seenInstances[instance] then
         return false
     end
@@ -824,6 +824,47 @@ local function processInstance(instance)
     end
 
     return true
+end
+
+-- Keep processing failures from poisoning the live snapshot. The unsafe worker
+-- may have marked/count-added an instance before a later UI/connection step fails;
+-- restore its counters and remove any partial record/row/listeners before retry.
+local function processInstance(instance)
+    local before = {
+        nodes = stats.nodes,
+        remotes = stats.remotes,
+        values = stats.values,
+        tools = stats.tools,
+        models = stats.models,
+    }
+    local ok, result = pcall(processInstanceUnsafe, instance)
+    if ok then return result end
+
+    stats.nodes = before.nodes
+    stats.remotes = before.remotes
+    stats.values = before.values
+    stats.tools = before.tools
+    stats.models = before.models
+    seenInstances[instance] = nil
+    humanoidModelCounted[instance] = nil
+
+    local record = entryByInstance[instance] or State.analysisRecords[instance]
+    if record then
+        entryByInstance[instance] = nil
+        instanceByRecord[record] = nil
+        State.analysisRecords[instance] = nil
+        for i = #State.scanEntries, 1, -1 do
+            if State.scanEntries[i] == record then table.remove(State.scanEntries, i) end
+        end
+    end
+    pcall(removeExplorerEntry, instance)
+    for _, connectionMap in ipairs({nameChangeConnections, valueChangeConnections}) do
+        local connection = connectionMap[instance]
+        if connection then pcall(function() connection:Disconnect() end) end
+        connectionMap[instance] = nil
+    end
+    logRuntime("Instance processing rolled back: " .. tostring(result))
+    return false, result
 end
 
 local function updateHumanoidModel(model)
@@ -948,11 +989,6 @@ local function exportData()
             Relationships = State.relationshipEdges,
             Entries = {},
         }
-        for _, instance in ipairs(explorerRows) do
-            if instance and instance.Parent then
-                -- UI rows are not game instances; detailed records are stored separately below.
-            end
-        end
         for _, item in ipairs(State.scanEntries or {}) do
             table.insert(payload.Entries, item)
         end
@@ -990,8 +1026,8 @@ local function analyzeRelationships(generation, progressLabel)
                     local recordState = nextRecordState[record]
                     if parentState and recordState then
                         recordState.NearestRelevantAncestor = parentRecord.Path or ""
+                        parentState.ChildCount += 1
                         if #nextEdges < MAX_RELATIONSHIPS then
-                            parentState.ChildCount += 1
                             table.insert(nextEdges, {
                                 Parent = parentRecord.Path or "",
                                 Child = record.Path or "",
@@ -1082,8 +1118,9 @@ scheduleRelationshipRefresh = function()
                     stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
                     #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS
                 )
-                exportText.Text = "Live analysis refreshed; export to save current data."
-                logRuntime("Relationship refresh complete: " .. tostring(#State.relationshipEdges) .. " edges")
+                exportText.Text = "Live analysis refreshed; updating export..."
+                exportData()
+                logRuntime("Relationship refresh complete and export updated: " .. tostring(#State.relationshipEdges) .. " edges")
             end
             -- If changes arrived during this pass, allow a visible completion gap
             -- before rebuilding again. This avoids back-to-back progress resets.
@@ -1142,26 +1179,50 @@ local function scan()
             updateStatus("Scanning", containerName)
             local containerStarted = os.clock()
 
-            local ok, descendants = pcall(function() return container:GetDescendants() end)
+            -- Walk depth-first through immediate-child snapshots. This avoids
+            -- allocating one array containing every descendant in a large container.
+            local ok, rootChildren = pcall(function() return container:GetChildren() end)
             if not ok then
-                logRuntime("Could not read " .. containerName .. ": " .. tostring(descendants))
+                logRuntime("Could not read " .. containerName .. ": " .. tostring(rootChildren))
+                State.scanErrors += 1
                 continue
             end
 
-            for index, instance in ipairs(descendants) do
+            local stack = {{children = rootChildren, index = #rootChildren}}
+            local processedCount = 0
+            while #stack > 0 do
                 if not State.alive or generation ~= State.scanGeneration then return end
-                State.scanMetrics.visited += 1
-                local processOk, processResult = pcall(processInstance, instance)
-                if not processOk then
-                    State.scanErrors += 1
-                    if State.scanErrors <= 10 then
-                        logRuntime("Instance processing failed: " .. tostring(processResult))
+                local frame = stack[#stack]
+                if frame.index <= 0 then
+                    stack[#stack] = nil
+                else
+                    local instance = frame.children[frame.index]
+                    frame.index -= 1
+                    if instance then
+                        State.scanMetrics.visited += 1
+                        processedCount += 1
+                        local processOk, processResult, processError = pcall(processInstance, instance)
+                        local processingFailed = not processOk or (processResult == false and processError ~= nil)
+                        if processingFailed then
+                            State.scanErrors += 1
+                            if State.scanErrors <= 10 then
+                                logRuntime("Instance processing failed: " .. tostring(processError or processResult))
+                            end
+                        end
+                        local childrenOk, children = pcall(function() return instance:GetChildren() end)
+                        if childrenOk and #children > 0 then
+                            table.insert(stack, {children = children, index = #children})
+                        elseif not childrenOk then
+                            State.scanErrors += 1
+                            if State.scanErrors <= 10 then
+                                logRuntime("Could not read children of " .. tostring(instance.Name) .. ": " .. tostring(children))
+                            end
+                        end
+                        if processedCount % SCAN_BATCH_SIZE == 0 then
+                            updateStatus("Scanning " .. tostring(State.scanMetrics.visited), containerName)
+                            task.wait(SCAN_YIELD_SECONDS)
+                        end
                     end
-                end
-
-                if index % SCAN_BATCH_SIZE == 0 then
-                    updateStatus("Scanning", containerName)
-                    task.wait(SCAN_YIELD_SECONDS)
                 end
             end
             local containerElapsed = os.clock() - containerStarted
@@ -1255,7 +1316,12 @@ track(rescanBtn.MouseButton1Click:Connect(scan))
 -- The hook is process-wide in executor environments and cannot be disconnected;
 -- the callback checks State.alive so a closed UI stops receiving log updates.
 local function installPassiveRemoteLogger()
-    if State.hookInstalled then return end
+    if env.AetheriusCoreHookInstalled then
+        State.hookInstalled = true
+        env.AetheriusCoreHookState = State
+        logRuntime("Reusing persistent passive remote logger")
+        return
+    end
     if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then
         logRuntime("Remote interception APIs unavailable; passive log disabled")
         return
@@ -1264,10 +1330,14 @@ local function installPassiveRemoteLogger()
     local ok, result = pcall(function()
         oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             local method = getnamecallmethod()
-            if State.alive and (method == "FireServer" or method == "InvokeServer") then
+            local activeState = env.AetheriusCoreHookState
+            if activeState and activeState.alive and (method == "FireServer" or method == "InvokeServer") then
                 local isInstance = typeof(self) == "Instance"
                 if isInstance and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
-                    logRuntime(method .. " -> " .. self:GetFullName())
+                    local remotePathOk, remotePath = pcall(function() return self:GetFullName() end)
+                    if remotePathOk and activeState.remoteLog then
+                        pcall(activeState.remoteLog, method .. " -> " .. remotePath)
+                    end
                 end
             end
             return oldNamecall(self, ...)
@@ -1275,6 +1345,8 @@ local function installPassiveRemoteLogger()
     end)
     if ok and type(oldNamecall) == "function" then
         State.hookInstalled = true
+        env.AetheriusCoreHookInstalled = true
+        env.AetheriusCoreHookState = State
         logRuntime("Passive remote-call logger installed")
     else
         logRuntime("Remote logger setup failed: " .. tostring(result))
@@ -1495,3 +1567,5 @@ print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
 -- completion. This reduces repeated progress resets under frequent live changes;
 -- scan limits, batch sizes, yielding, relationship rules, cleanup, and passive
 -- remote forwarding remain unchanged. Manual runtime testing is still required.
+
+-- v0.12.4: incremental child traversal, process rollback, uncapped child counts, live export, and shared hook dispatcher.
