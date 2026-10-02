@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.10.2 Progress Feedback)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.10.3 Compact Edition)
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
@@ -9,7 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
-print("[AetheriusCore]: Initializing Progress Feedback Suite...")
+print("[AetheriusCore]: Initializing Compact Suite...")
 
 -- 1. ROBUST UI CONTAINER SETUP
 local rootParent = CoreGui
@@ -31,27 +31,27 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = rootParent
 
--- 2. MAIN WINDOW UI LAYOUT (Draggable & Collapsible)
+-- 2. MAIN WINDOW UI LAYOUT (Compact Dimensions: 340x260)
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.new(0, 380, 0, 340)
-MainWindow.Position = UDim2.new(0.5, -190, 0.5, -170)
+MainWindow.Size = UDim2.new(0, 340, 0, 260)
+MainWindow.Position = UDim2.new(0.5, -170, 0.5, -130)
 MainWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 MainWindow.BorderSizePixel = 0
 MainWindow.Visible = true 
 MainWindow.Parent = ScreenGui
 
 local cornerMain = Instance.new("UICorner")
-cornerMain.CornerRadius = UDim.new(0, 10)
+cornerMain.CornerRadius = UDim.new(0, 8)
 cornerMain.Parent = MainWindow
 
--- Title Bar with Live Status Feedback
+-- Title Bar (Compact 24px height)
 local TitleBar = Instance.new("TextLabel")
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
+TitleBar.Size = UDim2.new(1, 0, 0, 24)
 TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = "  AetheriusCore v0.10.2 [Initializing...]"
-TitleBar.TextSize = 11
+TitleBar.Text = "  AetheriusCore v0.10.3 [Initializing...]"
+TitleBar.TextSize = 10
 TitleBar.Font = Enum.Font.GothamBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
 TitleBar.Parent = MainWindow
@@ -84,12 +84,12 @@ end)
 
 -- Close Button
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 30, 0, 30)
-CloseBtn.Position = UDim2.new(1, -30, 0, 0)
+CloseBtn.Size = UDim2.new(0, 24, 0, 24)
+CloseBtn.Position = UDim2.new(1, -24, 0, 0)
 CloseBtn.BackgroundTransparency = 1
 CloseBtn.TextColor3 = Color3.fromRGB(200, 80, 80)
 CloseBtn.Text = "X"
-CloseBtn.TextSize = 14
+CloseBtn.TextSize = 12
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.Parent = TitleBar
 
@@ -100,32 +100,32 @@ end)
 -- Minimize Button (-)
 local minimized = false
 local MinimizeBtn = Instance.new("TextButton")
-MinimizeBtn.Size = UDim2.new(0, 30, 0, 30)
-MinimizeBtn.Position = UDim2.new(1, -60, 0, 0)
+MinimizeBtn.Size = UDim2.new(0, 24, 0, 24)
+MinimizeBtn.Position = UDim2.new(1, -48, 0, 0)
 MinimizeBtn.BackgroundTransparency = 1
 MinimizeBtn.TextColor3 = Color3.fromRGB(200, 200, 100)
 MinimizeBtn.Text = "-"
-MinimizeBtn.TextSize = 16
+MinimizeBtn.TextSize = 14
 MinimizeBtn.Font = Enum.Font.GothamBold
 MinimizeBtn.Parent = TitleBar
 
 local ContentArea = Instance.new("Frame")
-ContentArea.Size = UDim2.new(1, 0, 1, -58)
-ContentArea.Position = UDim2.new(0, 0, 0, 58)
+ContentArea.Size = UDim2.new(1, 0, 1, -48)
+ContentArea.Position = UDim2.new(0, 0, 0, 48)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
 MinimizeBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     ContentArea.Visible = not minimized
-    MainWindow.Size = minimized and UDim2.new(0, 380, 0, 30) or UDim2.new(0, 380, 0, 340)
+    MainWindow.Size = minimized and UDim2.new(0, 340, 0, 24) or UDim2.new(0, 340, 0, 260)
     MinimizeBtn.Text = minimized and "+" or "-"
 end)
 
--- 4 Streamlined Tabs
+-- 4 Streamlined Tabs (Compact 24px height)
 local TabBar = Instance.new("Frame")
-TabBar.Size = UDim2.new(1, 0, 0, 28)
-TabBar.Position = UDim2.new(0, 0, 0, 30)
+TabBar.Size = UDim2.new(1, 0, 0, 24)
+TabBar.Position = UDim2.new(0, 0, 0, 24)
 TabBar.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainWindow
@@ -140,22 +140,22 @@ for i, tabName in ipairs(tabs) do
     btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
     btn.TextColor3 = Color3.fromRGB(180, 180, 180)
     btn.Text = tabName
-    btn.TextSize = 11
+    btn.TextSize = 10
     btn.Font = Enum.Font.GothamMedium
     btn.Parent = TabBar
 
     local panel = Instance.new("ScrollingFrame")
-    panel.Size = UDim2.new(1, -10, 1, -10)
-    panel.Position = UDim2.new(0, 5, 0, 5)
+    panel.Size = UDim2.new(1, -6, 1, -6)
+    panel.Position = UDim2.new(0, 3, 0, 3)
     panel.BackgroundTransparency = 1
     panel.Visible = (tabName == "Overview")
     panel.CanvasSize = UDim2.new(0, 0, 0, 0)
-    panel.ScrollBarThickness = 4
+    panel.ScrollBarThickness = 3
     panel.Parent = ContentArea
     
     local uiList = Instance.new("UIListLayout")
     uiList.SortOrder = Enum.SortOrder.LayoutOrder
-    uiList.Padding = UDim.new(0, 4)
+    uiList.Padding = UDim.new(0, 3)
     uiList.Parent = panel
     
     panels[tabName] = panel
@@ -167,12 +167,12 @@ for i, tabName in ipairs(tabs) do
     end)
 end
 
--- Panel UI Setup
+-- Panel UI Setup (Compact elements)
 local overviewText = Instance.new("TextLabel")
-overviewText.Size = UDim2.new(1, 0, 0, 160)
+overviewText.Size = UDim2.new(1, 0, 0, 130)
 overviewText.BackgroundTransparency = 1
 overviewText.TextColor3 = Color3.fromRGB(220, 220, 220)
-overviewText.TextSize = 11
+overviewText.TextSize = 10
 overviewText.Font = Enum.Font.Code
 overviewText.TextXAlignment = Enum.TextXAlignment.Left
 overviewText.TextYAlignment = Enum.TextYAlignment.Top
@@ -180,13 +180,13 @@ overviewText.LayoutOrder = 1
 overviewText.Parent = panels["Overview"]
 overviewText.Text = "Status: Preparing scanner environment..."
 
--- Runtime Tab with Pause Toggle
+-- Runtime Tab with Compact Pause Toggle
 local runtimePaused = false
 local pauseToggleBtn = Instance.new("TextButton")
-pauseToggleBtn.Size = UDim2.new(1, 0, 0, 28)
+pauseToggleBtn.Size = UDim2.new(1, 0, 0, 22)
 pauseToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 pauseToggleBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
-pauseToggleBtn.TextSize = 11
+pauseToggleBtn.TextSize = 10
 pauseToggleBtn.Font = Enum.Font.GothamBold
 pauseToggleBtn.Text = "⏸ Pause Log Stream: Active"
 pauseToggleBtn.LayoutOrder = 1
@@ -200,10 +200,10 @@ pauseToggleBtn.MouseButton1Click:Connect(function()
 end)
 
 local runtimeText = Instance.new("TextLabel")
-runtimeText.Size = UDim2.new(1, 0, 0, 260)
+runtimeText.Size = UDim2.new(1, 0, 0, 180)
 runtimeText.BackgroundTransparency = 1
 runtimeText.TextColor3 = Color3.fromRGB(255, 230, 150)
-runtimeText.TextSize = 10
+runtimeText.TextSize = 9
 runtimeText.Font = Enum.Font.Code
 runtimeText.TextXAlignment = Enum.TextXAlignment.Left
 runtimeText.TextYAlignment = Enum.TextYAlignment.Top
@@ -212,10 +212,10 @@ runtimeText.Parent = panels["Runtime"]
 runtimeText.Text = "Runtime Activity Stream Active...\nIntercepting events & remote payloads..."
 
 local exportStatusLabel = Instance.new("TextLabel")
-exportStatusLabel.Size = UDim2.new(1, 0, 0, 50)
+exportStatusLabel.Size = UDim2.new(1, 0, 0, 40)
 exportStatusLabel.BackgroundTransparency = 1
 exportStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-exportStatusLabel.TextSize = 11
+exportStatusLabel.TextSize = 10
 exportStatusLabel.Font = Enum.Font.Code
 exportStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 exportStatusLabel.LayoutOrder = 1
@@ -223,16 +223,16 @@ exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/CoreData.json\nSt
 exportStatusLabel.Parent = panels["Data"]
 
 local clearLogsBtn = Instance.new("TextButton")
-clearLogsBtn.Size = UDim2.new(1, 0, 0, 34)
+clearLogsBtn.Size = UDim2.new(1, 0, 0, 28)
 clearLogsBtn.BackgroundColor3 = Color3.fromRGB(45, 30, 30)
 clearLogsBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
-clearLogsBtn.TextSize = 11
+clearLogsBtn.TextSize = 10
 clearLogsBtn.Font = Enum.Font.GothamBold
 clearLogsBtn.Text = "Clear Runtime Log History"
 clearLogsBtn.LayoutOrder = 2
 clearLogsBtn.Parent = panels["Data"]
 
-panels["Data"].CanvasSize = UDim2.new(0, 0, 0, 100)
+panels["Data"].CanvasSize = UDim2.new(0, 0, 0, 80)
 
 -- Helper: Get Clean Path
 local function getFullPath(instance)
@@ -245,7 +245,7 @@ end
 
 -- 3. CORE LOGGING & HOOKING ENGINE
 local runtimeHistory = {}
-local maxHistorySize = 25
+local maxHistorySize = 20
 
 local function logRuntimeEvent(entry)
     if runtimePaused then return end
@@ -270,7 +270,7 @@ if hookmetamethod and getnamecallmethod then
             for i, arg in ipairs(args) do
                 argsSummary = argsSummary .. string.format("[%d]:%s ", i, tostring(arg))
             end
-            logRuntimeEvent(string.format("[%s] [REMOTE %s] %s\n  Args: %s", os.date("%H:%M:%S"), method, self.Name, argsSummary))
+            logRuntimeEvent(string.format("[%s] [%s] %s | Args: %s", os.date("%H:%M:%S"), method, self.Name, argsSummary))
         end
         return oldNameCall(self, ...)
     end)
@@ -310,10 +310,10 @@ task.spawn(function()
                 if isKeyObj then objectCount = objectCount + 1 end
                 
                 local itemBtn = Instance.new("TextButton")
-                itemBtn.Size = UDim2.new(1, 0, 0, 24)
+                itemBtn.Size = UDim2.new(1, 0, 0, 22)
                 itemBtn.BackgroundColor3 = isRemote and Color3.fromRGB(30, 30, 45) or (isValue and Color3.fromRGB(25, 40, 30) or Color3.fromRGB(35, 35, 35))
                 itemBtn.TextColor3 = isRemote and Color3.fromRGB(150, 200, 255) or (isValue and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(220, 220, 150))
-                itemBtn.TextSize = 10
+                itemBtn.TextSize = 9
                 itemBtn.Font = Enum.Font.Code
                 itemBtn.LayoutOrder = explorerEntries
                 
@@ -321,12 +321,12 @@ task.spawn(function()
                 itemBtn.Text = displayInfo .. " (Tap to Copy)"
                 itemBtn.TextXAlignment = Enum.TextXAlignment.Left
                 itemBtn.Parent = panels["Explorer"]
-                panels["Explorer"].CanvasSize = UDim2.new(0, 0, 0, explorerEntries * 28)
+                panels["Explorer"].CanvasSize = UDim2.new(0, 0, 0, explorerEntries * 24)
                 
                 itemBtn.MouseButton1Click:Connect(function()
                     if setclipboard then
                         setclipboard(getFullPath(descendant))
-                        itemBtn.Text = " Copied Path to Clipboard!"
+                        itemBtn.Text = " Copied Path!"
                         task.wait(1)
                         itemBtn.Text = displayInfo .. " (Tap to Copy)"
                     end
@@ -349,14 +349,14 @@ task.spawn(function()
         exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/CoreData.json\nStatus: Exported Successfully!"
     end
 
-    TitleBar.Text = "  AetheriusCore v0.10.2 [Ready]"
+    TitleBar.Text = "  AetheriusCore v0.10.3 [Ready]"
     overviewText.Text = string.format([[
  Status: Scan Complete (%.2fs)
  Nodes Inspected: %d
  Remotes Mapped: %d
  Values/Configs: %d
  Key Objects: %d
- Feedback: Fully Operational]], elapsedTime, totalInstances, remoteCount, valueCount, objectCount)
+ Layout: Compact Mobile]], elapsedTime, totalInstances, remoteCount, valueCount, objectCount)
 
     Workspace.ChildAdded:Connect(function(child)
         logRuntimeEvent(string.format("[%s] [SPAWN] %s (%s)", os.date("%H:%M:%S"), child.Name, child.ClassName))
@@ -366,4 +366,4 @@ task.spawn(function()
     end)
 end)
 
-print("[AetheriusCore]: Progress Feedback Suite active.")
+print("[AetheriusCore]: Compact Suite active.")
