@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 3 Combined)
+-- AetheriusCore: Client Game Intelligence Analyzer (Phases 1 - 4 Combined)
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
@@ -7,7 +7,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
-print("[AetheriusCore]: Initializing Core Intelligence Analyzer...")
+print("[AetheriusCore]: Initializing Core Intelligence Analyzer (Phase 4)...")
 
 -- 1. ROBUST UI CONTAINER SETUP (Delta & gethui compatibility)
 local rootParent = CoreGui
@@ -30,11 +30,11 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = rootParent
 
--- 2. MAIN WINDOW UI LAYOUT (Visible by default for mobile verification)
+-- 2. MAIN WINDOW UI LAYOUT
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.new(0, 340, 0, 300)
-MainWindow.Position = UDim2.new(0.5, -170, 0.5, -150)
+MainWindow.Size = UDim2.new(0, 350, 0, 310)
+MainWindow.Position = UDim2.new(0.5, -175, 0.5, -155)
 MainWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 MainWindow.BorderSizePixel = 0
 MainWindow.Visible = true 
@@ -49,8 +49,8 @@ local TitleBar = Instance.new("TextLabel")
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = "  AetheriusCore v0.3 (Phases 1-3)"
-TitleBar.TextSize = 13
+TitleBar.Text = "  AetheriusCore v0.4 (Phase 4: Behavior)"
+TitleBar.TextSize = 12
 TitleBar.Font = Enum.Font.GothamBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
 TitleBar.Parent = MainWindow
@@ -70,7 +70,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- Tab Container Bar
+-- Tab Container Bar (Expanded to 4 Tabs)
 local TabBar = Instance.new("Frame")
 TabBar.Size = UDim2.new(1, 0, 0, 28)
 TabBar.Position = UDim2.new(0, 0, 0, 30)
@@ -86,7 +86,7 @@ ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
 -- Tabs & Panels Setup
-local tabs = {"Overview", "Objects", "Remotes"}
+local tabs = {"Overview", "Objects", "Remotes", "Behavior"}
 local panels = {}
 
 for i, tabName in ipairs(tabs) do
@@ -96,7 +96,7 @@ for i, tabName in ipairs(tabs) do
     btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
     btn.TextColor3 = Color3.fromRGB(180, 180, 180)
     btn.Text = tabName
-    btn.TextSize = 12
+    btn.TextSize = 11
     btn.Font = Enum.Font.GothamMedium
     btn.Parent = TabBar
 
@@ -105,7 +105,7 @@ for i, tabName in ipairs(tabs) do
     panel.Position = UDim2.new(0, 5, 0, 5)
     panel.BackgroundTransparency = 1
     panel.Visible = (tabName == "Overview")
-    panel.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+    panel.CanvasSize = UDim2.new(0, 0, 2, 0)
     panel.ScrollBarThickness = 4
     panel.Parent = ContentArea
     
@@ -117,9 +117,9 @@ for i, tabName in ipairs(tabs) do
     end)
 end
 
--- Overview Panel Text
+-- Panel Text Containers
 local overviewText = Instance.new("TextLabel")
-overviewText.Size = UDim2.new(1, 0, 0, 120)
+overviewText.Size = UDim2.new(1, 0, 0, 140)
 overviewText.BackgroundTransparency = 1
 overviewText.TextColor3 = Color3.fromRGB(220, 220, 220)
 overviewText.TextSize = 11
@@ -127,10 +127,8 @@ overviewText.Font = Enum.Font.Code
 overviewText.TextXAlignment = Enum.TextXAlignment.Left
 overviewText.TextYAlignment = Enum.TextYAlignment.Top
 overviewText.Parent = panels["Overview"]
+overviewText.Text = "Status: Scanning Workspace & Initializing Behavior Tracker..."
 
-overviewText.Text = "Status: Scanning Workspace...\nPlease wait."
-
--- Remotes Panel Text Container
 local remotesText = Instance.new("TextLabel")
 remotesText.Size = UDim2.new(1, 0, 0, 200)
 remotesText.BackgroundTransparency = 1
@@ -141,11 +139,22 @@ remotesText.TextXAlignment = Enum.TextXAlignment.Left
 remotesText.TextYAlignment = Enum.TextYAlignment.Top
 remotesText.Parent = panels["Remotes"]
 
+local behaviorText = Instance.new("TextLabel")
+behaviorText.Size = UDim2.new(1, 0, 0, 300)
+behaviorText.BackgroundTransparency = 1
+behaviorText.TextColor3 = Color3.fromRGB(180, 255, 180)
+behaviorText.TextSize = 10
+behaviorText.Font = Enum.Font.Code
+behaviorText.TextXAlignment = Enum.TextXAlignment.Left
+behaviorText.TextYAlignment = Enum.TextYAlignment.Top
+behaviorText.Parent = panels["Behavior"]
+behaviorText.Text = "Behavior Monitor Active...\nWaiting for runtime events (spawns/despawns)..."
 
--- 3. PHASE 1: CLASSIFICATION & SCANNING ENGINE (Optimized for Mobile)
+
+-- 3. PHASE 1 & 4: SCANNING ENGINE + BEHAVIOR MONITOR
 local ScanConfig = {
-    MaxDepth = 3,         -- Kept safe for mobile performance limits
-    YieldEvery = 150,     -- Yield frequency to prevent frame drops
+    MaxDepth = 3,
+    YieldEvery = 150,
 }
 
 local function classifyInstance(instance)
@@ -163,13 +172,27 @@ local function classifyInstance(instance)
     return instance.ClassName
 end
 
--- Asynchronous background scan task to prevent freezing UI
+-- Runtime Event History Buffer (Phase 4)
+local eventHistory = {}
+local maxHistorySize = 25
+
+local function logBehaviorEvent(eventType, itemName, itemClass)
+    local timestamp = os.date("%H:%M:%S")
+    local entry = string.format("[%s] %s: %s (%s)", timestamp, eventType, itemName, itemClass)
+    
+    table.insert(eventHistory, 1, entry) -- Insert at top
+    if #eventHistory > maxHistorySize then
+        table.remove(eventHistory) -- Drop oldest to save mobile RAM
+    end
+    
+    behaviorText.Text = table.concat(eventHistory, "\n")
+end
+
+-- Background Scan Task
 task.spawn(function()
     local startTime = tick()
     local totalInstances = 0
     local remoteCount = 0
-    local categoryCounts = {}
-    
     local workspaceData = {}
     
     local function scanRecursive(instance, currentDepth)
@@ -177,12 +200,10 @@ task.spawn(function()
         
         totalInstances = totalInstances + 1
         if totalInstances % ScanConfig.YieldEvery == 0 then
-            task.wait() -- Keep mobile FPS stable
+            task.wait()
         end
         
         local category = classifyInstance(instance)
-        categoryCounts[category] = (categoryCounts[category] or 0) + 1
-        
         if category == "NetworkRemote" then
             remoteCount = remoteCount + 1
         end
@@ -206,17 +227,25 @@ task.spawn(function()
     local scannedTree = scanRecursive(Workspace, 1)
     local elapsedTime = tick() - startTime
     
-    -- Update Overview UI with statistics
     overviewText.Text = string.format([[
- Status: Scan Complete (%.2fs)
- Total Scanned Nodes: %d
+ Status: Active & Monitoring (%.2fs)
+ Scanned Nodes: %d
  Remotes Identified: %d
  Environment: Delta Mobile
- UI Layer: Protected Framework]], elapsedTime, totalInstances, remoteCount)
+ Behavior Feed: Active (Capped @ %d)]], elapsedTime, totalInstances, remoteCount, maxHistorySize)
 
-    remotesText.Text = string.format("Scan found %d remote objects.\nCheck Delta workspace export for complete map.", remoteCount)
+    remotesText.Text = string.format("Detected %d remote objects in client hierarchy.", remoteCount)
 
-    -- Export file via Delta filesystem capabilities
+    -- Hook up Phase 4 Runtime Listeners (Workspace changes)
+    Workspace.ChildAdded:Connect(function(child)
+        logBehaviorEvent("SPAWN", child.Name, child.ClassName)
+    end)
+
+    Workspace.ChildRemoved:Connect(function(child)
+        logBehaviorEvent("REMOVE", child.Name, child.ClassName)
+    end)
+
+    -- Export file via Delta filesystem
     if writefile then
         if not isfolder("AetheriusCore") then
             makefolder("AetheriusCore")
@@ -226,4 +255,4 @@ task.spawn(function()
     end
 end)
 
-print("[AetheriusCore]: Phases 1-3 loaded and execution thread running smoothly.")
+print("[AetheriusCore]: Phases 1-4 loaded successfully.")
