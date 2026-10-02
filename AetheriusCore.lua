@@ -88,7 +88,7 @@ local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
 MainWindow.Size = UDim2.fromOffset(300, 230)
 MainWindow.Position = UDim2.new(0.5, -150, 0.5, -115)
-MainWindow.BackgroundColor3 = Color3.fromRGB(18, 20, 27)
+MainWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 MainWindow.BorderSizePixel = 0
 MainWindow.Parent = ScreenGui
 Instance.new("UICorner", MainWindow).CornerRadius = UDim.new(0, 9)
@@ -99,13 +99,13 @@ windowStroke.Transparency = 0.15
 windowStroke.Parent = MainWindow
 
 local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, 0, 0, 34)
-TitleBar.BackgroundColor3 = Color3.fromRGB(27, 30, 40)
+TitleBar.Size = UDim2.new(1, 0, 0, 25)
+TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainWindow
 Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 9)
 local headerAccent = Instance.new("Frame")
-headerAccent.Size = UDim2.new(1, -20, 0, 2)
+headerAccent.Size = UDim2.new(1, -20, 0, 1)
 headerAccent.Position = UDim2.new(0, 10, 1, -2)
 headerAccent.BackgroundColor3 = Color3.fromRGB(70, 130, 255)
 headerAccent.BorderSizePixel = 0
@@ -113,12 +113,12 @@ headerAccent.Parent = TitleBar
 Instance.new("UICorner", headerAccent).CornerRadius = UDim.new(1, 0)
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -72, 1, 0)
+Title.Size = UDim2.new(1, -70, 1, 0)
 Title.Position = UDim2.fromOffset(12, 0)
 Title.BackgroundTransparency = 1
 Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [Starting]"
 Title.TextColor3 = Color3.fromRGB(235, 238, 245)
-Title.TextSize = 12
+Title.TextSize = 10
 Title.Font = Enum.Font.GothamBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TitleBar
@@ -137,25 +137,26 @@ local function makeTitleButton(text, xOffset, color)
 end
 
 local MinimizeBtn = makeTitleButton("−", -54, Color3.fromRGB(230, 205, 120))
-MinimizeBtn.Size = UDim2.fromOffset(20, 20)
-MinimizeBtn.Position = UDim2.new(1, -54, 0, 7)
+MinimizeBtn.Size = UDim2.fromOffset(18, 18)
+MinimizeBtn.Position = UDim2.new(1, -51, 0, 3)
 MinimizeBtn.BackgroundTransparency = 0
 MinimizeBtn.BackgroundColor3 = Color3.fromRGB(43, 44, 48)
 MinimizeBtn.AutoButtonColor = true
 Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 5)
 
-local CloseBtn = makeTitleButton("×", -28, Color3.fromRGB(235, 115, 115))
+local CloseBtn = makeTitleButton("×", -25, Color3.fromRGB(235, 115, 115))
+CloseBtn.Size = UDim2.fromOffset(22, 25)
 
 local TabBar = Instance.new("Frame")
-TabBar.Position = UDim2.fromOffset(0, 34)
-TabBar.Size = UDim2.new(1, 0, 0, 30)
-TabBar.BackgroundColor3 = Color3.fromRGB(32, 35, 46)
+TabBar.Position = UDim2.fromOffset(0, 25)
+TabBar.Size = UDim2.new(1, 0, 0, 22)
+TabBar.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainWindow
 
 local ContentArea = Instance.new("Frame")
-ContentArea.Position = UDim2.fromOffset(10, 72)
-ContentArea.Size = UDim2.new(1, -20, 1, -82)
+ContentArea.Position = UDim2.fromOffset(8, 52)
+ContentArea.Size = UDim2.new(1, -16, 1, -60)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
@@ -255,85 +256,27 @@ local function makeLabel(parent, text, height, size, color)
     return label
 end
 
--- Overview summary: compact status header and live metric tiles.
+-- Compact overview summary, following the supplied simple text-based layout.
 local overviewPanel = panels.Overview
-
-local overviewStatus = Instance.new("TextLabel")
-overviewStatus.Name = "OverviewStatus"
-overviewStatus.Position = UDim2.fromOffset(0, 0)
-overviewStatus.Size = UDim2.fromOffset(116, 22)
-overviewStatus.BackgroundColor3 = Color3.fromRGB(34, 48, 45)
-overviewStatus.BorderSizePixel = 0
-overviewStatus.Text = "  SCAN STARTING"
-overviewStatus.TextColor3 = Color3.fromRGB(128, 220, 168)
-overviewStatus.TextSize = 9
-overviewStatus.Font = Enum.Font.GothamBold
-overviewStatus.TextXAlignment = Enum.TextXAlignment.Left
-overviewStatus.Parent = overviewPanel
-Instance.new("UICorner", overviewStatus).CornerRadius = UDim.new(0, 6)
-
-local scopeLabel = Instance.new("TextLabel")
-scopeLabel.Name = "ScanScope"
-scopeLabel.Position = UDim2.new(0, 122, 0, 0)
-scopeLabel.Size = UDim2.new(1, -122, 0, 22)
-scopeLabel.BackgroundTransparency = 1
-scopeLabel.Text = "Workspace + ReplicatedStorage"
-scopeLabel.TextColor3 = Color3.fromRGB(145, 154, 172)
-scopeLabel.TextSize = 8
-scopeLabel.Font = Enum.Font.GothamMedium
-scopeLabel.TextXAlignment = Enum.TextXAlignment.Right
-scopeLabel.TextTruncate = Enum.TextTruncate.AtEnd
-scopeLabel.Parent = overviewPanel
-
-local overviewMetrics = {}
-local function makeMetricTile(name, caption, xScale, xOffset, yOffset, wide)
-    local tile = Instance.new("Frame")
-    tile.Name = name .. "Metric"
-    tile.Position = UDim2.new(xScale, xOffset, 0, yOffset)
-    tile.Size = wide and UDim2.new(1, 0, 0, 36) or UDim2.new(0.5, -4, 0, 36)
-    tile.BackgroundColor3 = Color3.fromRGB(27, 31, 42)
-    tile.BorderSizePixel = 0
-    tile.Parent = overviewPanel
-    Instance.new("UICorner", tile).CornerRadius = UDim.new(0, 6)
-
-    local outline = Instance.new("UIStroke")
-    outline.Color = Color3.fromRGB(52, 59, 75)
-    outline.Transparency = 0.35
-    outline.Thickness = 1
-    outline.Parent = tile
-
-    local value = Instance.new("TextLabel")
-    value.Name = "Value"
-    value.Position = UDim2.fromOffset(9, 2)
-    value.Size = UDim2.new(1, -18, 0, 17)
-    value.BackgroundTransparency = 1
-    value.Text = "0"
-    value.TextColor3 = Color3.fromRGB(235, 240, 250)
-    value.TextSize = 13
-    value.Font = Enum.Font.GothamBold
-    value.TextXAlignment = Enum.TextXAlignment.Left
-    value.Parent = tile
-
-    local title = Instance.new("TextLabel")
-    title.Name = "Caption"
-    title.Position = UDim2.fromOffset(9, 19)
-    title.Size = UDim2.new(1, -18, 0, 13)
-    title.BackgroundTransparency = 1
-    title.Text = caption
-    title.TextColor3 = Color3.fromRGB(145, 154, 172)
-    title.TextSize = 8
-    title.Font = Enum.Font.GothamMedium
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = tile
-
-    overviewMetrics[name] = value
-end
-
-makeMetricTile("Nodes", "NODES SCANNED", 0, 0, 28, false)
-makeMetricTile("Remotes", "REMOTES", 0.5, 4, 28, false)
-makeMetricTile("Values", "VALUE OBJECTS", 0, 0, 67, false)
-makeMetricTile("Tools", "TOOLS", 0.5, 4, 67, false)
-makeMetricTile("Models", "HUMANOID MODELS", 0, 0, 106, true)
+local overviewText = Instance.new("TextLabel")
+overviewText.Name = "OverviewSummary"
+overviewText.Size = UDim2.new(1, -8, 0, 116)
+overviewText.Position = UDim2.fromOffset(0, 0)
+overviewText.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+overviewText.BorderSizePixel = 0
+overviewText.TextColor3 = Color3.fromRGB(220, 224, 233)
+overviewText.TextSize = 9
+overviewText.Font = Enum.Font.Code
+overviewText.TextXAlignment = Enum.TextXAlignment.Left
+overviewText.TextYAlignment = Enum.TextYAlignment.Top
+overviewText.TextWrapped = true
+overviewText.Text = "Status: Preparing scan...\n\nNodes: 0\nRemotes: 0\nValues: 0\nTools: 0\nHumanoid Models: 0"
+overviewText.Parent = overviewPanel
+Instance.new("UICorner", overviewText).CornerRadius = UDim.new(0, 6)
+local overviewPadding = Instance.new("UIPadding")
+overviewPadding.PaddingLeft = UDim.new(0, 9)
+overviewPadding.PaddingTop = UDim.new(0, 7)
+overviewPadding.Parent = overviewText
 
 local explorerPanel = panels.Explorer
 local runtimePanel = panels.Runtime
@@ -495,20 +438,10 @@ local function updateStatus(status, containerName)
     if not State.alive then return end
     Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [" .. status .. "]"
 
-    local statusLower = string.lower(status)
-    local complete = string.find(statusLower, "ready", 1, true) ~= nil
-    local scanning = string.find(statusLower, "scanning", 1, true) ~= nil
-    overviewStatus.Text = complete and "  SCAN COMPLETE" or (scanning and "  SCANNING" or "  " .. string.upper(status))
-    overviewStatus.TextColor3 = complete and Color3.fromRGB(128, 220, 168)
-        or (scanning and Color3.fromRGB(135, 180, 255) or Color3.fromRGB(230, 195, 120))
-    overviewStatus.BackgroundColor3 = complete and Color3.fromRGB(34, 48, 45)
-        or (scanning and Color3.fromRGB(34, 43, 61) or Color3.fromRGB(49, 44, 34))
-
-    overviewMetrics.Nodes.Text = tostring(stats.nodes)
-    overviewMetrics.Remotes.Text = tostring(stats.remotes)
-    overviewMetrics.Values.Text = tostring(stats.values)
-    overviewMetrics.Tools.Text = tostring(stats.tools)
-    overviewMetrics.Models.Text = tostring(stats.models)
+    overviewText.Text = string.format(
+        "Status: %s\nContainer: %s\n\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d",
+        status, tostring(containerName or "-"), stats.nodes, stats.remotes, stats.values, stats.tools, stats.models
+    )
 end
 
 local function exportData()
@@ -723,15 +656,15 @@ track(MinimizeBtn.MouseButton1Click:Connect(function()
     else
         -- Restore the original panel layout and controls.
         MainWindow.Size = UDim2.fromOffset(300, 230)
-        TitleBar.Size = UDim2.new(1, 0, 0, 34)
+        TitleBar.Size = UDim2.new(1, 0, 0, 25)
         ContentArea.Visible = true
         TabBar.Visible = true
         Title.Visible = true
         CloseBtn.Visible = true
         headerAccent.Visible = true
 
-        MinimizeBtn.Size = UDim2.fromOffset(20, 20)
-        MinimizeBtn.Position = UDim2.new(1, -54, 0, 7)
+        MinimizeBtn.Size = UDim2.fromOffset(18, 18)
+        MinimizeBtn.Position = UDim2.new(1, -51, 0, 3)
         MinimizeBtn.Text = "−"
     end
 end))
