@@ -2104,7 +2104,7 @@ local function WatchInstanceName(instance)
 end
 
 --------------------------------------------------
--- LIVE ATTRIBUTE / VALUE CHANGE WATCHER
+-- LIVE ATTRIBUTE / VALUE / SELECTED PROPERTY CHANGE WATCHER
 --------------------------------------------------
 
 -- Data changes reuse the existing queued structural refresh, which updates
@@ -2141,6 +2141,34 @@ local function WatchInstanceData(instance)
 		end)
 		if valueSuccess and valueConnection then
 			table.insert(connections, valueConnection)
+		end
+	end
+
+	-- Watch only relatively stable properties already captured by the record.
+	-- Frequently changing values such as Position, Transparency, and Health are
+	-- intentionally excluded to avoid a continuous refresh queue during gameplay.
+	local propertyNames = {}
+	if instance:IsA("BasePart") then
+		propertyNames = {"Size", "Anchored", "CanCollide"}
+	elseif instance:IsA("Humanoid") then
+		propertyNames = {"MaxHealth", "WalkSpeed", "JumpPower", "HipHeight"}
+	elseif instance:IsA("Tool") then
+		propertyNames = {"Enabled", "ToolTip"}
+	elseif instance:IsA("TextLabel") or instance:IsA("TextButton")
+		or instance:IsA("TextBox") then
+		propertyNames = {"Text", "Visible"}
+	elseif instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+		propertyNames = {"Image", "Visible"}
+	elseif instance:IsA("ProximityPrompt") then
+		propertyNames = {"ActionText", "ObjectText", "HoldDuration", "MaxActivationDistance", "Enabled"}
+	end
+
+	for _, propertyName in ipairs(propertyNames) do
+		local propertySuccess, propertyConnection = pcall(function()
+			return instance:GetPropertyChangedSignal(propertyName):Connect(queueDataRefresh)
+		end)
+		if propertySuccess and propertyConnection then
+			table.insert(connections, propertyConnection)
 		end
 	end
 
