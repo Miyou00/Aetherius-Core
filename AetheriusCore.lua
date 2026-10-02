@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.8 Advanced Update)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.9 Consolidated)
 -- ==============================================================================
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
@@ -8,7 +8,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-print("[AetheriusCore]: Initializing Advanced Intelligence Suite...")
+print("[AetheriusCore]: Initializing Consolidated Intelligence Suite...")
 
 -- 1. ROBUST UI CONTAINER SETUP
 local rootParent = CoreGui
@@ -30,7 +30,7 @@ ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = rootParent
 
--- 2. MAIN WINDOW UI LAYOUT
+-- 2. MAIN WINDOW UI LAYOUT (Optimized for Mobile)
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
 MainWindow.Size = UDim2.new(0, 380, 0, 340)
@@ -49,7 +49,7 @@ local TitleBar = Instance.new("TextLabel")
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
 TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = "  AetheriusCore v0.8 (Advanced Analyzer)"
+TitleBar.Text = "  AetheriusCore v0.9 (Consolidated)"
 TitleBar.TextSize = 12
 TitleBar.Font = Enum.Font.GothamBold
 TitleBar.TextXAlignment = Enum.TextXAlignment.Left
@@ -70,7 +70,7 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- Tab Container Bar (6 Tabs: Overview, Objects, Remotes, Spy, Behavior, Data)
+-- 4 Streamlined Tabs: Overview, Explorer, Runtime, Data
 local TabBar = Instance.new("Frame")
 TabBar.Size = UDim2.new(1, 0, 0, 28)
 TabBar.Position = UDim2.new(0, 0, 0, 30)
@@ -84,7 +84,7 @@ ContentArea.Position = UDim2.new(0, 0, 0, 58)
 ContentArea.BackgroundTransparency = 1
 ContentArea.Parent = MainWindow
 
-local tabs = {"Overview", "Objects", "Remotes", "Spy", "Behavior", "Data"}
+local tabs = {"Overview", "Explorer", "Runtime", "Data"}
 local panels = {}
 
 for i, tabName in ipairs(tabs) do
@@ -94,7 +94,7 @@ for i, tabName in ipairs(tabs) do
     btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
     btn.TextColor3 = Color3.fromRGB(180, 180, 180)
     btn.Text = tabName
-    btn.TextSize = 9
+    btn.TextSize = 11
     btn.Font = Enum.Font.GothamMedium
     btn.Parent = TabBar
 
@@ -122,7 +122,7 @@ end
 
 -- Panel UI Setup
 local overviewText = Instance.new("TextLabel")
-overviewText.Size = UDim2.new(1, 0, 0, 150)
+overviewText.Size = UDim2.new(1, 0, 0, 160)
 overviewText.BackgroundTransparency = 1
 overviewText.TextColor3 = Color3.fromRGB(220, 220, 220)
 overviewText.TextSize = 11
@@ -131,31 +131,19 @@ overviewText.TextXAlignment = Enum.TextXAlignment.Left
 overviewText.TextYAlignment = Enum.TextYAlignment.Top
 overviewText.LayoutOrder = 1
 overviewText.Parent = panels["Overview"]
-overviewText.Text = "Status: Scanning Containers & Values..."
+overviewText.Text = "Status: Initializing Core Engine..."
 
-local spyText = Instance.new("TextLabel")
-spyText.Size = UDim2.new(1, 0, 0, 300)
-spyText.BackgroundTransparency = 1
-spyText.TextColor3 = Color3.fromRGB(255, 220, 150)
-spyText.TextSize = 10
-spyText.Font = Enum.Font.Code
-spyText.TextXAlignment = Enum.TextXAlignment.Left
-spyText.TextYAlignment = Enum.TextYAlignment.Top
-spyText.LayoutOrder = 1
-spyText.Parent = panels["Spy"]
-spyText.Text = "Remote Spy Active...\nIntercepting client calls..."
-
-local behaviorText = Instance.new("TextLabel")
-behaviorText.Size = UDim2.new(1, 0, 0, 300)
-behaviorText.BackgroundTransparency = 1
-behaviorText.TextColor3 = Color3.fromRGB(180, 255, 180)
-behaviorText.TextSize = 10
-behaviorText.Font = Enum.Font.Code
-behaviorText.TextXAlignment = Enum.TextXAlignment.Left
-behaviorText.TextYAlignment = Enum.TextYAlignment.Top
-behaviorText.LayoutOrder = 1
-behaviorText.Parent = panels["Behavior"]
-behaviorText.Text = "Behavior Monitor Active...\nWaiting for runtime events..."
+local runtimeText = Instance.new("TextLabel")
+runtimeText.Size = UDim2.new(1, 0, 0, 300)
+runtimeText.BackgroundTransparency = 1
+runtimeText.TextColor3 = Color3.fromRGB(255, 230, 150)
+runtimeText.TextSize = 10
+runtimeText.Font = Enum.Font.Code
+runtimeText.TextXAlignment = Enum.TextXAlignment.Left
+runtimeText.TextYAlignment = Enum.TextYAlignment.Top
+runtimeText.LayoutOrder = 1
+runtimeText.Parent = panels["Runtime"]
+runtimeText.Text = "Runtime Activity Stream Active...\nIntercepting events & remote payloads..."
 
 local exportStatusLabel = Instance.new("TextLabel")
 exportStatusLabel.Size = UDim2.new(1, 0, 0, 50)
@@ -165,22 +153,22 @@ exportStatusLabel.TextSize = 11
 exportStatusLabel.Font = Enum.Font.Code
 exportStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 exportStatusLabel.LayoutOrder = 1
-exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/AdvancedScan.json\nStatus: Pending First Export"
+exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/CoreData.json\nStatus: Pending First Export"
 exportStatusLabel.Parent = panels["Data"]
 
 local clearLogsBtn = Instance.new("TextButton")
-clearLogsBtn.Size = UDim2.new(1, 0, 0, 32)
+clearLogsBtn.Size = UDim2.new(1, 0, 0, 34)
 clearLogsBtn.BackgroundColor3 = Color3.fromRGB(45, 30, 30)
 clearLogsBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
 clearLogsBtn.TextSize = 11
 clearLogsBtn.Font = Enum.Font.GothamBold
-clearLogsBtn.Text = "Clear Log History"
+clearLogsBtn.Text = "Clear Runtime Log History"
 clearLogsBtn.LayoutOrder = 2
 clearLogsBtn.Parent = panels["Data"]
 
 panels["Data"].CanvasSize = UDim2.new(0, 0, 0, 100)
 
--- Helper function to generate clean path strings for clipboard copy
+-- Helper: Get Clean Path
 local function getFullPath(instance)
     local name = instance.Name
     local parent = instance.Parent
@@ -189,109 +177,82 @@ local function getFullPath(instance)
     else return instance:GetFullName() end
 end
 
--- 3. ADVANCED SCANNING & EXTRACTION ENGINE
-local function classifyInstance(instance)
-    if instance:IsA("Model") and instance:FindFirstChild("Humanoid") then
-        if instance == LocalPlayer.Character then return "LocalPlayer" else return "Character/NPC" end
-    elseif instance:IsA("Tool") then return "Tool"
-    elseif instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") then return "NetworkRemote"
-    elseif instance:IsA("ValueBase") then return "DataValue"
-    end
-    return instance.ClassName
-end
+-- 3. CORE LOGGING & HOOKING ENGINE
+local runtimeHistory = {}
+local maxHistorySize = 25
 
-local eventHistory = {}
-local spyHistory = {}
-local maxHistorySize = 15
-
-local function logEvent(targetText, historyBuffer, entry)
-    table.insert(historyBuffer, 1, entry)
-    if #historyBuffer > maxHistorySize then table.remove(historyBuffer) end
-    targetText.Text = table.concat(historyBuffer, "\n")
+local function logRuntimeEvent(entry)
+    table.insert(runtimeHistory, 1, entry)
+    if #runtimeHistory > maxHistorySize then table.remove(runtimeHistory) end
+    runtimeText.Text = table.concat(runtimeHistory, "\n\n")
 end
 
 clearLogsBtn.MouseButton1Click:Connect(function()
-    table.clear(eventHistory)
-    table.clear(spyHistory)
-    behaviorText.Text = "Behavior history cleared."
-    spyText.Text = "Spy history cleared."
+    table.clear(runtimeHistory)
+    runtimeText.Text = "Runtime history cleared."
 end)
 
--- Background Scanning & Inspector Task
+-- Universal NameCall Hook (Remote Spy + Behavior Unified)
+if hookmetamethod and getnamecallmethod then
+    local oldNameCall
+    oldNameCall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        if (method == "FireServer" or method == "InvokeServer") and self:IsA("Instance") then
+            local argsSummary = ""
+            for i, arg in ipairs(args) do
+                argsSummary = argsSummary .. string.format("[%d]:%s ", i, tostring(arg))
+            end
+            logRuntimeEvent(string.format("[%s] [REMOTE %s] %s\n  Args: %s", os.date("%H:%M:%S"), method, self.Name, argsSummary))
+        end
+        return oldNameCall(self, ...)
+    end)
+end
+
+-- Background Unified Scanner Task
 task.spawn(function()
     local startTime = tick()
     local totalInstances = 0
     local remoteCount = 0
     local objectCount = 0
     local valueCount = 0
+    local explorerEntries = 0
 
     local function processContainer(container)
         for _, descendant in ipairs(container:GetDescendants()) do
             totalInstances = totalInstances + 1
             if totalInstances % 200 == 0 then task.wait() end
             
-            local category = classifyInstance(descendant)
+            local isRemote = descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction")
+            local isValue = descendant:IsA("ValueBase")
+            local isKeyObj = descendant:IsA("Tool") or (descendant:IsA("Model") and descendant:FindFirstChild("Humanoid"))
             
-            -- Remotes Tab + Hook Spy Interceptor
-            if category == "NetworkRemote" then
-                remoteCount = remoteCount + 1
+            if isRemote or isValue or isKeyObj then
+                explorerEntries = explorerEntries + 1
+                if isRemote then remoteCount = remoteCount + 1 end
+                if isValue then valueCount = valueCount + 1 end
+                if isKeyObj then objectCount = objectCount + 1 end
                 
-                -- Tap-to-Copy Remote Button
-                local remoteBtn = Instance.new("TextButton")
-                remoteBtn.Size = UDim2.new(1, 0, 0, 24)
-                remoteBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-                remoteBtn.TextColor3 = Color3.fromRGB(150, 200, 255)
-                remoteBtn.TextSize = 10
-                remoteBtn.Font = Enum.Font.Code
-                remoteBtn.Text = string.format(" [%s] %s (Tap to Copy)", descendant.ClassName, descendant.Name)
-                remoteBtn.TextXAlignment = Enum.TextXAlignment.Left
-                remoteBtn.Parent = panels["Remotes"]
-                panels["Remotes"].CanvasSize = UDim2.new(0, 0, 0, remoteCount * 28)
+                -- Unified Explorer Row (Tap to Copy Path)
+                local itemBtn = Instance.new("TextButton")
+                itemBtn.Size = UDim2.new(1, 0, 0, 24)
+                itemBtn.BackgroundColor3 = isRemote and Color3.fromRGB(30, 30, 45) or (isValue and Color3.fromRGB(25, 40, 30) or Color3.fromRGB(35, 35, 35))
+                itemBtn.TextColor3 = isRemote and Color3.fromRGB(150, 200, 255) or (isValue and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(220, 220, 150))
+                itemBtn.TextSize = 10
+                itemBtn.Font = Enum.Font.Code
                 
-                remoteBtn.MouseButton1Click:Connect(function()
+                local displayInfo = isValue and string.format(" [%s] %s = %s", descendant.ClassName, descendant.Name, tostring(descendant.Value)) or string.format(" [%s] %s", descendant.ClassName, descendant.Name)
+                itemBtn.Text = displayInfo .. " (Tap to Copy)"
+                itemBtn.TextXAlignment = Enum.TextXAlignment.Left
+                itemBtn.Parent = panels["Explorer"]
+                panels["Explorer"].CanvasSize = UDim2.new(0, 0, 0, explorerEntries * 28)
+                
+                itemBtn.MouseButton1Click:Connect(function()
                     if setclipboard then
                         setclipboard(getFullPath(descendant))
-                        remoteBtn.Text = " Copied Path to Clipboard!"
+                        itemBtn.Text = " Copied Path to Clipboard!"
                         task.wait(1)
-                        remoteBtn.Text = string.format(" [%s] %s (Tap to Copy)", descendant.ClassName, descendant.Name)
-                    end
-                end)
-
-                -- Phase 8 Extra: Hook NameCall / FireServer/InvokeServer logging
-                if descendant:IsA("RemoteEvent") then
-                    local originalFire
-                    originalFire = hookfunction(descendant.FireServer, function(self, ...)
-                        if self == descendant then
-                            local args = {...}
-                            logEvent(spyText, spyHistory, string.format("[Fire] %s | Args: %s", descendant.Name, table.concat({tostringall(...)}, ", ")))
-                        end
-                        return originalFire(self, ...)
-                    end)
-                end
-
-            -- Objects Tab (Models, Tools, Values)
-            elseif category == "Character/NPC" or category == "Tool" or category == "DataValue" then
-                objectCount = objectCount + 1
-                if category == "DataValue" then valueCount = valueCount + 1 end
-                
-                local objBtn = Instance.new("TextButton")
-                objBtn.Size = UDim2.new(1, 0, 0, 24)
-                objBtn.BackgroundColor3 = Color3.fromRGB(25, 30, 35)
-                objBtn.TextColor3 = category == "DataValue" and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(220, 220, 150)
-                objBtn.TextSize = 10
-                objBtn.Font = Enum.Font.Code
-                local displayVal = (category == "DataValue") and tostring(descendant.Value) or descendant.Name
-                objBtn.Text = string.format(" [%s] %s = %s", descendant.ClassName, descendant.Name, displayVal)
-                objBtn.TextXAlignment = Enum.TextXAlignment.Left
-                objBtn.Parent = panels["Objects"]
-                panels["Objects"].CanvasSize = UDim2.new(0, 0, 0, objectCount * 28)
-                
-                objBtn.MouseButton1Click:Connect(function()
-                    if setclipboard then
-                        setclipboard(getFullPath(descendant))
-                        objBtn.Text = " Copied Path!"
-                        task.wait(1)
-                        objBtn.Text = string.format(" [%s] %s = %s", descendant.ClassName, descendant.Name, displayVal)
+                        itemBtn.Text = displayInfo .. " (Tap to Copy)"
                     end
                 end)
             end
@@ -305,24 +266,25 @@ task.spawn(function()
     
     overviewText.Text = string.format([[
  Status: Scan Complete (%.2fs)
- Total Nodes Checked: %d
+ Nodes Inspected: %d
  Remotes Mapped: %d
- ValueBases/Configs: %d
- Key Objects Mapped: %d]], elapsedTime, totalInstances, remoteCount, valueCount, objectCount)
+ Values/Configs: %d
+ Key Objects: %d
+ Environment: Delta Mobile]], elapsedTime, totalInstances, remoteCount, valueCount, objectCount)
 
-    -- Runtime Behavior Listeners
+    -- Runtime Behavior Listeners (Merged into Runtime Stream)
     Workspace.ChildAdded:Connect(function(child)
-        logEvent(behaviorText, eventHistory, string.format("[%s] SPAWN: %s", os.date("%H:%M:%S"), child.Name))
+        logRuntimeEvent(string.format("[%s] [SPAWN] %s (%s)", os.date("%H:%M:%S"), child.Name, child.ClassName))
     end)
     Workspace.ChildRemoved:Connect(function(child)
-        logEvent(behaviorText, eventHistory, string.format("[%s] REMOVE: %s", os.date("%H:%M:%S"), child.Name))
+        logRuntimeEvent(string.format("[%s] [REMOVE] %s (%s)", os.date("%H:%M:%S"), child.Name, child.ClassName))
     end)
 
     if writefile then
         if not isfolder("AetheriusCore") then makefolder("AetheriusCore") end
-        writefile("AetheriusCore/AdvancedScan.json", HttpService:JSONEncode({Remotes = remoteCount, Values = valueCount}))
-        exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/AdvancedScan.json\nStatus: Exported Successfully!"
+        writefile("AetheriusCore/CoreData.json", HttpService:JSONEncode({Remotes = remoteCount, Values = valueCount, Objects = objectCount}))
+        exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/CoreData.json\nStatus: Exported Successfully!"
     end
 end)
 
-print("[AetheriusCore]: Advanced intelligence suite running smoothly.")
+print("[AetheriusCore]: Consolidated intelligence suite active.")
