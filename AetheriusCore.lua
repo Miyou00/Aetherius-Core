@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.13.0 Universal Observation)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.13.1 Discord Export Diagnostics)
 -- Passive observation for development and testing in experiences you own.
 -- Observed properties are kept separate from documented and unknown behavior.
 -- Executor APIs are optional and executor-specific. Remote calls are never
@@ -19,7 +19,7 @@ local SCRIPT_VERSION = "0.13.1"
 
 -- Personal-use Discord export. Paste a dedicated Discord webhook URL here.
 -- Anyone with access to this script can read and use the webhook URL.
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550477515313782837/EuiOYHStQU29cu9PXj-TFJHpM-_bZPfKwzWaQ_Z5Oeb3s1aHwRNPuI9lk0a29nOj13BW"
+local DISCORD_WEBHOOK_URL = "PASTE_DISCORD_WEBHOOK_URL_HERE"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -1299,8 +1299,14 @@ local function sendJsonToDiscord()
     State.webhookSending = true
     discordExportBtn.Text = "Sending to Discord..."
     task.spawn(function()
+        local stage = "building JSON"
         local ok, result = pcall(function()
             local json = buildExportJson()
+            if type(json) ~= "string" or json == "" then
+                error("JSON builder returned empty or invalid data")
+            end
+
+            stage = "assembling Discord attachment"
             local boundary = "----AetheriusCore" .. HttpService:GenerateGUID(false):gsub("-", "")
             local payloadJson = HttpService:JSONEncode({
                 content = "AetheriusCore JSON export | v" .. SCRIPT_VERSION
@@ -1317,6 +1323,7 @@ local function sendJsonToDiscord()
                 json .. "\r\n",
                 "--" .. boundary .. "--\r\n",
             })
+            stage = "connecting to Discord webhook"
             local response = httpRequest({
                 Url = DISCORD_WEBHOOK_URL,
                 Method = "POST",
@@ -1324,12 +1331,17 @@ local function sendJsonToDiscord()
                 Body = body,
             })
             if type(response) ~= "table" then
-                error("HTTP request returned no response details")
+                error("request function returned " .. type(response) .. ", not a response table")
             end
-            local statusCode = tonumber(response.StatusCode or response.Status or 0) or 0
+
+            local statusCode = tonumber(response.StatusCode or response.Status or response.status_code or 0) or 0
+            if statusCode == 0 and response.Success == true then
+                statusCode = 200
+            end
             if statusCode < 200 or statusCode >= 300 then
-                error("Discord returned HTTP " .. tostring(statusCode)
-                    .. (response.Body and (": " .. string.sub(tostring(response.Body), 1, 240)) or ""))
+                local responseBody = response.Body or response.body or ""
+                error("Discord/HTTP status " .. tostring(statusCode)
+                    .. (responseBody ~= "" and (": " .. string.sub(tostring(responseBody), 1, 300)) or ""))
             end
             return statusCode
         end)
@@ -1341,8 +1353,8 @@ local function sendJsonToDiscord()
             exportText.Text = "Discord export: sent successfully (HTTP " .. tostring(result) .. ")"
             logRuntime("JSON export sent to Discord webhook")
         else
-            exportText.Text = "Discord export: failed - " .. tostring(result)
-            logRuntime("Discord JSON export failed: " .. tostring(result))
+            exportText.Text = "Discord export: failed while " .. stage .. " - " .. tostring(result)
+            logRuntime("Discord JSON export failed while " .. stage .. ": " .. tostring(result))
         end
     end)
 end
