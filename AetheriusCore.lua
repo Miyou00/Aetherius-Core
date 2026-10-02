@@ -19,7 +19,7 @@ local SCRIPT_VERSION = "0.13.0"
 
 -- Personal-use Discord export. Paste a dedicated Discord webhook URL here.
 -- Anyone with access to this script can read and use the webhook URL.
-local DISCORD_WEBHOOK_URL = "PASTE_DISCORD_WEBHOOK_URL_HERE"
+local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550477515313782837/EuiOYHStQU29cu9PXj-TFJHpM-_bZPfKwzWaQ_Z5Oeb3s1aHwRNPuI9lk0a29nOj13BW"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
