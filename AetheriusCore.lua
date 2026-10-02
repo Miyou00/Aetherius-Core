@@ -2104,22 +2104,14 @@ local function WatchInstanceName(instance)
 end
 
 --------------------------------------------------
--- LIVE ATTRIBUTE / VALUE / SELECTED PROPERTY CHANGE WATCHER
+-- LIVE ATTRIBUTE / VALUE CHANGE WATCHER
 --------------------------------------------------
 
 -- Data changes reuse the existing queued structural refresh, which updates
 -- the record and rebuilds dependent classification/relationship summaries.
-local DataWatcherDiagnosticPrinted = false
-
 local function WatchInstanceData(instance)
 	if not instance or DataWatchConnections[instance] then
 		return
-	end
-
-	local showWatcherDiagnostics = not DataWatcherDiagnosticPrinted
-	if showWatcherDiagnostics then
-		DataWatcherDiagnosticPrinted = true
-		print("[AetheriusCore diagnostic] DATA WATCHER ENTERED / " .. tostring(instance.ClassName))
 	end
 
 	local connections = {}
@@ -2141,11 +2133,6 @@ local function WatchInstanceData(instance)
 	end)
 	if success and attributeConnection then
 		table.insert(connections, attributeConnection)
-	elseif not success then
-		warn("[AetheriusCore diagnostic] Attribute listener error: " .. tostring(attributeConnection))
-	end
-	if showWatcherDiagnostics then
-		print("[AetheriusCore diagnostic] ATTRIBUTE LISTENER CHECK COMPLETE")
 	end
 
 	if instance:IsA("ValueBase") then
@@ -2154,51 +2141,10 @@ local function WatchInstanceData(instance)
 		end)
 		if valueSuccess and valueConnection then
 			table.insert(connections, valueConnection)
-		elseif not valueSuccess then
-			warn("[AetheriusCore diagnostic] Value listener error: " .. tostring(valueConnection))
-		end
-	end
-	if showWatcherDiagnostics then
-		print("[AetheriusCore diagnostic] VALUE LISTENER CHECK COMPLETE")
-	end
-
-	-- Watch only relatively stable properties already captured by the record.
-	-- Frequently changing values such as Position, Transparency, and Health are
-	-- intentionally excluded to avoid a continuous refresh queue during gameplay.
-	local propertyNames = {}
-	if instance:IsA("BasePart") then
-		propertyNames = {"Size", "Anchored", "CanCollide"}
-	elseif instance:IsA("Humanoid") then
-		propertyNames = {"MaxHealth", "WalkSpeed", "JumpPower", "HipHeight"}
-	elseif instance:IsA("Tool") then
-		propertyNames = {"Enabled", "ToolTip"}
-	elseif instance:IsA("TextLabel") or instance:IsA("TextButton")
-		or instance:IsA("TextBox") then
-		propertyNames = {"Text", "Visible"}
-	elseif instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
-		propertyNames = {"Image", "Visible"}
-	elseif instance:IsA("ProximityPrompt") then
-		propertyNames = {"ActionText", "ObjectText", "HoldDuration", "MaxActivationDistance", "Enabled"}
-	end
-
-	for _, propertyName in ipairs(propertyNames) do
-		local propertySuccess, propertyConnection = pcall(function()
-			return instance:GetPropertyChangedSignal(propertyName):Connect(queueDataRefresh)
-		end)
-		if propertySuccess and propertyConnection then
-			table.insert(connections, propertyConnection)
-		elseif not propertySuccess then
-			warn("[AetheriusCore diagnostic] Property listener error for "
-				.. tostring(instance.ClassName) .. "." .. tostring(propertyName)
-				.. ": " .. tostring(propertyConnection))
 		end
 	end
 
 	DataWatchConnections[instance] = connections
-	if showWatcherDiagnostics then
-		print("[AetheriusCore diagnostic] PROPERTY LISTENER CHECK COMPLETE / " .. tostring(#connections) .. " CONNECTIONS")
-		print("[AetheriusCore diagnostic] DATA WATCHER COMPLETE")
-	end
 end
 
 local function DisconnectInstanceData(instance)
@@ -3995,6 +3941,28 @@ local function RunClassification(scanGeneration)
 
 	for category in pairs(ClassificationCounts) do
 		ClassificationCounts[category] = localCounts[category] or 0
+	end
+
+	-- A live addition can arrive while family, relevance, or relationship
+	-- data is being committed above. Those stages yield, so the earlier
+	-- PendingClassification drain may already have finished. Recheck the
+	-- queue immediately before marking this pass complete and schedule one
+	-- follow-up pass when new work arrived during those yields.
+	if next(PendingClassification) then
+		ClassificationRunning = false
+		ClassificationScheduled = true
+		ClassificationComplete = false
+		ClassificationProgress = math.min(ClassificationProgress, 99)
+		RequestClassificationUIUpdate()
+
+		local retryGeneration = scanGeneration
+		task.defer(function()
+			task.wait(0.1)
+			if retryGeneration == CurrentScan and ClassificationScheduled and not ClassificationRunning then
+				RunClassification(retryGeneration)
+			end
+		end)
+		return
 	end
 
 	ClassificationRunning = false
