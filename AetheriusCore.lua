@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.0 Stability Diagnostics and Performance Monitoring)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.1 Stability Testing and Diagnostic Review)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.0"
+local SCRIPT_VERSION = "0.12.1"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -48,6 +48,7 @@ local State = {
     scanComplete = false,
     scanErrors = 0,
     scanMetrics = {visited = 0, workspaceSeconds = 0, replicatedSeconds = 0, analysisSeconds = 0, totalSeconds = 0},
+    previousScanSummary = nil, -- Only the last completed scan is retained for comparison.
 }
 env.AetheriusCoreState = State
 
@@ -1185,16 +1186,46 @@ local function scan()
         local elapsed = os.clock() - scanStarted
         State.scanMetrics.totalSeconds = elapsed
         State.scanComplete = true
+
+        -- Compare completed scans only. Deltas are informational: live instances
+        -- can legitimately be added, removed, or changed between scans.
+        local currentScanSummary = {
+            nodes = stats.nodes,
+            remotes = stats.remotes,
+            values = stats.values,
+            tools = stats.tools,
+            models = stats.models,
+            classified = #State.scanEntries,
+            relationships = #State.relationshipEdges,
+            visited = State.scanMetrics.visited,
+        }
+        local comparisonLine = "Previous scan: none (first completed scan)"
+        local previousScanSummary = State.previousScanSummary
+        if previousScanSummary then
+            comparisonLine = string.format(
+                "Change vs prior scan: Nodes %+d | Remotes %+d | Values %+d | Tools %+d | Models %+d | Classified %+d | Relations %+d | Visited %+d",
+                currentScanSummary.nodes - previousScanSummary.nodes,
+                currentScanSummary.remotes - previousScanSummary.remotes,
+                currentScanSummary.values - previousScanSummary.values,
+                currentScanSummary.tools - previousScanSummary.tools,
+                currentScanSummary.models - previousScanSummary.models,
+                currentScanSummary.classified - previousScanSummary.classified,
+                currentScanSummary.relationships - previousScanSummary.relationships,
+                currentScanSummary.visited - previousScanSummary.visited
+            )
+        end
+        State.previousScanSummary = currentScanSummary
+
         local completionStatus = State.scanErrors > 0
             and string.format("Ready with %d warning(s) (%.2fs)", State.scanErrors, elapsed)
             or string.format("Ready (%.2fs)", elapsed)
         updateStatus(completionStatus, State.scanErrors > 0 and "Validation" or "Complete")
         dataText.Text = string.format(
-            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d\nVisited: %d\nPhase time (scan / analysis): %.2fs / %.2fs\nProcessing warnings: %d",
+            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d\nVisited: %d\nPhase time (scan / analysis): %.2fs / %.2fs\nProcessing warnings: %d\n%s",
             elapsed, stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
             #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS, #explorerRows, MAX_EXPLORER_ROWS,
             State.scanMetrics.visited, State.scanMetrics.workspaceSeconds + State.scanMetrics.replicatedSeconds,
-            State.scanMetrics.analysisSeconds, State.scanErrors
+            State.scanMetrics.analysisSeconds, State.scanErrors, comparisonLine
         )
         if #State.scanEntries > MAX_EXPLORER_ROWS then
             exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
@@ -1447,7 +1478,8 @@ installPassiveRemoteLogger()
 scan()
 print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
 
--- v0.12.0 notes: adds per-run visited-instance and scan/relationship phase timing
--- diagnostics to the existing completion summary. Processing limits, yielding,
--- cleanup, generation checks, relationship validation, UI, and passive forwarding
--- behavior remain unchanged. Runtime measurements are diagnostic, not benchmarks.
+-- v0.12.1 notes: adds a compact comparison against the previous completed scan.
+-- Aggregate count deltas are informational, not errors, because live instance
+-- changes are expected. Scan batch sizes, yielding, cleanup, generation checks,
+-- relationship validation, UI workflow, and passive remote forwarding are unchanged.
+-- This diagnostic supports manual stability review; it does not perform runtime tests.
