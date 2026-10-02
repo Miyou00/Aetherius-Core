@@ -1,6 +1,7 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.8 Discord JSON Export)
--- Passive inspection/logging for development and testing in experiences you own.
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.13.0 Universal Observation)
+-- Passive observation for development and testing in experiences you own.
+-- Observed properties are kept separate from documented and unknown behavior.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
 -- ==============================================================================
@@ -11,13 +12,14 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.8"
+local SCRIPT_VERSION = "0.13.0"
 
 -- Personal-use Discord export. Paste a dedicated Discord webhook URL here.
 -- Anyone with access to this script can read and use the webhook URL.
-local DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1550477515313782837/EuiOYHStQU29cu9PXj-TFJHpM-_bZPfKwzWaQ_Z5Oeb3s1aHwRNPuI9lk0a29nOj13BW"
+local DISCORD_WEBHOOK_URL = "PASTE_DISCORD_WEBHOOK_URL_HERE"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -53,6 +55,8 @@ local State = {
     scanErrors = 0,
     scanMetrics = {visited = 0, workspaceSeconds = 0, replicatedSeconds = 0, analysisSeconds = 0, totalSeconds = 0},
     previousScanSummary = nil, -- Only the last completed scan is retained for comparison.
+    instanceIds = setmetatable({}, {__mode = "k"}), -- Stable for each live Instance during this script session.
+    nextInstanceId = 0,
 }
 env.AetheriusCoreState = State
 env.AetheriusCoreHookState = State -- Shared dispatcher target for the one persistent wrapper.
@@ -815,6 +819,96 @@ local function relevanceLabel(score)
     return "Low"
 end
 
+-- IDs disambiguate same-named/same-path Instances without merging them. They are
+-- session-local identifiers, not Roblox persistent IDs.
+local function getInstanceId(instance)
+    local existing = State.instanceIds[instance]
+    if existing then return existing end
+    State.nextInstanceId += 1
+    local id = "AC-" .. tostring(State.nextInstanceId)
+    State.instanceIds[instance] = id
+    return id
+end
+
+-- Capture only directly accessible properties. This helper does not infer gameplay meaning.
+local function serializableObservedValue(value)
+    local valueType = typeof(value)
+    if valueType == "string" or valueType == "number" or valueType == "boolean" then
+        return value
+    end
+    return tostring(value)
+end
+
+local function collectObservedData(instance)
+    local observed = {
+        EvidenceType = "Observed",
+        ObservedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        Scope = instance:IsDescendantOf(Workspace) and "Workspace"
+            or instance:IsDescendantOf(ReplicatedStorage) and "ReplicatedStorage" or "Unknown",
+        Attributes = {},
+        Tags = {},
+    }
+
+    local okAttributes, attributes = pcall(function() return instance:GetAttributes() end)
+    if okAttributes then
+        for key, value in pairs(attributes) do
+            observed.Attributes[key] = serializableObservedValue(value)
+        end
+    end
+
+    local okTags, tags = pcall(function() return CollectionService:GetTags(instance) end)
+    if okTags then observed.Tags = tags end
+
+    if instance:IsA("Model") then
+        local okModel, humanoid, root = pcall(function()
+            local foundHumanoid = instance:FindFirstChildWhichIsA("Humanoid", true)
+            local foundRoot = instance:FindFirstChild("HumanoidRootPart", true)
+            if not foundRoot and instance.PrimaryPart then foundRoot = instance.PrimaryPart end
+            return foundHumanoid, foundRoot
+        end)
+        if okModel then
+            observed.HasHumanoid = humanoid ~= nil
+            observed.HasHumanoidRootPart = root ~= nil and root:IsA("BasePart") or false
+            if humanoid then
+                local okHealth, health, maxHealth = pcall(function()
+                    return humanoid.Health, humanoid.MaxHealth
+                end)
+                if okHealth then
+                    observed.Health = health
+                    observed.MaxHealth = maxHealth
+                    observed.HealthState = health <= 0 and "ObservedZeroOrLess" or "ObservedAboveZero"
+                end
+            end
+            if root and root:IsA("BasePart") then
+                local okPosition, position = pcall(function() return root.Position end)
+                if okPosition then observed.Position = tostring(position) end
+            end
+        end
+    elseif instance:IsA("Humanoid") then
+        local okHealth, health, maxHealth = pcall(function()
+            return instance.Health, instance.MaxHealth
+        end)
+        if okHealth then
+            observed.Health = health
+            observed.MaxHealth = maxHealth
+            observed.HealthState = health <= 0 and "ObservedZeroOrLess" or "ObservedAboveZero"
+        end
+    elseif instance:IsA("BasePart") then
+        local okPosition, position = pcall(function() return instance.Position end)
+        if okPosition then observed.Position = tostring(position) end
+    end
+    return observed
+end
+
+local function attachEvidence(record, instance)
+    record.Evidence = collectObservedData(instance)
+    -- No combat semantics are inferred from names, assets, or object classes.
+    record.Interpretation = {
+        Status = "Unknown",
+        Reason = "No game-specific behavior has been verified from source code.",
+    }
+end
+
 local function processInstanceUnsafe(instance)
     if not State.alive or not inScanScope(instance) or seenInstances[instance] then
         return false
@@ -839,6 +933,7 @@ local function processInstanceUnsafe(instance)
 
     if isRelevant(instance) then
         local record = {
+            InstanceId = getInstanceId(instance),
             Class = instance.ClassName,
             Name = instance.Name,
             Path = fullPath(instance),
@@ -852,6 +947,7 @@ local function processInstanceUnsafe(instance)
         }
         record.RelevanceScore = calculateRelevance(instance, record.Category)
         record.Relevance = relevanceLabel(record.RelevanceScore)
+        attachEvidence(record, instance)
         if isValue then record.Value = tostring(instance.Value) end
         State.analysisRecords[instance] = record
         entryByInstance[instance] = record
@@ -952,6 +1048,7 @@ local function updateHumanoidModel(model)
             local record
             local success, err = pcall(function()
                 record = {
+                    InstanceId = getInstanceId(model),
                     Class = model.ClassName,
                     Name = model.Name,
                     Path = fullPath(model),
@@ -964,6 +1061,7 @@ local function updateHumanoidModel(model)
                     ChildCount = 0,
                 }
                 record.Relevance = relevanceLabel(record.RelevanceScore)
+                attachEvidence(record, model)
                 State.analysisRecords[model] = record
                 entryByInstance[model] = record
                 instanceByRecord[record] = model
@@ -1073,7 +1171,7 @@ local function updateStatus(status, containerName)
         or Color3.fromRGB(70, 205, 125)
     StatusDetailText.Text = "Scan scope: Workspace + ReplicatedStorage\nRemote observer: "
         .. (State.hookInstalled and "Active (passive)" or "Unavailable / initializing")
-        .. "\nLive updates: add/remove, names, ancestor paths, and ValueBase values"
+        .. "\nLive updates: add/remove, names, ancestor paths, and ValueBase values; evidence is observed only"
 
     overviewStatLabels.Objects.Text = tostring(stats.nodes)
     overviewStatLabels.Remotes.Text = tostring(stats.remotes)
@@ -1083,17 +1181,72 @@ local function updateStatus(status, containerName)
 end
 
 local function buildExportJson()
+    local entries = State.scanEntries or {}
+    local sections = {HumanoidModels = {}, Values = {}, Remotes = {}, Tools = {}, Other = {}}
+    local pathCounts = {}
+    local idSet = {}
+    local exportedUnique = 0
+    for _, item in ipairs(entries) do
+        local category = item.Category
+        local target = category == "Humanoid Model" and sections.HumanoidModels
+            or category == "Value" and sections.Values
+            or category == "Remote" and sections.Remotes
+            or category == "Tool" and sections.Tools or sections.Other
+        table.insert(target, item)
+        pathCounts[item.Path or ""] = (pathCounts[item.Path or ""] or 0) + 1
+        local id = item.InstanceId
+        if id and not idSet[id] then
+            idSet[id] = true
+            exportedUnique += 1
+        end
+    end
+
+    local duplicatePathGroups, extraPathRecords = 0, 0
+    for _, count in pairs(pathCounts) do
+        if count > 1 then
+            duplicatePathGroups += 1
+            extraPathRecords += count - 1
+        end
+    end
+
+    local statsSnapshot = {
+        nodes = stats.nodes, remotes = stats.remotes, values = stats.values,
+        tools = stats.tools, models = stats.models, visited = State.scanMetrics.visited,
+        tracked = #entries, exported = #entries, uniqueInstanceIds = exportedUnique,
+        filtered = math.max(0, (stats.remotes + stats.values + stats.tools + stats.models) - #entries),
+        excluded = math.max(0, State.scanMetrics.visited - (stats.remotes + stats.values + stats.tools + stats.models)),
+        scanErrors = State.scanErrors,
+    }
     local payload = {
         Version = SCRIPT_VERSION,
         Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        Stats = stats,
+        Stats = statsSnapshot,
         RelationshipCount = #State.relationshipEdges,
         Relationships = State.relationshipEdges,
-        Entries = {},
+        Entries = entries, -- Retained for compatibility with v0.12.8 consumers.
+        Sections = sections,
+        GameData = {
+            Summary = {
+                evidencePolicy = "Observed properties are direct client-visible observations; no behavior is inferred from names or assets.",
+                documentedBehaviorCount = 0,
+                unknownBehaviorPolicy = "Game-specific behavior remains unknown until confirmed from the experience's own source code.",
+            },
+            Observed = entries,
+            Documented = {},
+            Unknown = {
+                {Topic = "Combat semantics", Status = "Unknown", Reason = "No game-specific source documentation is attached to this observation."},
+                {Topic = "Skill activation and cooldown rules", Status = "Unknown", Reason = "Not inferred from animation assets, object names, or remotes."},
+                {Topic = "Attack telegraphs and intent", Status = "Unknown", Reason = "Requires verified source documentation or a separately validated analysis."},
+            },
+            RuntimeEvents = State.runtimeHistory,
+        },
+        Integrity = {
+            identityScheme = "session-local InstanceId; IDs are not persistent across script sessions",
+            duplicatePathGroups = duplicatePathGroups,
+            extraRecordsWithRepeatedPath = extraPathRecords,
+            duplicateRelationshipTuples = 0, -- Relationship construction is instance-pair deduplicated.
+        },
     }
-    for _, item in ipairs(State.scanEntries or {}) do
-        table.insert(payload.Entries, item)
-    end
     return HttpService:JSONEncode(payload)
 end
 
@@ -1237,6 +1390,8 @@ local function analyzeRelationships(generation, progressLabel)
                             parentState.ChildCount += 1
                             if #nextEdges < MAX_RELATIONSHIPS then
                                 table.insert(nextEdges, {
+                                    ParentId = parentRecord.InstanceId or "",
+                                    ChildId = record.InstanceId or "",
                                     Parent = parentRecord.Path or "",
                                     Child = record.Path or "",
                                     Type = "Relevant ancestor",
