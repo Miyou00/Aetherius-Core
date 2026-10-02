@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.8 Data Accuracy and Validation)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.9 Analysis Reliability and Error Recovery)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.8"
+local SCRIPT_VERSION = "0.11.9"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -46,6 +46,7 @@ local State = {
     analysisRecords = {},
     relationshipEdges = {},
     scanComplete = false,
+    scanErrors = 0,
 }
 env.AetheriusCoreState = State
 
@@ -963,37 +964,38 @@ end
 -- relevant object links only to its nearest relevant ancestor, preventing the
 -- all-pairs relationship explosion that caused duplicate-heavy output.
 local function analyzeRelationships(generation)
-    table.clear(State.relationshipEdges)
-    local edgeKeys = setmetatable({}, {__mode = "k"})
+    -- Build a temporary result and commit only if this generation finishes.
+    -- Initialize counts separately so each parent's count is independent of
+    -- iteration order and a failed refresh cannot publish partial edges.
+    local nextEdges = {}
+    local nextRecordState = {}
     local processed = 0
-    local linked = 0
     local entries = State.scanEntries or {}
 
     for _, record in ipairs(entries) do
+        nextRecordState[record] = {NearestRelevantAncestor = "", ChildCount = 0}
+    end
+
+    for _, record in ipairs(entries) do
         if not State.alive or generation ~= State.scanGeneration then return false end
-        record.NearestRelevantAncestor = ""
-        record.ChildCount = 0
         local instance = instanceByRecord[record]
         if instance then
             local cursor = instance.Parent
             while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
                 local parentRecord = entryByInstance[cursor]
                 if parentRecord and parentRecord ~= record then
-                    local parentPath = parentRecord.Path
-                    local parentInstance = cursor
-                    local childrenForParent = edgeKeys[parentInstance]
-                    if not childrenForParent then
-                        childrenForParent = setmetatable({}, {__mode = "k"})
-                        edgeKeys[parentInstance] = childrenForParent
-                    end
-                    record.NearestRelevantAncestor = parentPath
-                    if not childrenForParent[instance] and linked < MAX_RELATIONSHIPS then
-                        childrenForParent[instance] = true
-                        parentRecord.ChildCount = (parentRecord.ChildCount or 0) + 1
-                        table.insert(State.relationshipEdges, {
-                            Parent = parentPath, Child = record.Path, Type = "Relevant ancestor"
-                        })
-                        linked += 1
+                    local parentState = nextRecordState[parentRecord]
+                    local recordState = nextRecordState[record]
+                    if parentState and recordState then
+                        recordState.NearestRelevantAncestor = parentRecord.Path or ""
+                        if #nextEdges < MAX_RELATIONSHIPS then
+                            parentState.ChildCount += 1
+                            table.insert(nextEdges, {
+                                Parent = parentRecord.Path or "",
+                                Child = record.Path or "",
+                                Type = "Relevant ancestor",
+                            })
+                        end
                     end
                     break
                 end
@@ -1006,7 +1008,46 @@ local function analyzeRelationships(generation)
             task.wait(SCAN_YIELD_SECONDS)
         end
     end
+
+    if not State.alive or generation ~= State.scanGeneration then return false end
+    for record, values in pairs(nextRecordState) do
+        record.NearestRelevantAncestor = values.NearestRelevantAncestor
+        record.ChildCount = values.ChildCount
+    end
+    State.relationshipEdges = nextEdges
     return true
+end
+
+-- Lightweight integrity validation runs once after the initial relationship
+-- pass. It checks record uniqueness/mappings and category totals without
+-- rescanning the full game hierarchy.
+local function validateAnalysisSnapshot()
+    local warnings = 0
+    local counts = {Remote = 0, Value = 0, Tool = 0, ["Humanoid Model"] = 0}
+    local uniqueRecords = {}
+
+    for _, record in ipairs(State.scanEntries or {}) do
+        if uniqueRecords[record] then
+            warnings += 1
+        else
+            uniqueRecords[record] = true
+        end
+        local instance = instanceByRecord[record]
+        if not instance or entryByInstance[instance] ~= record then
+            warnings += 1
+        end
+        if counts[record.Category] ~= nil then
+            counts[record.Category] += 1
+        end
+    end
+
+    if counts.Remote ~= stats.remotes then warnings += 1 end
+    if counts.Value ~= stats.values then warnings += 1 end
+    if counts.Tool ~= stats.tools then warnings += 1 end
+    if counts["Humanoid Model"] ~= stats.models then warnings += 1 end
+    if #State.relationshipEdges > MAX_RELATIONSHIPS then warnings += 1 end
+
+    return warnings
 end
 
 -- Coalesce bursts of live changes into one asynchronous relationship refresh.
@@ -1074,6 +1115,7 @@ local function scan()
     exportText.Text = "Export: scanning..."
     scanStarted = os.clock()
     State.scanComplete = false
+    State.scanErrors = 0
     updateStatus("Scanning", "Workspace")
 
     task.spawn(function()
@@ -1094,7 +1136,13 @@ local function scan()
 
             for index, instance in ipairs(descendants) do
                 if not State.alive or generation ~= State.scanGeneration then return end
-                processInstance(instance)
+                local processOk, processResult = pcall(processInstance, instance)
+                if not processOk then
+                    State.scanErrors += 1
+                    if State.scanErrors <= 10 then
+                        logRuntime("Instance processing failed: " .. tostring(processResult))
+                    end
+                end
 
                 if index % SCAN_BATCH_SIZE == 0 then
                     updateStatus("Scanning", containerName)
@@ -1104,15 +1152,34 @@ local function scan()
         end
 
         if not State.alive or generation ~= State.scanGeneration then return end
-        local analysisOk = analyzeRelationships(generation)
-        if not analysisOk or not State.alive or generation ~= State.scanGeneration then return end
+        local relationshipCallOk, analysisOk = pcall(analyzeRelationships, generation)
+        if not relationshipCallOk then
+            State.scanErrors += 1
+            logRuntime("Initial relationship analysis failed: " .. tostring(analysisOk))
+            analysisOk = false
+        end
+        if not analysisOk or not State.alive or generation ~= State.scanGeneration then
+            if State.alive and generation == State.scanGeneration then
+                updateStatus("Analysis error; rescan recommended", "Validation")
+                exportText.Text = "Analysis incomplete; rescan to retry."
+            end
+            return
+        end
+        local integrityWarnings = validateAnalysisSnapshot()
+        State.scanErrors += integrityWarnings
+        if integrityWarnings > 0 then
+            logRuntime("Snapshot validation found " .. tostring(integrityWarnings) .. " warning(s)")
+        end
         local elapsed = os.clock() - scanStarted
         State.scanComplete = true
-        updateStatus(string.format("Ready (%.2fs)", elapsed), "Complete")
+        local completionStatus = State.scanErrors > 0
+            and string.format("Ready with %d warning(s) (%.2fs)", State.scanErrors, elapsed)
+            or string.format("Ready (%.2fs)", elapsed)
+        updateStatus(completionStatus, State.scanErrors > 0 and "Validation" or "Complete")
         dataText.Text = string.format(
-            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d",
+            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d\nProcessing warnings: %d",
             elapsed, stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
-            #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS, #explorerRows, MAX_EXPLORER_ROWS
+            #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS, #explorerRows, MAX_EXPLORER_ROWS, State.scanErrors
         )
         if #State.scanEntries > MAX_EXPLORER_ROWS then
             exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
