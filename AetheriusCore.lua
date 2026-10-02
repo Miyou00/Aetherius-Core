@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.9 Analysis Reliability and Error Recovery)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.0 Stability Diagnostics and Performance Monitoring)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.9"
+local SCRIPT_VERSION = "0.12.0"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -47,6 +47,7 @@ local State = {
     relationshipEdges = {},
     scanComplete = false,
     scanErrors = 0,
+    scanMetrics = {visited = 0, workspaceSeconds = 0, replicatedSeconds = 0, analysisSeconds = 0, totalSeconds = 0},
 }
 env.AetheriusCoreState = State
 
@@ -1116,6 +1117,7 @@ local function scan()
     scanStarted = os.clock()
     State.scanComplete = false
     State.scanErrors = 0
+    State.scanMetrics = {visited = 0, workspaceSeconds = 0, replicatedSeconds = 0, analysisSeconds = 0, totalSeconds = 0}
     updateStatus("Scanning", "Workspace")
 
     task.spawn(function()
@@ -1127,6 +1129,7 @@ local function scan()
             local containerName, container = pair[1], pair[2]
             if not State.alive or generation ~= State.scanGeneration then return end
             updateStatus("Scanning", containerName)
+            local containerStarted = os.clock()
 
             local ok, descendants = pcall(function() return container:GetDescendants() end)
             if not ok then
@@ -1136,6 +1139,7 @@ local function scan()
 
             for index, instance in ipairs(descendants) do
                 if not State.alive or generation ~= State.scanGeneration then return end
+                State.scanMetrics.visited += 1
                 local processOk, processResult = pcall(processInstance, instance)
                 if not processOk then
                     State.scanErrors += 1
@@ -1149,10 +1153,18 @@ local function scan()
                     task.wait(SCAN_YIELD_SECONDS)
                 end
             end
+            local containerElapsed = os.clock() - containerStarted
+            if containerName == "Workspace" then
+                State.scanMetrics.workspaceSeconds = containerElapsed
+            else
+                State.scanMetrics.replicatedSeconds = containerElapsed
+            end
         end
 
         if not State.alive or generation ~= State.scanGeneration then return end
+        local analysisStarted = os.clock()
         local relationshipCallOk, analysisOk = pcall(analyzeRelationships, generation)
+        State.scanMetrics.analysisSeconds = os.clock() - analysisStarted
         if not relationshipCallOk then
             State.scanErrors += 1
             logRuntime("Initial relationship analysis failed: " .. tostring(analysisOk))
@@ -1171,15 +1183,18 @@ local function scan()
             logRuntime("Snapshot validation found " .. tostring(integrityWarnings) .. " warning(s)")
         end
         local elapsed = os.clock() - scanStarted
+        State.scanMetrics.totalSeconds = elapsed
         State.scanComplete = true
         local completionStatus = State.scanErrors > 0
             and string.format("Ready with %d warning(s) (%.2fs)", State.scanErrors, elapsed)
             or string.format("Ready (%.2fs)", elapsed)
         updateStatus(completionStatus, State.scanErrors > 0 and "Validation" or "Complete")
         dataText.Text = string.format(
-            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d\nProcessing warnings: %d",
+            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d\nVisited: %d\nPhase time (scan / analysis): %.2fs / %.2fs\nProcessing warnings: %d",
             elapsed, stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
-            #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS, #explorerRows, MAX_EXPLORER_ROWS, State.scanErrors
+            #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS, #explorerRows, MAX_EXPLORER_ROWS,
+            State.scanMetrics.visited, State.scanMetrics.workspaceSeconds + State.scanMetrics.replicatedSeconds,
+            State.scanMetrics.analysisSeconds, State.scanErrors
         )
         if #State.scanEntries > MAX_EXPLORER_ROWS then
             exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
@@ -1431,3 +1446,8 @@ end
 installPassiveRemoteLogger()
 scan()
 print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
+
+-- v0.12.0 notes: adds per-run visited-instance and scan/relationship phase timing
+-- diagnostics to the existing completion summary. Processing limits, yielding,
+-- cleanup, generation checks, relationship validation, UI, and passive forwarding
+-- behavior remain unchanged. Runtime measurements are diagnostic, not benchmarks.
