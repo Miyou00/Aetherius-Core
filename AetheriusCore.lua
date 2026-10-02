@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.2 Refined UI)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.4 Compact UI Refinement)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.2"
+local SCRIPT_VERSION = "0.11.4"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -121,6 +121,7 @@ Title.TextColor3 = Color3.fromRGB(235, 238, 245)
 Title.TextSize = 12
 Title.Font = Enum.Font.GothamBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.TextTruncate = Enum.TextTruncate.AtEnd
 Title.Parent = TitleBar
 
 local function makeTitleButton(text, xOffset, color)
@@ -132,7 +133,18 @@ local function makeTitleButton(text, xOffset, color)
     button.TextColor3 = color
     button.TextSize = 13
     button.Font = Enum.Font.GothamBold
+    button.AutoButtonColor = false
     button.Parent = TitleBar
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 6)
+    track(button.MouseEnter:Connect(function()
+        if State.alive then
+            button.BackgroundTransparency = 0
+            button.BackgroundColor3 = Color3.fromRGB(43, 50, 64)
+        end
+    end))
+    track(button.MouseLeave:Connect(function()
+        button.BackgroundTransparency = 1
+    end))
     return button
 end
 
@@ -169,6 +181,18 @@ for i, tabName in ipairs(tabs) do
     btn.Font = Enum.Font.GothamSemibold
     btn.Parent = TabBar
     tabButtons[tabName] = btn
+
+    -- Subtle hover feedback; selected-tab styling remains controlled below.
+    track(btn.MouseEnter:Connect(function()
+        if not State.alive or activeTab == tabName then return end
+        btn.BackgroundColor3 = Color3.fromRGB(28, 34, 45)
+        btn.TextColor3 = Color3.fromRGB(205, 214, 230)
+    end))
+    track(btn.MouseLeave:Connect(function()
+        if not State.alive or activeTab == tabName then return end
+        btn.BackgroundColor3 = Color3.fromRGB(21, 25, 33)
+        btn.TextColor3 = Color3.fromRGB(145, 156, 175)
+    end))
 
     local indicator = Instance.new("Frame")
     indicator.Name = "ActiveIndicator"
@@ -237,7 +261,7 @@ local function makeLabel(parent, text, height, size, color)
     -- Keep a subtle inset border on information cards.
     local labelStroke = Instance.new("UIStroke")
     labelStroke.Color = Color3.fromRGB(43, 51, 65)
-    labelStroke.Transparency = 0.45
+    labelStroke.Transparency = 0.55
     labelStroke.Thickness = 1
     labelStroke.Parent = label
     label.Text = text
