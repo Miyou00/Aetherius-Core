@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.4 Incremental Analysis)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.5 Relevance + Relationships)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,10 +13,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.4"
+local SCRIPT_VERSION = "0.11.5"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
+local MAX_RELATIONSHIPS = 5000
+local ANALYSIS_BATCH_SIZE = 50
 local SCAN_BATCH_SIZE = 100
 local SCAN_YIELD_SECONDS = 0.02
 
@@ -42,6 +44,7 @@ local State = {
     runtimeHistory = {},
     hookInstalled = false,
     analysisRecords = {},
+    relationshipEdges = {},
     scanComplete = false,
 }
 env.AetheriusCoreState = State
@@ -500,6 +503,7 @@ local stats = {nodes = 0, remotes = 0, values = 0, tools = 0, models = 0}
 local explorerRows = {}
 local seenInstances = setmetatable({}, {__mode = "k"})
 local entryByInstance = setmetatable({}, {__mode = "k"})
+local instanceByRecord = setmetatable({}, {__mode = "k"})
 local rowByInstance = setmetatable({}, {__mode = "k"})
 local humanoidModelCounted = setmetatable({}, {__mode = "k"})
 local scanStarted = 0
@@ -538,7 +542,9 @@ local function addExplorerRow(instance, order, category)
     row.Font = Enum.Font.Code
     row.TextXAlignment = Enum.TextXAlignment.Left
     row.TextTruncate = Enum.TextTruncate.AtEnd
-    local info = string.format("  [%s] %s", category or instance.ClassName, fullPath(instance))
+    local record = entryByInstance[instance]
+    local relevanceText = record and string.format(" R:%d", record.RelevanceScore or 0) or ""
+    local info = string.format("  [%s%s] %s", category or instance.ClassName, relevanceText, fullPath(instance))
     if instance:IsA("ValueBase") then
         info ..= " = " .. tostring(instance.Value)
     end
@@ -627,7 +633,40 @@ local function removeExplorerEntry(instance)
         end
         entryByInstance[instance] = nil
     end
+    if entry then instanceByRecord[entry] = nil end
     State.analysisRecords[instance] = nil
+end
+
+-- Relevance is a transparent, rule-based priority for review, not a prediction
+-- of gameplay importance. Scores are intentionally inexpensive to calculate.
+local function calculateRelevance(instance, category)
+    local score = 25
+    if category == "Remote" then
+        score = 90
+    elseif category == "Humanoid Model" then
+        score = 80
+    elseif category == "Tool" then
+        score = 70
+    elseif category == "Value" then
+        score = 60
+    end
+
+    if instance:IsDescendantOf(ReplicatedStorage) then
+        score += 5
+    elseif instance:IsDescendantOf(Workspace) then
+        score += 3
+    end
+    if instance:IsA("ValueBase") then
+        local ok, value = pcall(function() return instance.Value end)
+        if ok and value ~= nil and tostring(value) ~= "" then score += 5 end
+    end
+    return math.clamp(score, 0, 100)
+end
+
+local function relevanceLabel(score)
+    if score >= 85 then return "High" end
+    if score >= 65 then return "Medium" end
+    return "Low"
 end
 
 local function processInstance(instance)
@@ -659,10 +698,18 @@ local function processInstance(instance)
             Path = fullPath(instance),
             Category = classifyRelevant(instance),
             Family = familyName(instance),
+            RelevanceScore = 0,
+            Relevance = "Low",
+            ParentPath = instance.Parent and fullPath(instance.Parent) or "",
+            NearestRelevantAncestor = "",
+            ChildCount = 0,
         }
+        record.RelevanceScore = calculateRelevance(instance, record.Category)
+        record.Relevance = relevanceLabel(record.RelevanceScore)
         if isValue then record.Value = tostring(instance.Value) end
         State.analysisRecords[instance] = record
         entryByInstance[instance] = record
+        instanceByRecord[record] = instance
         table.insert(State.scanEntries, record)
         addExplorerRow(instance, #State.scanEntries, record.Category)
     end
@@ -688,9 +735,16 @@ local function updateHumanoidModel(model)
                 Path = fullPath(model),
                 Category = "Humanoid Model",
                 Family = familyName(model),
+                RelevanceScore = calculateRelevance(model, "Humanoid Model"),
+                Relevance = "Medium",
+                ParentPath = model.Parent and fullPath(model.Parent) or "",
+                NearestRelevantAncestor = "",
+                ChildCount = 0,
             }
+            record.Relevance = relevanceLabel(record.RelevanceScore)
             State.analysisRecords[model] = record
             entryByInstance[model] = record
+            instanceByRecord[record] = model
             table.insert(State.scanEntries, record)
             addExplorerRow(model, #State.scanEntries, record.Category)
         end
@@ -767,6 +821,8 @@ local function exportData()
             Version = SCRIPT_VERSION,
             Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
             Stats = stats,
+            RelationshipCount = #State.relationshipEdges,
+            Relationships = State.relationshipEdges,
             Entries = {},
         }
         for _, instance in ipairs(explorerRows) do
@@ -783,6 +839,56 @@ local function exportData()
         or ("Export: failed - " .. tostring(err))
 end
 
+-- Build a capped, deduplicated hierarchy map after the instance scan. Each
+-- relevant object links only to its nearest relevant ancestor, preventing the
+-- all-pairs relationship explosion that caused duplicate-heavy output.
+local function analyzeRelationships(generation)
+    table.clear(State.relationshipEdges)
+    local edgeKeys = setmetatable({}, {__mode = "k"})
+    local processed = 0
+    local linked = 0
+    local entries = State.scanEntries or {}
+
+    for _, record in ipairs(entries) do
+        if not State.alive or generation ~= State.scanGeneration then return false end
+        record.NearestRelevantAncestor = ""
+        record.ChildCount = 0
+        local instance = instanceByRecord[record]
+        if instance then
+            local cursor = instance.Parent
+            while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
+                local parentRecord = entryByInstance[cursor]
+                if parentRecord and parentRecord ~= record then
+                    local parentPath = parentRecord.Path
+                    local parentInstance = cursor
+                    local childrenForParent = edgeKeys[parentInstance]
+                    if not childrenForParent then
+                        childrenForParent = setmetatable({}, {__mode = "k"})
+                        edgeKeys[parentInstance] = childrenForParent
+                    end
+                    record.NearestRelevantAncestor = parentPath
+                    if not childrenForParent[instance] and linked < MAX_RELATIONSHIPS then
+                        childrenForParent[instance] = true
+                        parentRecord.ChildCount = (parentRecord.ChildCount or 0) + 1
+                        table.insert(State.relationshipEdges, {
+                            Parent = parentPath, Child = record.Path, Type = "Relevant ancestor"
+                        })
+                        linked += 1
+                    end
+                    break
+                end
+                cursor = cursor.Parent
+            end
+        end
+        processed += 1
+        if processed % ANALYSIS_BATCH_SIZE == 0 then
+            updateStatus("Analyzing relationships " .. tostring(processed) .. "/" .. tostring(#entries), "Analysis")
+            task.wait(SCAN_YIELD_SECONDS)
+        end
+    end
+    return true
+end
+
 local function scan()
     if not State.alive then return end
     State.scanGeneration += 1
@@ -791,8 +897,10 @@ local function scan()
     stats.nodes, stats.remotes, stats.values, stats.tools, stats.models = 0, 0, 0, 0, 0
     table.clear(seenInstances)
     table.clear(entryByInstance)
+    table.clear(instanceByRecord)
     table.clear(humanoidModelCounted)
     table.clear(State.analysisRecords)
+    table.clear(State.relationshipEdges)
     State.scanEntries = {}
     clearExplorer()
     exportText.Text = "Export: scanning..."
@@ -828,13 +936,15 @@ local function scan()
         end
 
         if not State.alive or generation ~= State.scanGeneration then return end
+        local analysisOk = analyzeRelationships(generation)
+        if not analysisOk or not State.alive or generation ~= State.scanGeneration then return end
         local elapsed = os.clock() - scanStarted
         State.scanComplete = true
         updateStatus(string.format("Ready (%.2fs)", elapsed), "Complete")
         dataText.Text = string.format(
-            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified records: %d\nExplorer rows: %d / %d",
+            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified: %d\nRelationships: %d / %d\nRelevance: rule-based 0-100\nExplorer rows: %d / %d",
             elapsed, stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
-            #State.scanEntries, #explorerRows, MAX_EXPLORER_ROWS
+            #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS, #explorerRows, MAX_EXPLORER_ROWS
         )
         if #State.scanEntries > MAX_EXPLORER_ROWS then
             exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
