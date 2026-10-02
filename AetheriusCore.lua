@@ -15,7 +15,7 @@ local UserInputService = game:GetService("UserInputService")
 local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.13.0"
+local SCRIPT_VERSION = "0.13.1"
 
 -- Personal-use Discord export. Paste a dedicated Discord webhook URL here.
 -- Anyone with access to this script can read and use the webhook URL.
