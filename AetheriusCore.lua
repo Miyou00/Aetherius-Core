@@ -1,363 +1,572 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.10.4 Ultra-Compact)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.0)
+-- Passive inspection/logging for development and testing in experiences you own.
+-- Executor APIs are optional and executor-specific. Remote calls are never
+-- modified, blocked, replayed, or supplied with altered arguments.
 -- ==============================================================================
+
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+
 local LocalPlayer = Players.LocalPlayer
+local SCRIPT_VERSION = "0.11.0"
+local GUI_NAME = "AetheriusCoreUI"
+local MAX_HISTORY = 30
+local MAX_EXPLORER_ROWS = 250
+local SCAN_BATCH_SIZE = 250
+local SCAN_YIELD_SECONDS = 0.03
 
-print("[AetheriusCore]: Initializing Ultra-Compact Suite...")
+-- Stop a previous UI instance and invalidate its worker before creating another.
+local env = (type(getgenv) == "function" and getgenv()) or _G
+if env.AetheriusCoreState then
+    local previous = env.AetheriusCoreState
+    previous.alive = false
+    if previous.connections then
+        for _, connection in ipairs(previous.connections) do
+            pcall(function() connection:Disconnect() end)
+        end
+    end
+    if previous.gui then pcall(function() previous.gui:Destroy() end) end
+end
 
--- 1. ROBUST UI CONTAINER SETUP
+local State = {
+    alive = true,
+    connections = {},
+    gui = nil,
+    scanGeneration = 0,
+    runtimePaused = false,
+    runtimeHistory = {},
+    hookInstalled = false,
+}
+env.AetheriusCoreState = State
+
+local function track(connection)
+    table.insert(State.connections, connection)
+    return connection
+end
+
+local function safeDisconnectAll()
+    for _, connection in ipairs(State.connections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    table.clear(State.connections)
+end
+
+local function safeCall(fn, ...)
+    if type(fn) ~= "function" then return false, "API unavailable" end
+    return pcall(fn, ...)
+end
+
+-- Executor-specific UI parent selection.
 local rootParent = CoreGui
-if syn and syn.protect_gui then
-    local suc, protected = pcall(syn.protect_gui)
-    if suc and protected then rootParent = protected end
-elseif gethui then
-    local suc, res = pcall(gethui)
-    if suc and res then rootParent = res end
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+    pcall(function() syn.protect_gui(rootParent) end)
+elseif type(gethui) == "function" then
+    local ok, result = pcall(gethui)
+    if ok and result then rootParent = result end
 end
 
-if rootParent:FindFirstChild("AetheriusCoreUI") then
-    rootParent.AetheriusCoreUI:Destroy()
-end
+pcall(function()
+    local existing = rootParent:FindFirstChild(GUI_NAME)
+    if existing then existing:Destroy() end
+end)
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AetheriusCoreUI"
+ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 10000
 ScreenGui.Parent = rootParent
+State.gui = ScreenGui
 
--- 2. MAIN WINDOW UI LAYOUT (Reduced by 30%: 240x185)
 local MainWindow = Instance.new("Frame")
 MainWindow.Name = "MainWindow"
-MainWindow.Size = UDim2.new(0, 240, 0, 185)
-MainWindow.Position = UDim2.new(0.5, -120, 0.5, -92)
-MainWindow.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainWindow.Size = UDim2.fromOffset(300, 230)
+MainWindow.Position = UDim2.new(0.5, -150, 0.5, -115)
+MainWindow.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 MainWindow.BorderSizePixel = 0
-MainWindow.Visible = true 
 MainWindow.Parent = ScreenGui
+Instance.new("UICorner", MainWindow).CornerRadius = UDim.new(0, 7)
 
-local cornerMain = Instance.new("UICorner")
-cornerMain.CornerRadius = UDim.new(0, 6)
-cornerMain.Parent = MainWindow
-
--- Title Bar (20px height)
-local TitleBar = Instance.new("TextLabel")
-TitleBar.Size = UDim2.new(1, 0, 0, 20)
-TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
-TitleBar.TextColor3 = Color3.fromRGB(255, 255, 255)
-TitleBar.Text = " AetheriusCore v0.10.4"
-TitleBar.TextSize = 9
-TitleBar.Font = Enum.Font.GothamBold
-TitleBar.TextXAlignment = Enum.TextXAlignment.Left
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 26)
+TitleBar.BackgroundColor3 = Color3.fromRGB(31, 34, 42)
+TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainWindow
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 7)
 
--- Dragging Functionality for Mobile/PC
-local dragging, dragInput, dragStart, startPos
-TitleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainWindow.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
-    end
-end)
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -68, 1, 0)
+Title.Position = UDim2.fromOffset(8, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [Starting]"
+Title.TextColor3 = Color3.fromRGB(235, 238, 245)
+Title.TextSize = 10
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
 
-TitleBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
+local function makeTitleButton(text, xOffset, color)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.fromOffset(26, 26)
+    button.Position = UDim2.new(1, xOffset, 0, 0)
+    button.BackgroundTransparency = 1
+    button.Text = text
+    button.TextColor3 = color
+    button.TextSize = 13
+    button.Font = Enum.Font.GothamBold
+    button.Parent = TitleBar
+    return button
+end
 
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
+local MinimizeBtn = makeTitleButton("-", -52, Color3.fromRGB(230, 205, 120))
+local CloseBtn = makeTitleButton("×", -26, Color3.fromRGB(235, 115, 115))
 
--- Close Button
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 20, 0, 20)
-CloseBtn.Position = UDim2.new(1, -20, 0, 0)
-CloseBtn.BackgroundTransparency = 1
-CloseBtn.TextColor3 = Color3.fromRGB(200, 80, 80)
-CloseBtn.Text = "X"
-CloseBtn.TextSize = 10
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.Parent = TitleBar
-
-CloseBtn.MouseButton1Click:Connect(function()
-    ScreenGui:Destroy()
-end)
-
--- Minimize Button (-)
-local minimized = false
-local MinimizeBtn = Instance.new("TextButton")
-MinimizeBtn.Size = UDim2.new(0, 20, 0, 20)
-MinimizeBtn.Position = UDim2.new(1, -40, 0, 0)
-MinimizeBtn.BackgroundTransparency = 1
-MinimizeBtn.TextColor3 = Color3.fromRGB(200, 200, 100)
-MinimizeBtn.Text = "-"
-MinimizeBtn.TextSize = 12
-MinimizeBtn.Font = Enum.Font.GothamBold
-MinimizeBtn.Parent = TitleBar
-
-local ContentArea = Instance.new("Frame")
-ContentArea.Size = UDim2.new(1, 0, 1, -40)
-ContentArea.Position = UDim2.new(0, 0, 0, 40)
-ContentArea.BackgroundTransparency = 1
-ContentArea.Parent = MainWindow
-
-MinimizeBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    ContentArea.Visible = not minimized
-    MainWindow.Size = minimized and UDim2.new(0, 240, 0, 20) or UDim2.new(0, 240, 0, 185)
-    MinimizeBtn.Text = minimized and "+" or "-"
-end)
-
--- 4 Streamlined Tabs (20px height)
 local TabBar = Instance.new("Frame")
-TabBar.Size = UDim2.new(1, 0, 0, 20)
-TabBar.Position = UDim2.new(0, 0, 0, 20)
-TabBar.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+TabBar.Position = UDim2.fromOffset(0, 26)
+TabBar.Size = UDim2.new(1, 0, 0, 25)
+TabBar.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainWindow
 
+local ContentArea = Instance.new("Frame")
+ContentArea.Position = UDim2.fromOffset(7, 56)
+ContentArea.Size = UDim2.new(1, -14, 1, -63)
+ContentArea.BackgroundTransparency = 1
+ContentArea.Parent = MainWindow
+
 local tabs = {"Overview", "Explorer", "Runtime", "Data"}
-local panels = {}
+local panels, tabButtons = {}, {}
+local activeTab = "Overview"
 
 for i, tabName in ipairs(tabs) do
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1 / #tabs, 0, 1, 0)
     btn.Position = UDim2.new((i - 1) / #tabs, 0, 0, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
-    btn.TextColor3 = Color3.fromRGB(180, 180, 180)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 27, 34)
+    btn.TextColor3 = Color3.fromRGB(175, 181, 194)
     btn.Text = tabName
     btn.TextSize = 9
     btn.Font = Enum.Font.GothamMedium
     btn.Parent = TabBar
+    tabButtons[tabName] = btn
 
     local panel = Instance.new("ScrollingFrame")
-    panel.Size = UDim2.new(1, -4, 1, -4)
-    panel.Position = UDim2.new(0, 2, 0, 2)
+    panel.Name = tabName .. "Panel"
+    panel.Size = UDim2.fromScale(1, 1)
     panel.BackgroundTransparency = 1
-    panel.Visible = (tabName == "Overview")
-    panel.CanvasSize = UDim2.new(0, 0, 0, 0)
-    panel.ScrollBarThickness = 2
+    panel.BorderSizePixel = 0
+    panel.ScrollBarThickness = 3
+    panel.CanvasSize = UDim2.new()
+    panel.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    panel.Visible = tabName == activeTab
     panel.Parent = ContentArea
-    
-    local uiList = Instance.new("UIListLayout")
-    uiList.SortOrder = Enum.SortOrder.LayoutOrder
-    uiList.Padding = UDim.new(0, 2)
-    uiList.Parent = panel
-    
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 3)
+    layout.Parent = panel
     panels[tabName] = panel
-    
-    btn.MouseButton1Click:Connect(function()
-        local selectedPanel = panel
-        for _, p in pairs(panels) do p.Visible = false end
-        selectedPanel.Visible = true
-    end)
+
+    track(btn.MouseButton1Click:Connect(function()
+        if not State.alive then return end
+        activeTab = tabName
+        for name, p in pairs(panels) do
+            p.Visible = name == activeTab
+            tabButtons[name].BackgroundColor3 = name == activeTab
+                and Color3.fromRGB(48, 53, 66) or Color3.fromRGB(25, 27, 34)
+            tabButtons[name].TextColor3 = name == activeTab
+                and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(175, 181, 194)
+        end
+    end))
 end
 
--- Panel UI Setup (Ultra-Compact elements)
-local overviewText = Instance.new("TextLabel")
-overviewText.Size = UDim2.new(1, 0, 0, 120)
-overviewText.BackgroundTransparency = 1
-overviewText.TextColor3 = Color3.fromRGB(220, 220, 220)
-overviewText.TextSize = 9
-overviewText.Font = Enum.Font.Code
-overviewText.TextXAlignment = Enum.TextXAlignment.Left
-overviewText.TextYAlignment = Enum.TextYAlignment.Top
-overviewText.LayoutOrder = 1
-overviewText.Parent = panels["Overview"]
-overviewText.Text = "Status: Preparing scanner..."
+local function makeLabel(parent, text, height, size, color)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -6, 0, height)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = color or Color3.fromRGB(220, 224, 233)
+    label.TextSize = size or 9
+    label.Font = Enum.Font.Code
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.TextYAlignment = Enum.TextYAlignment.Top
+    label.TextWrapped = true
+    label.Text = text
+    label.Parent = parent
+    return label
+end
 
--- Runtime Tab with Pause Toggle
+local overviewText = makeLabel(panels.Overview, "Status: Preparing scan...", 100, 10)
+local explorerPanel = panels.Explorer
+local runtimePanel = panels.Runtime
+local dataPanel = panels.Data
+
 local runtimePaused = false
-local pauseToggleBtn = Instance.new("TextButton")
-pauseToggleBtn.Size = UDim2.new(1, 0, 0, 20)
-pauseToggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-pauseToggleBtn.TextColor3 = Color3.fromRGB(255, 200, 100)
-pauseToggleBtn.TextSize = 9
-pauseToggleBtn.Font = Enum.Font.GothamBold
-pauseToggleBtn.Text = "⏸ Pause Log Stream"
-pauseToggleBtn.LayoutOrder = 1
-pauseToggleBtn.Parent = panels["Runtime"]
+local runtimeTextRows = {}
+local pauseBtn = Instance.new("TextButton")
+pauseBtn.Size = UDim2.new(1, -6, 0, 23)
+pauseBtn.BackgroundColor3 = Color3.fromRGB(39, 43, 54)
+pauseBtn.TextColor3 = Color3.fromRGB(255, 210, 125)
+pauseBtn.Text = "Pause Log Stream"
+pauseBtn.TextSize = 9
+pauseBtn.Font = Enum.Font.GothamBold
+pauseBtn.LayoutOrder = 0
+pauseBtn.Parent = runtimePanel
 
-pauseToggleBtn.MouseButton1Click:Connect(function()
-    runtimePaused = not runtimePaused
-    pauseToggleBtn.BackgroundColor3 = runtimePaused and Color3.fromRGB(45, 35, 30) or Color3.fromRGB(35, 35, 45)
-    pauseToggleBtn.TextColor3 = runtimePaused and Color3.fromRGB(255, 120, 120) or Color3.fromRGB(255, 200, 100)
-    pauseToggleBtn.Text = runtimePaused and "▶ Resume Log Stream" or "⏸ Pause Log Stream"
-end)
-
-local runtimeText = Instance.new("TextLabel")
-runtimeText.Size = UDim2.new(1, 0, 0, 120)
-runtimeText.BackgroundTransparency = 1
-runtimeText.TextColor3 = Color3.fromRGB(255, 230, 150)
-runtimeText.TextSize = 8
-runtimeText.Font = Enum.Font.Code
-runtimeText.TextXAlignment = Enum.TextXAlignment.Left
-runtimeText.TextYAlignment = Enum.TextYAlignment.Top
-runtimeText.LayoutOrder = 2
-runtimeText.Parent = panels["Runtime"]
-runtimeText.Text = "Runtime Activity Stream Active..."
-
-local exportStatusLabel = Instance.new("TextLabel")
-exportStatusLabel.Size = UDim2.new(1, 0, 0, 35)
-exportStatusLabel.BackgroundTransparency = 1
-exportStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-exportStatusLabel.TextSize = 9
-exportStatusLabel.Font = Enum.Font.Code
-exportStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-exportStatusLabel.LayoutOrder = 1
-exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/\nStatus: Pending"
-exportStatusLabel.Parent = panels["Data"]
-
-local clearLogsBtn = Instance.new("TextButton")
-clearLogsBtn.Size = UDim2.new(1, 0, 0, 24)
-clearLogsBtn.BackgroundColor3 = Color3.fromRGB(45, 30, 30)
-clearLogsBtn.TextColor3 = Color3.fromRGB(255, 150, 150)
-clearLogsBtn.TextSize = 9
-clearLogsBtn.Font = Enum.Font.GothamBold
-clearLogsBtn.Text = "Clear Log History"
-clearLogsBtn.LayoutOrder = 2
-clearLogsBtn.Parent = panels["Data"]
-
-panels["Data"].CanvasSize = UDim2.new(0, 0, 0, 60)
-
--- Helper: Get Clean Path
-local function getFullPath(instance)
-    local name = instance.Name
-    local parent = instance.Parent
-    if parent == Workspace then return 'game:GetService("Workspace").' .. name
-    elseif parent == ReplicatedStorage then return 'game:GetService("ReplicatedStorage").' .. name
-    else return instance:GetFullName() end
+local function renderRuntime()
+    for _, row in ipairs(runtimeTextRows) do
+        pcall(function() row:Destroy() end)
+    end
+    table.clear(runtimeTextRows)
+    for i, entry in ipairs(State.runtimeHistory) do
+        local row = makeLabel(runtimePanel, entry, 25, 8, Color3.fromRGB(245, 220, 155))
+        row.LayoutOrder = i
+        table.insert(runtimeTextRows, row)
+    end
 end
 
--- 3. CORE LOGGING & HOOKING ENGINE
-local runtimeHistory = {}
-local maxHistorySize = 15
-
-local function logRuntimeEvent(entry)
-    if runtimePaused then return end
-    table.insert(runtimeHistory, 1, entry)
-    if #runtimeHistory > maxHistorySize then table.remove(runtimeHistory) end
-    runtimeText.Text = table.concat(runtimeHistory, "\n\n")
+local function logRuntime(message)
+    if not State.alive or State.runtimePaused then return end
+    table.insert(State.runtimeHistory, 1, string.format("[%s] %s", os.date("%H:%M:%S"), tostring(message)))
+    while #State.runtimeHistory > MAX_HISTORY do
+        table.remove(State.runtimeHistory)
+    end
+    if runtimePanel.Visible then renderRuntime() end
 end
 
-clearLogsBtn.MouseButton1Click:Connect(function()
-    table.clear(runtimeHistory)
-    runtimeText.Text = "History cleared."
-end)
+track(pauseBtn.MouseButton1Click:Connect(function()
+    State.runtimePaused = not State.runtimePaused
+    pauseBtn.Text = State.runtimePaused and "Resume Log Stream" or "Pause Log Stream"
+    pauseBtn.TextColor3 = State.runtimePaused
+        and Color3.fromRGB(255, 145, 145) or Color3.fromRGB(255, 210, 125)
+end))
 
--- Universal NameCall Hook
-if hookmetamethod and getnamecallmethod then
-    local oldNameCall
-    oldNameCall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        local args = {...}
-        if (method == "FireServer" or method == "InvokeServer") and self:IsA("Instance") then
-            logRuntimeEvent(string.format("[%s] [%s] %s", os.date("%H:%M:%S"), method, self.Name))
-        end
-        return oldNameCall(self, ...)
-    end)
+local dataText = makeLabel(dataPanel, "Scan data will appear here.", 75, 9)
+local exportText = makeLabel(dataPanel, "Export: waiting", 35, 9, Color3.fromRGB(180, 205, 220))
+local rescanBtn = Instance.new("TextButton")
+rescanBtn.Size = UDim2.new(1, -6, 0, 24)
+rescanBtn.BackgroundColor3 = Color3.fromRGB(42, 54, 72)
+rescanBtn.TextColor3 = Color3.fromRGB(235, 240, 250)
+rescanBtn.Text = "Rescan"
+rescanBtn.TextSize = 9
+rescanBtn.Font = Enum.Font.GothamBold
+rescanBtn.Parent = dataPanel
+
+local clearBtn = Instance.new("TextButton")
+clearBtn.Size = UDim2.new(1, -6, 0, 24)
+clearBtn.BackgroundColor3 = Color3.fromRGB(55, 37, 39)
+clearBtn.TextColor3 = Color3.fromRGB(255, 165, 165)
+clearBtn.Text = "Clear Runtime History"
+clearBtn.TextSize = 9
+clearBtn.Font = Enum.Font.GothamBold
+clearBtn.Parent = dataPanel
+
+track(clearBtn.MouseButton1Click:Connect(function()
+    table.clear(State.runtimeHistory)
+    renderRuntime()
+end))
+
+local stats = {nodes = 0, remotes = 0, values = 0, tools = 0, models = 0}
+local explorerRows = {}
+local scanStarted = 0
+
+local function clearExplorer()
+    for _, row in ipairs(explorerRows) do
+        pcall(function() row:Destroy() end)
+    end
+    table.clear(explorerRows)
 end
 
--- Background Unified Scanner Task with Real-time Feedback
-task.spawn(function()
-    local startTime = tick()
-    local totalInstances = 0
-    local remoteCount = 0
-    local objectCount = 0
-    local valueCount = 0
-    local explorerEntries = 0
+local function fullPath(instance)
+    local ok, result = pcall(function() return instance:GetFullName() end)
+    return ok and result or instance.Name
+end
 
-    TitleBar.Text = " AetheriusCore [Scanning...]"
-    overviewText.Text = "Status: Scanning Workspace..."
+local function isRelevant(instance)
+    return instance:IsA("RemoteEvent")
+        or instance:IsA("RemoteFunction")
+        or instance:IsA("ValueBase")
+        or instance:IsA("Tool")
+        or (instance:IsA("Model") and instance:FindFirstChildWhichIsA("Humanoid", true) ~= nil)
+end
 
-    local function processContainer(containerName, container)
-        TitleBar.Text = string.format(" AetheriusCore [%s...]", containerName)
-        overviewText.Text = string.format("Status: Scanning %s...\nNodes: %d", containerName, totalInstances)
-
-        for _, descendant in ipairs(container:GetDescendants()) do
-            totalInstances = totalInstances + 1
-            if totalInstances % 300 == 0 then 
-                task.wait() 
-                overviewText.Text = string.format("Status: Scanning %s...\nNodes: %d | Remotes: %d", containerName, totalInstances, remoteCount)
-            end
-            
-            local isRemote = descendant:IsA("RemoteEvent") or descendant:IsA("RemoteFunction")
-            local isValue = descendant:IsA("ValueBase")
-            local isKeyObj = descendant:IsA("Tool") or (descendant:IsA("Model") and descendant:FindFirstChild("Humanoid"))
-            
-            if isRemote or isValue or isKeyObj then
-                explorerEntries = explorerEntries + 1
-                if isRemote then remoteCount = remoteCount + 1 end
-                if isValue then valueCount = valueCount + 1 end
-                if isKeyObj then objectCount = objectCount + 1 end
-                
-                local itemBtn = Instance.new("TextButton")
-                itemBtn.Size = UDim2.new(1, 0, 0, 20)
-                itemBtn.BackgroundColor3 = isRemote and Color3.fromRGB(30, 30, 45) or (isValue and Color3.fromRGB(25, 40, 30) or Color3.fromRGB(35, 35, 35))
-                itemBtn.TextColor3 = isRemote and Color3.fromRGB(150, 200, 255) or (isValue and Color3.fromRGB(150, 255, 150) or Color3.fromRGB(220, 220, 150))
-                itemBtn.TextSize = 8
-                itemBtn.Font = Enum.Font.Code
-                itemBtn.LayoutOrder = explorerEntries
-                
-                local displayInfo = isValue and string.format(" [%s] %s=%s", descendant.ClassName, descendant.Name, tostring(descendant.Value)) or string.format(" [%s] %s", descendant.ClassName, descendant.Name)
-                itemBtn.Text = displayInfo
-                itemBtn.TextXAlignment = Enum.TextXAlignment.Left
-                itemBtn.Parent = panels["Explorer"]
-                panels["Explorer"].CanvasSize = UDim2.new(0, 0, 0, explorerEntries * 22)
-                
-                itemBtn.MouseButton1Click:Connect(function()
-                    if setclipboard then
-                        setclipboard(getFullPath(descendant))
-                        itemBtn.Text = " Copied!"
-                        task.wait(1)
-                        itemBtn.Text = displayInfo
-                    end
+local function addExplorerRow(instance, order)
+    if #explorerRows >= MAX_EXPLORER_ROWS then return end
+    local row = Instance.new("TextButton")
+    row.Size = UDim2.new(1, -6, 0, 23)
+    row.BackgroundColor3 = Color3.fromRGB(31, 34, 42)
+    row.BorderSizePixel = 0
+    local isRemote = instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction")
+    row.TextColor3 = isRemote and Color3.fromRGB(150, 195, 255)
+        or Color3.fromRGB(215, 220, 230)
+    row.TextSize = 8
+    row.Font = Enum.Font.Code
+    row.TextXAlignment = Enum.TextXAlignment.Left
+    row.TextTruncate = Enum.TextTruncate.AtEnd
+    local info = string.format("  [%s] %s", instance.ClassName, fullPath(instance))
+    if instance:IsA("ValueBase") then
+        info ..= " = " .. tostring(instance.Value)
+    end
+    row.Text = info
+    row.LayoutOrder = order
+    row.Parent = explorerPanel
+    table.insert(explorerRows, row)
+    track(row.MouseButton1Click:Connect(function()
+        if not State.alive then return end
+        if type(setclipboard) == "function" then
+            local ok = pcall(setclipboard, fullPath(instance))
+            if ok then
+                row.Text = "  Copied path: " .. instance.Name
+                task.delay(1, function()
+                    if State.alive and row.Parent then row.Text = info end
                 end)
+            else
+                row.Text = "  Clipboard unavailable"
+            end
+        else
+            row.Text = "  " .. fullPath(instance)
+        end
+    end))
+end
+
+local function updateStatus(status, containerName)
+    if not State.alive then return end
+    Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [" .. status .. "]"
+    overviewText.Text = string.format(
+        "Status: %s\nContainer: %s\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d",
+        status, containerName or "-", stats.nodes, stats.remotes, stats.values, stats.tools, stats.models
+    )
+end
+
+local function exportData()
+    if type(writefile) ~= "function" then
+        exportText.Text = "Export: writefile unavailable in this executor"
+        return
+    end
+    local ok, err = pcall(function()
+        if type(isfolder) == "function" and type(makefolder) == "function" then
+            if not isfolder("AetheriusCore") then makefolder("AetheriusCore") end
+        elseif type(makefolder) == "function" then
+            pcall(makefolder, "AetheriusCore")
+        end
+        local payload = {
+            Version = SCRIPT_VERSION,
+            Timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            Stats = stats,
+            Entries = {},
+        }
+        for _, instance in ipairs(explorerRows) do
+            if instance and instance.Parent then
+                -- UI rows are not game instances; detailed records are stored separately below.
             end
         end
-    end
-
-    processContainer("Workspace", Workspace)
-    processContainer("ReplicatedStorage", ReplicatedStorage)
-
-    TitleBar.Text = " AetheriusCore [Exporting...]"
-    overviewText.Text = "Status: Writing data files..."
-
-    local elapsedTime = tick() - startTime
-    
-    if writefile then
-        if not isfolder("AetheriusCore") then makefolder("AetheriusCore") end
-        writefile("AetheriusCore/CoreData.json", HttpService:JSONEncode({Remotes = remoteCount, Values = valueCount, Objects = objectCount}))
-        exportStatusLabel.Text = "Export Path: workspace/AetheriusCore/\nStatus: Success!"
-    end
-
-    TitleBar.Text = " AetheriusCore v0.10.4 [Ready]"
-    overviewText.Text = string.format([[
- Scan Complete (%.2fs)
- Nodes: %d | Remotes: %d
- Values: %d | Objects: %d
- Size: Ultra-Compact (240x185)]], elapsedTime, totalInstances, remoteCount, valueCount, objectCount)
-
-    Workspace.ChildAdded:Connect(function(child)
-        logRuntimeEvent(string.format("[%s] [+] %s", os.date("%H:%M:%S"), child.Name))
+        for _, item in ipairs(State.scanEntries or {}) do
+            table.insert(payload.Entries, item)
+        end
+        writefile("AetheriusCore/CoreData.json", HttpService:JSONEncode(payload))
     end)
-    Workspace.ChildRemoved:Connect(function(child)
-        logRuntimeEvent(string.format("[%s] [-] %s", os.date("%H:%M:%S"), child.Name))
-    end)
-end)
+    exportText.Text = ok and "Export: successful (AetheriusCore/CoreData.json)"
+        or ("Export: failed - " .. tostring(err))
+end
 
-print("[AetheriusCore]: Ultra-Compact Suite active.")
+local function scan()
+    if not State.alive then return end
+    State.scanGeneration += 1
+    local generation = State.scanGeneration
+    table.clear(stats)
+    stats.nodes, stats.remotes, stats.values, stats.tools, stats.models = 0, 0, 0, 0, 0
+    State.scanEntries = {}
+    clearExplorer()
+    exportText.Text = "Export: scanning..."
+    scanStarted = os.clock()
+    updateStatus("Scanning", "Workspace")
+
+    task.spawn(function()
+        local containers = {
+            {"Workspace", Workspace},
+            {"ReplicatedStorage", ReplicatedStorage},
+        }
+        local displayCount = 0
+        for _, pair in ipairs(containers) do
+            local containerName, container = pair[1], pair[2]
+            if not State.alive or generation ~= State.scanGeneration then return end
+            updateStatus("Scanning", containerName)
+
+            local ok, descendants = pcall(function() return container:GetDescendants() end)
+            if not ok then
+                logRuntime("Could not read " .. containerName .. ": " .. tostring(descendants))
+                continue
+            end
+
+            for index, instance in ipairs(descendants) do
+                if not State.alive or generation ~= State.scanGeneration then return end
+                stats.nodes += 1
+
+                if instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") then
+                    stats.remotes += 1
+                end
+                if instance:IsA("ValueBase") then stats.values += 1 end
+                if instance:IsA("Tool") then stats.tools += 1 end
+                if instance:IsA("Model") and instance:FindFirstChildWhichIsA("Humanoid", true) then
+                    stats.models += 1
+                end
+
+                if isRelevant(instance) then
+                    displayCount += 1
+                    local record = {
+                        Class = instance.ClassName,
+                        Name = instance.Name,
+                        Path = fullPath(instance),
+                    }
+                    if instance:IsA("ValueBase") then record.Value = tostring(instance.Value) end
+                    table.insert(State.scanEntries, record)
+                    addExplorerRow(instance, displayCount)
+                end
+
+                if index % SCAN_BATCH_SIZE == 0 then
+                    updateStatus("Scanning", containerName)
+                    task.wait(SCAN_YIELD_SECONDS)
+                end
+            end
+        end
+
+        if not State.alive or generation ~= State.scanGeneration then return end
+        local elapsed = os.clock() - scanStarted
+        updateStatus(string.format("Ready (%.2fs)", elapsed), "Complete")
+        dataText.Text = string.format(
+            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nExplorer rows: %d / %d",
+            elapsed, stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
+            #explorerRows, MAX_EXPLORER_ROWS
+        )
+        if displayCount > MAX_EXPLORER_ROWS then
+            exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
+        else
+            exportText.Text = "Scan complete. Export available."
+        end
+        exportData()
+        logRuntime("Scan completed: " .. tostring(stats.nodes) .. " nodes")
+    end)
+end
+
+track(rescanBtn.MouseButton1Click:Connect(scan))
+
+-- Passive remote-call observation. Arguments and return values are intentionally
+-- not inspected or changed. Calls are forwarded unchanged to the prior method.
+-- The hook is process-wide in executor environments and cannot be disconnected;
+-- the callback checks State.alive so a closed UI stops receiving log updates.
+local function installPassiveRemoteLogger()
+    if State.hookInstalled then return end
+    if type(hookmetamethod) ~= "function" or type(getnamecallmethod) ~= "function" then
+        logRuntime("Remote interception APIs unavailable; passive log disabled")
+        return
+    end
+    local oldNamecall
+    local ok, result = pcall(function()
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            if State.alive and (method == "FireServer" or method == "InvokeServer") then
+                local isInstance = typeof(self) == "Instance"
+                if isInstance and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
+                    logRuntime(method .. " -> " .. self:GetFullName())
+                end
+            end
+            return oldNamecall(self, ...)
+        end)
+    end)
+    if ok and type(oldNamecall) == "function" then
+        State.hookInstalled = true
+        logRuntime("Passive remote-call logger installed")
+    else
+        logRuntime("Remote logger setup failed: " .. tostring(result))
+    end
+end
+
+-- Live top-level additions/removals are logged, without duplicating scan rows.
+track(Workspace.ChildAdded:Connect(function(child)
+    logRuntime("[Workspace +] " .. child.Name)
+end))
+track(Workspace.ChildRemoved:Connect(function(child)
+    logRuntime("[Workspace -] " .. child.Name)
+end))
+track(ReplicatedStorage.ChildAdded:Connect(function(child)
+    logRuntime("[ReplicatedStorage +] " .. child.Name)
+end))
+track(ReplicatedStorage.ChildRemoved:Connect(function(child)
+    logRuntime("[ReplicatedStorage -] " .. child.Name)
+end))
+
+-- Dragging supports mouse and touch. Global input connection is tracked for cleanup.
+local dragging, dragStart, startPosition, dragInput
+track(TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPosition = MainWindow.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end))
+track(TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end))
+track(UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput and State.alive then
+        local delta = input.Position - dragStart
+        MainWindow.Position = UDim2.new(
+            startPosition.X.Scale, startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale, startPosition.Y.Offset + delta.Y
+        )
+    end
+end))
+track(UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end))
+
+local minimized = false
+track(MinimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    ContentArea.Visible = not minimized
+    TabBar.Visible = not minimized
+    MainWindow.Size = minimized and UDim2.fromOffset(300, 26) or UDim2.fromOffset(300, 230)
+    MinimizeBtn.Text = minimized and "+" or "-"
+end))
+
+track(CloseBtn.MouseButton1Click:Connect(function()
+    if not State.alive then return end
+    State.alive = false
+    State.scanGeneration += 1 -- invalidate an in-progress scan
+    safeDisconnectAll()
+    pcall(function() ScreenGui:Destroy() end)
+    if env.AetheriusCoreState == State then env.AetheriusCoreState = nil end
+end))
+
+-- Keep the panel within the viewport after initial placement and resolution changes.
+local function constrainWindow()
+    if not State.alive then return end
+    local camera = Workspace.CurrentCamera
+    if not camera then return end
+    local viewport = camera.ViewportSize
+    local size = MainWindow.AbsoluteSize
+    local x = math.clamp(MainWindow.AbsolutePosition.X, 0, math.max(0, viewport.X - size.X))
+    local y = math.clamp(MainWindow.AbsolutePosition.Y, 0, math.max(0, viewport.Y - size.Y))
+    MainWindow.Position = UDim2.fromOffset(x, y)
+end
+if Workspace.CurrentCamera then
+    track(Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(constrainWindow))
+end
+
+installPassiveRemoteLogger()
+scan()
+print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
