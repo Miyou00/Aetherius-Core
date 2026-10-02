@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.2 Refined UI)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.3 Overview UI)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.2"
+local SCRIPT_VERSION = "0.11.3"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -203,7 +203,10 @@ for i, tabName in ipairs(tabs) do
     local layout = Instance.new("UIListLayout")
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.Padding = UDim.new(0, 5)
-    layout.Parent = panel
+    -- Overview uses fixed-position metric tiles; other tabs use vertical lists.
+    if tabName ~= "Overview" then
+        layout.Parent = panel
+    end
     panels[tabName] = panel
     if tabName == activeTab then
         btn.BackgroundColor3 = Color3.fromRGB(38, 42, 54)
@@ -252,7 +255,86 @@ local function makeLabel(parent, text, height, size, color)
     return label
 end
 
-local overviewText = makeLabel(panels.Overview, "Status: Preparing scan...", 100, 10)
+-- Overview summary: compact status header and live metric tiles.
+local overviewPanel = panels.Overview
+
+local overviewStatus = Instance.new("TextLabel")
+overviewStatus.Name = "OverviewStatus"
+overviewStatus.Position = UDim2.fromOffset(0, 0)
+overviewStatus.Size = UDim2.fromOffset(116, 22)
+overviewStatus.BackgroundColor3 = Color3.fromRGB(34, 48, 45)
+overviewStatus.BorderSizePixel = 0
+overviewStatus.Text = "  SCAN STARTING"
+overviewStatus.TextColor3 = Color3.fromRGB(128, 220, 168)
+overviewStatus.TextSize = 9
+overviewStatus.Font = Enum.Font.GothamBold
+overviewStatus.TextXAlignment = Enum.TextXAlignment.Left
+overviewStatus.Parent = overviewPanel
+Instance.new("UICorner", overviewStatus).CornerRadius = UDim.new(0, 6)
+
+local scopeLabel = Instance.new("TextLabel")
+scopeLabel.Name = "ScanScope"
+scopeLabel.Position = UDim2.new(0, 122, 0, 0)
+scopeLabel.Size = UDim2.new(1, -122, 0, 22)
+scopeLabel.BackgroundTransparency = 1
+scopeLabel.Text = "Workspace + ReplicatedStorage"
+scopeLabel.TextColor3 = Color3.fromRGB(145, 154, 172)
+scopeLabel.TextSize = 8
+scopeLabel.Font = Enum.Font.GothamMedium
+scopeLabel.TextXAlignment = Enum.TextXAlignment.Right
+scopeLabel.TextTruncate = Enum.TextTruncate.AtEnd
+scopeLabel.Parent = overviewPanel
+
+local overviewMetrics = {}
+local function makeMetricTile(name, caption, xScale, xOffset, yOffset, wide)
+    local tile = Instance.new("Frame")
+    tile.Name = name .. "Metric"
+    tile.Position = UDim2.new(xScale, xOffset, 0, yOffset)
+    tile.Size = wide and UDim2.new(1, 0, 0, 36) or UDim2.new(0.5, -4, 0, 36)
+    tile.BackgroundColor3 = Color3.fromRGB(27, 31, 42)
+    tile.BorderSizePixel = 0
+    tile.Parent = overviewPanel
+    Instance.new("UICorner", tile).CornerRadius = UDim.new(0, 6)
+
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.fromRGB(52, 59, 75)
+    outline.Transparency = 0.35
+    outline.Thickness = 1
+    outline.Parent = tile
+
+    local value = Instance.new("TextLabel")
+    value.Name = "Value"
+    value.Position = UDim2.fromOffset(9, 2)
+    value.Size = UDim2.new(1, -18, 0, 17)
+    value.BackgroundTransparency = 1
+    value.Text = "0"
+    value.TextColor3 = Color3.fromRGB(235, 240, 250)
+    value.TextSize = 13
+    value.Font = Enum.Font.GothamBold
+    value.TextXAlignment = Enum.TextXAlignment.Left
+    value.Parent = tile
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Caption"
+    title.Position = UDim2.fromOffset(9, 19)
+    title.Size = UDim2.new(1, -18, 0, 13)
+    title.BackgroundTransparency = 1
+    title.Text = caption
+    title.TextColor3 = Color3.fromRGB(145, 154, 172)
+    title.TextSize = 8
+    title.Font = Enum.Font.GothamMedium
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = tile
+
+    overviewMetrics[name] = value
+end
+
+makeMetricTile("Nodes", "NODES SCANNED", 0, 0, 28, false)
+makeMetricTile("Remotes", "REMOTES", 0.5, 4, 28, false)
+makeMetricTile("Values", "VALUE OBJECTS", 0, 0, 67, false)
+makeMetricTile("Tools", "TOOLS", 0.5, 4, 67, false)
+makeMetricTile("Models", "HUMANOID MODELS", 0, 0, 106, true)
+
 local explorerPanel = panels.Explorer
 local runtimePanel = panels.Runtime
 local dataPanel = panels.Data
@@ -412,10 +494,21 @@ end
 local function updateStatus(status, containerName)
     if not State.alive then return end
     Title.Text = "AetheriusCore v" .. SCRIPT_VERSION .. "  [" .. status .. "]"
-    overviewText.Text = string.format(
-        "Status: %s\nContainer: %s\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d",
-        status, containerName or "-", stats.nodes, stats.remotes, stats.values, stats.tools, stats.models
-    )
+
+    local statusLower = string.lower(status)
+    local complete = string.find(statusLower, "ready", 1, true) ~= nil
+    local scanning = string.find(statusLower, "scanning", 1, true) ~= nil
+    overviewStatus.Text = complete and "  SCAN COMPLETE" or (scanning and "  SCANNING" or "  " .. string.upper(status))
+    overviewStatus.TextColor3 = complete and Color3.fromRGB(128, 220, 168)
+        or (scanning and Color3.fromRGB(135, 180, 255) or Color3.fromRGB(230, 195, 120))
+    overviewStatus.BackgroundColor3 = complete and Color3.fromRGB(34, 48, 45)
+        or (scanning and Color3.fromRGB(34, 43, 61) or Color3.fromRGB(49, 44, 34))
+
+    overviewMetrics.Nodes.Text = tostring(stats.nodes)
+    overviewMetrics.Remotes.Text = tostring(stats.remotes)
+    overviewMetrics.Values.Text = tostring(stats.values)
+    overviewMetrics.Tools.Text = tostring(stats.tools)
+    overviewMetrics.Models.Text = tostring(stats.models)
 end
 
 local function exportData()
