@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.5 Live Reclassification and Update Handling)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.6 Data Integrity and Relationship Validation)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.5"
+local SCRIPT_VERSION = "0.12.6"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -653,23 +653,28 @@ local function familyName(instance)
     return rootName
 end
 
--- Refresh paths only when a tracked name/ancestor changes; normal scans do not
--- repeatedly walk every record. One listener is shared per ancestor instance.
+-- Refresh one record after a reparent/name change without walking the entire
+-- snapshot. The all-record variant is reserved for shared ancestor-name changes.
+local function refreshTrackedPath(instance)
+    local record = entryByInstance[instance]
+    if not instance or not record then return false end
+    record.Name = instance.Name
+    record.Path = fullPath(instance)
+    record.Family = familyName(instance)
+    record.ParentPath = instance.Parent and fullPath(instance.Parent) or ""
+    local row = rowByInstance[instance]
+    if row and row.Parent then
+        local relevanceText = string.format(" R:%d", record.RelevanceScore or 0)
+        local valueText = instance:IsA("ValueBase") and (" = " .. tostring(instance.Value)) or ""
+        row.Text = string.format("  [%s%s] %s%s", record.Category or instance.ClassName, relevanceText, record.Path, valueText)
+    end
+    return true
+end
+
 refreshTrackedPaths = function()
     if not State.alive then return end
-    for instance, record in pairs(entryByInstance) do
-        if instance and record then
-            record.Name = instance.Name
-            record.Path = fullPath(instance)
-            record.Family = familyName(instance)
-            record.ParentPath = instance.Parent and fullPath(instance.Parent) or ""
-            local row = rowByInstance[instance]
-            if row and row.Parent then
-                local relevanceText = string.format(" R:%d", record.RelevanceScore or 0)
-                local valueText = instance:IsA("ValueBase") and (" = " .. tostring(instance.Value)) or ""
-                row.Text = string.format("  [%s%s] %s%s", record.Category or instance.ClassName, relevanceText, record.Path, valueText)
-            end
-        end
+    for instance in pairs(entryByInstance) do
+        refreshTrackedPath(instance)
     end
     if State.scanComplete and scheduleRelationshipRefresh then scheduleRelationshipRefresh() end
     queueLiveUiRefresh()
@@ -1010,6 +1015,7 @@ local function analyzeRelationships(generation, progressLabel)
     -- iteration order and a failed refresh cannot publish partial edges.
     local nextEdges = {}
     local nextRecordState = {}
+    local edgePairs = setmetatable({}, {__mode = "k"})
     local processed = 0
     local entries = State.scanEntries or {}
 
@@ -1028,14 +1034,24 @@ local function analyzeRelationships(generation, progressLabel)
                     local parentState = nextRecordState[parentRecord]
                     local recordState = nextRecordState[record]
                     if parentState and recordState then
-                        recordState.NearestRelevantAncestor = parentRecord.Path or ""
-                        parentState.ChildCount += 1
-                        if #nextEdges < MAX_RELATIONSHIPS then
-                            table.insert(nextEdges, {
-                                Parent = parentRecord.Path or "",
-                                Child = record.Path or "",
-                                Type = "Relevant ancestor",
-                            })
+                        local childrenForParent = edgePairs[parentRecord]
+                        if not childrenForParent then
+                            childrenForParent = setmetatable({}, {__mode = "k"})
+                            edgePairs[parentRecord] = childrenForParent
+                        end
+                        -- A record pair can contribute only one edge/count, even if
+                        -- a damaged scanEntries array contains the same record twice.
+                        if not childrenForParent[record] then
+                            childrenForParent[record] = true
+                            recordState.NearestRelevantAncestor = parentRecord.Path or ""
+                            parentState.ChildCount += 1
+                            if #nextEdges < MAX_RELATIONSHIPS then
+                                table.insert(nextEdges, {
+                                    Parent = parentRecord.Path or "",
+                                    Child = record.Path or "",
+                                    Type = "Relevant ancestor",
+                                })
+                            end
                         end
                     end
                     break
@@ -1383,6 +1399,9 @@ end
 local function onDescendantAdded(instance, containerName)
     if not State.alive then return end
     local ok, processed, processError = pcall(processInstance, instance)
+    -- An already-known instance may have moved to a different parent while
+    -- remaining in scan scope. Refresh only its own stored path here.
+    pcall(refreshTrackedPath, instance)
     if not ok or (processed == false and processError ~= nil) then
         logRuntime("Live instance processing failed: " .. tostring(processError or processed))
     elseif processed and isRelevant(instance)
@@ -1410,17 +1429,39 @@ local function onDescendantRemoving(instance, containerName)
         cursor = cursor.Parent
     end
 
-    local removed = unprocessInstance(instance)
-    if removed and isRelevant(instance)
-        and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
-        logRuntime("[" .. containerName .. " -] " .. instance.Name .. " (" .. instance.ClassName .. ")")
-    end
+    -- DescendantRemoving may be raised for a container while its nested objects
+    -- remain represented in the snapshot. Walk its child tree incrementally and
+    -- remove only objects that have actually left both tracked scan roots. This
+    -- preserves records when an object is merely reparented within scan scope.
+    task.spawn(function()
+        local stack = {instance}
+        local processed = 0
+        while #stack > 0 do
+            if not State.alive then return end
+            local current = stack[#stack]
+            stack[#stack] = nil
+            local childrenOk, children = pcall(function()
+                return current:GetChildren()
+            end)
+            if childrenOk then
+                for _, child in ipairs(children) do
+                    table.insert(stack, child)
+                end
+            end
 
-    -- DescendantRemoving can fire while an initial scan has not yet marked the
-    -- departing instance as seen. Recheck affected models regardless, otherwise
-    -- a model can retain a stale Humanoid classification from its earlier state.
-    task.defer(function()
-        if not State.alive then return end
+            if not inScanScope(current) then
+                local removed = unprocessInstance(current)
+                if current == instance and removed and isRelevant(current) then
+                    logRuntime("[" .. containerName .. " -] " .. current.Name .. " (" .. current.ClassName .. ")")
+                end
+            end
+
+            processed += 1
+            if processed % SCAN_BATCH_SIZE == 0 then
+                task.wait(SCAN_YIELD_SECONDS)
+            end
+        end
+
         for _, model in ipairs(affectedModels) do
             pcall(updateHumanoidModel, model)
         end
@@ -1584,5 +1625,9 @@ print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
 -- v0.12.5: rechecks changed Models and their ancestors on live additions, and
 -- always rechecks affected Models after removals even when the removed instance
 -- was not yet in the scan snapshot. Live update callbacks are protected so a
--- transiently removed object cannot interrupt sibling updates. Scan policy,
--- relationship caps, UI structure, and passive remote forwarding are unchanged.
+-- transiently removed object cannot interrupt sibling updates.
+-- v0.12.6: relationship construction guards duplicate record-pair edges/counts;
+-- removal cleanup walks detached subtrees in bounded batches and retains records
+-- for reparenting within scan scope. Individual reparented paths refresh without
+-- traversing the full snapshot. UI, scan scope, caps, and passive remote forwarding
+-- remain unchanged.
