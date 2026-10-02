@@ -136,7 +136,14 @@ local function makeTitleButton(text, xOffset, color)
     return button
 end
 
-local MinimizeBtn = makeTitleButton("−", -56, Color3.fromRGB(230, 205, 120))
+local MinimizeBtn = makeTitleButton("−", -54, Color3.fromRGB(230, 205, 120))
+MinimizeBtn.Size = UDim2.fromOffset(20, 20)
+MinimizeBtn.Position = UDim2.new(1, -54, 0, 7)
+MinimizeBtn.BackgroundTransparency = 0
+MinimizeBtn.BackgroundColor3 = Color3.fromRGB(43, 44, 48)
+MinimizeBtn.AutoButtonColor = true
+Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 5)
+
 local CloseBtn = makeTitleButton("×", -28, Color3.fromRGB(235, 115, 115))
 
 local TabBar = Instance.new("Frame")
