@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.4 Scan Integrity and Lifecycle Fixes)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.5 Live Reclassification and Update Handling)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.4"
+local SCRIPT_VERSION = "0.12.5"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -909,11 +909,14 @@ local function updateHumanoidModel(model)
     end
 end
 
+-- Recheck the changed instance itself (when it is a Model) and every Model
+-- ancestor. Each update is idempotent, and a protected call prevents a model
+-- being removed mid-event from interrupting the rest of live-change handling.
 local function refreshHumanoidAncestors(instance)
-    local cursor = instance.Parent
+    local cursor = instance
     while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
         if cursor:IsA("Model") then
-            updateHumanoidModel(cursor)
+            pcall(updateHumanoidModel, cursor)
         end
         cursor = cursor.Parent
     end
@@ -1379,16 +1382,21 @@ end
 
 local function onDescendantAdded(instance, containerName)
     if not State.alive then return end
-    if processInstance(instance) then
-        if isRelevant(instance) and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
-            logRuntime("[" .. containerName .. " +] " .. instance.Name .. " (" .. instance.ClassName .. ")")
-        end
-        refreshHumanoidAncestors(instance)
-        if State.scanComplete and scheduleRelationshipRefresh then
-            scheduleRelationshipRefresh()
-        end
-        queueLiveUiRefresh()
+    local ok, processed, processError = pcall(processInstance, instance)
+    if not ok or (processed == false and processError ~= nil) then
+        logRuntime("Live instance processing failed: " .. tostring(processError or processed))
+    elseif processed and isRelevant(instance)
+        and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
+        logRuntime("[" .. containerName .. " +] " .. instance.Name .. " (" .. instance.ClassName .. ")")
     end
+
+    -- Do not gate reclassification on processInstance's return value: the
+    -- instance may already be in the snapshot while its Humanoid structure changed.
+    refreshHumanoidAncestors(instance)
+    if State.scanComplete and scheduleRelationshipRefresh then
+        scheduleRelationshipRefresh()
+    end
+    queueLiveUiRefresh()
 end
 
 local function onDescendantRemoving(instance, containerName)
@@ -1402,21 +1410,25 @@ local function onDescendantRemoving(instance, containerName)
         cursor = cursor.Parent
     end
 
-    if unprocessInstance(instance) then
-        if isRelevant(instance) and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
-            logRuntime("[" .. containerName .. " -] " .. instance.Name .. " (" .. instance.ClassName .. ")")
-        end
-        task.defer(function()
-            if not State.alive then return end
-            for _, model in ipairs(affectedModels) do
-                updateHumanoidModel(model)
-            end
-            if State.scanComplete and scheduleRelationshipRefresh then
-                scheduleRelationshipRefresh()
-            end
-            queueLiveUiRefresh()
-        end)
+    local removed = unprocessInstance(instance)
+    if removed and isRelevant(instance)
+        and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
+        logRuntime("[" .. containerName .. " -] " .. instance.Name .. " (" .. instance.ClassName .. ")")
     end
+
+    -- DescendantRemoving can fire while an initial scan has not yet marked the
+    -- departing instance as seen. Recheck affected models regardless, otherwise
+    -- a model can retain a stale Humanoid classification from its earlier state.
+    task.defer(function()
+        if not State.alive then return end
+        for _, model in ipairs(affectedModels) do
+            pcall(updateHumanoidModel, model)
+        end
+        if State.scanComplete and scheduleRelationshipRefresh then
+            scheduleRelationshipRefresh()
+        end
+        queueLiveUiRefresh()
+    end)
 end
 
 track(Workspace.DescendantAdded:Connect(function(instance)
@@ -1569,3 +1581,8 @@ print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
 -- remote forwarding remain unchanged. Manual runtime testing is still required.
 
 -- v0.12.4: incremental child traversal, process rollback, uncapped child counts, live export, and shared hook dispatcher.
+-- v0.12.5: rechecks changed Models and their ancestors on live additions, and
+-- always rechecks affected Models after removals even when the removed instance
+-- was not yet in the scan snapshot. Live update callbacks are protected so a
+-- transiently removed object cannot interrupt sibling updates. Scan policy,
+-- relationship caps, UI structure, and passive remote forwarding are unchanged.
