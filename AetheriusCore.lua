@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.3 Overview UI)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.4 Incremental Analysis)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,12 +13,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.3"
+local SCRIPT_VERSION = "0.11.4"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
-local SCAN_BATCH_SIZE = 250
-local SCAN_YIELD_SECONDS = 0.03
+local SCAN_BATCH_SIZE = 100
+local SCAN_YIELD_SECONDS = 0.02
 
 -- Stop a previous UI instance and invalidate its worker before creating another.
 local env = (type(getgenv) == "function" and getgenv()) or _G
@@ -41,6 +41,8 @@ local State = {
     runtimePaused = false,
     runtimeHistory = {},
     hookInstalled = false,
+    analysisRecords = {},
+    scanComplete = false,
 }
 env.AetheriusCoreState = State
 
@@ -496,6 +498,10 @@ end))
 
 local stats = {nodes = 0, remotes = 0, values = 0, tools = 0, models = 0}
 local explorerRows = {}
+local seenInstances = setmetatable({}, {__mode = "k"})
+local entryByInstance = setmetatable({}, {__mode = "k"})
+local rowByInstance = setmetatable({}, {__mode = "k"})
+local humanoidModelCounted = setmetatable({}, {__mode = "k"})
 local scanStarted = 0
 
 local function clearExplorer()
@@ -503,6 +509,7 @@ local function clearExplorer()
         pcall(function() row:Destroy() end)
     end
     table.clear(explorerRows)
+    table.clear(rowByInstance)
 end
 
 local function fullPath(instance)
@@ -518,7 +525,7 @@ local function isRelevant(instance)
         or (instance:IsA("Model") and instance:FindFirstChildWhichIsA("Humanoid", true) ~= nil)
 end
 
-local function addExplorerRow(instance, order)
+local function addExplorerRow(instance, order, category)
     if #explorerRows >= MAX_EXPLORER_ROWS then return end
     local row = Instance.new("TextButton")
     row.Size = UDim2.new(1, -8, 0, 27)
@@ -531,7 +538,7 @@ local function addExplorerRow(instance, order)
     row.Font = Enum.Font.Code
     row.TextXAlignment = Enum.TextXAlignment.Left
     row.TextTruncate = Enum.TextTruncate.AtEnd
-    local info = string.format("  [%s] %s", instance.ClassName, fullPath(instance))
+    local info = string.format("  [%s] %s", category or instance.ClassName, fullPath(instance))
     if instance:IsA("ValueBase") then
         info ..= " = " .. tostring(instance.Value)
     end
@@ -545,6 +552,7 @@ local function addExplorerRow(instance, order)
     row.LayoutOrder = order
     row.Parent = explorerPanel
     table.insert(explorerRows, row)
+    rowByInstance[instance] = row
     track(row.MouseButton1Click:Connect(function()
         if not State.alive then return end
         if type(setclipboard) == "function" then
@@ -563,6 +571,169 @@ local function addExplorerRow(instance, order)
     end))
 end
 
+-- Classify only relevant instances to keep analysis overhead bounded.
+-- This is descriptive metadata from client-visible instances, not a claim
+-- about server-side behavior or intent.
+local function classifyRelevant(instance)
+    if instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") then
+        return "Remote"
+    elseif instance:IsA("ValueBase") then
+        return "Value"
+    elseif instance:IsA("Tool") then
+        return "Tool"
+    elseif instance:IsA("Model") then
+        return "Humanoid Model"
+    end
+    return "Other"
+end
+
+local function familyName(instance)
+    local cursor = instance
+    local rootName = instance.Name
+    while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
+        rootName = cursor.Name
+        cursor = cursor.Parent
+    end
+    return rootName
+end
+
+local function inScanScope(instance)
+    local ok, result = pcall(function()
+        return instance:IsDescendantOf(Workspace) or instance:IsDescendantOf(ReplicatedStorage)
+    end)
+    return ok and result
+end
+
+local function removeExplorerEntry(instance)
+    local row = rowByInstance[instance]
+    if row then
+        pcall(function() row:Destroy() end)
+        rowByInstance[instance] = nil
+        for i = #explorerRows, 1, -1 do
+            if explorerRows[i] == row then
+                table.remove(explorerRows, i)
+                break
+            end
+        end
+    end
+
+    local entry = entryByInstance[instance]
+    if entry then
+        for i = #State.scanEntries, 1, -1 do
+            if State.scanEntries[i] == entry then
+                table.remove(State.scanEntries, i)
+                break
+            end
+        end
+        entryByInstance[instance] = nil
+    end
+    State.analysisRecords[instance] = nil
+end
+
+local function processInstance(instance)
+    if not State.alive or not inScanScope(instance) or seenInstances[instance] then
+        return false
+    end
+
+    seenInstances[instance] = true
+    stats.nodes += 1
+
+    local isRemote = instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction")
+    local isValue = instance:IsA("ValueBase")
+    local isTool = instance:IsA("Tool")
+    local isHumanoidModel = instance:IsA("Model")
+        and instance:FindFirstChildWhichIsA("Humanoid", true) ~= nil
+
+    if isRemote then stats.remotes += 1 end
+    if isValue then stats.values += 1 end
+    if isTool then stats.tools += 1 end
+    if isHumanoidModel then
+        stats.models += 1
+        humanoidModelCounted[instance] = true
+    end
+
+    if isRelevant(instance) then
+        local record = {
+            Class = instance.ClassName,
+            Name = instance.Name,
+            Path = fullPath(instance),
+            Category = classifyRelevant(instance),
+            Family = familyName(instance),
+        }
+        if isValue then record.Value = tostring(instance.Value) end
+        State.analysisRecords[instance] = record
+        entryByInstance[instance] = record
+        table.insert(State.scanEntries, record)
+        addExplorerRow(instance, #State.scanEntries, record.Category)
+    end
+
+    return true
+end
+
+local function updateHumanoidModel(model)
+    if not seenInstances[model] or not model:IsA("Model") then return end
+    local ok, hasHumanoid = pcall(function()
+        return model:FindFirstChildWhichIsA("Humanoid", true) ~= nil
+    end)
+    if not ok then return end
+
+    local wasCounted = humanoidModelCounted[model] == true
+    if hasHumanoid and not wasCounted then
+        humanoidModelCounted[model] = true
+        stats.models += 1
+        if not entryByInstance[model] then
+            local record = {
+                Class = model.ClassName,
+                Name = model.Name,
+                Path = fullPath(model),
+                Category = "Humanoid Model",
+                Family = familyName(model),
+            }
+            State.analysisRecords[model] = record
+            entryByInstance[model] = record
+            table.insert(State.scanEntries, record)
+            addExplorerRow(model, #State.scanEntries, record.Category)
+        end
+    elseif not hasHumanoid and wasCounted then
+        humanoidModelCounted[model] = nil
+        stats.models = math.max(0, stats.models - 1)
+        removeExplorerEntry(model)
+    end
+end
+
+local function refreshHumanoidAncestors(instance)
+    local cursor = instance.Parent
+    while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
+        if cursor:IsA("Model") then
+            updateHumanoidModel(cursor)
+        end
+        cursor = cursor.Parent
+    end
+end
+
+local function unprocessInstance(instance)
+    if not seenInstances[instance] then return false end
+    seenInstances[instance] = nil
+    stats.nodes = math.max(0, stats.nodes - 1)
+
+    if instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") then
+        stats.remotes = math.max(0, stats.remotes - 1)
+    end
+    if instance:IsA("ValueBase") then
+        stats.values = math.max(0, stats.values - 1)
+    end
+    if instance:IsA("Tool") then
+        stats.tools = math.max(0, stats.tools - 1)
+    end
+    if humanoidModelCounted[instance] then
+        humanoidModelCounted[instance] = nil
+        stats.models = math.max(0, stats.models - 1)
+    end
+
+    removeExplorerEntry(instance)
+    return true
+end
+
 local function updateStatus(status, containerName)
     if not State.alive then return end
     Title.Text = "AetheriusCore v" .. SCRIPT_VERSION
@@ -572,7 +743,7 @@ local function updateStatus(status, containerName)
         or Color3.fromRGB(70, 205, 125)
     StatusDetailText.Text = "Scan scope: Workspace + ReplicatedStorage\nRemote observer: "
         .. (State.hookInstalled and "Active (passive)" or "Unavailable / initializing")
-        .. "\nLive updates: Enabled"
+        .. "\nLive updates: Descendant add/remove"
 
     overviewStatLabels.Objects.Text = tostring(stats.nodes)
     overviewStatLabels.Remotes.Text = tostring(stats.remotes)
@@ -618,10 +789,15 @@ local function scan()
     local generation = State.scanGeneration
     table.clear(stats)
     stats.nodes, stats.remotes, stats.values, stats.tools, stats.models = 0, 0, 0, 0, 0
+    table.clear(seenInstances)
+    table.clear(entryByInstance)
+    table.clear(humanoidModelCounted)
+    table.clear(State.analysisRecords)
     State.scanEntries = {}
     clearExplorer()
     exportText.Text = "Export: scanning..."
     scanStarted = os.clock()
+    State.scanComplete = false
     updateStatus("Scanning", "Workspace")
 
     task.spawn(function()
@@ -629,7 +805,6 @@ local function scan()
             {"Workspace", Workspace},
             {"ReplicatedStorage", ReplicatedStorage},
         }
-        local displayCount = 0
         for _, pair in ipairs(containers) do
             local containerName, container = pair[1], pair[2]
             if not State.alive or generation ~= State.scanGeneration then return end
@@ -643,28 +818,7 @@ local function scan()
 
             for index, instance in ipairs(descendants) do
                 if not State.alive or generation ~= State.scanGeneration then return end
-                stats.nodes += 1
-
-                if instance:IsA("RemoteEvent") or instance:IsA("RemoteFunction") then
-                    stats.remotes += 1
-                end
-                if instance:IsA("ValueBase") then stats.values += 1 end
-                if instance:IsA("Tool") then stats.tools += 1 end
-                if instance:IsA("Model") and instance:FindFirstChildWhichIsA("Humanoid", true) then
-                    stats.models += 1
-                end
-
-                if isRelevant(instance) then
-                    displayCount += 1
-                    local record = {
-                        Class = instance.ClassName,
-                        Name = instance.Name,
-                        Path = fullPath(instance),
-                    }
-                    if instance:IsA("ValueBase") then record.Value = tostring(instance.Value) end
-                    table.insert(State.scanEntries, record)
-                    addExplorerRow(instance, displayCount)
-                end
+                processInstance(instance)
 
                 if index % SCAN_BATCH_SIZE == 0 then
                     updateStatus("Scanning", containerName)
@@ -675,13 +829,14 @@ local function scan()
 
         if not State.alive or generation ~= State.scanGeneration then return end
         local elapsed = os.clock() - scanStarted
+        State.scanComplete = true
         updateStatus(string.format("Ready (%.2fs)", elapsed), "Complete")
         dataText.Text = string.format(
-            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nExplorer rows: %d / %d",
+            "Scan complete: %.2fs\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified records: %d\nExplorer rows: %d / %d",
             elapsed, stats.nodes, stats.remotes, stats.values, stats.tools, stats.models,
-            #explorerRows, MAX_EXPLORER_ROWS
+            #State.scanEntries, #explorerRows, MAX_EXPLORER_ROWS
         )
-        if displayCount > MAX_EXPLORER_ROWS then
+        if #State.scanEntries > MAX_EXPLORER_ROWS then
             exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
         else
             exportText.Text = "Scan complete. Export available."
@@ -724,18 +879,91 @@ local function installPassiveRemoteLogger()
     end
 end
 
--- Live top-level additions/removals are logged, without duplicating scan rows.
+-- Live descendant updates are deduplicated against the initial scan snapshot.
+-- UI refreshes are coalesced to avoid redrawing for every instance in a burst.
+local liveUiRefreshQueued = false
+local function queueLiveUiRefresh()
+    if liveUiRefreshQueued then return end
+    liveUiRefreshQueued = true
+    task.delay(0.1, function()
+        liveUiRefreshQueued = false
+        if not State.alive then return end
+        overviewStatLabels.Objects.Text = tostring(stats.nodes)
+        overviewStatLabels.Remotes.Text = tostring(stats.remotes)
+        overviewStatLabels.Values.Text = tostring(stats.values)
+        overviewStatLabels.Tools.Text = tostring(stats.tools)
+        overviewStatLabels["Humanoid Models"].Text = tostring(stats.models)
+        if State.scanComplete then
+            dataText.Text = string.format(
+                "Live data updated\nNodes: %d\nRemotes: %d\nValues: %d\nTools: %d\nHumanoid Models: %d\nClassified records: %d",
+                stats.nodes, stats.remotes, stats.values, stats.tools, stats.models, #State.scanEntries
+            )
+            exportText.Text = "Live changes detected; rescan to refresh export."
+        end
+    end)
+end
+
+local function onDescendantAdded(instance, containerName)
+    if not State.alive then return end
+    if processInstance(instance) then
+        if isRelevant(instance) and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
+            logRuntime("[" .. containerName .. " +] " .. instance.Name .. " (" .. instance.ClassName .. ")")
+        end
+        refreshHumanoidAncestors(instance)
+        queueLiveUiRefresh()
+    end
+end
+
+local function onDescendantRemoving(instance, containerName)
+    if not State.alive then return end
+    local affectedModels = {}
+    local cursor = instance.Parent
+    while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
+        if cursor:IsA("Model") then
+            table.insert(affectedModels, cursor)
+        end
+        cursor = cursor.Parent
+    end
+
+    if unprocessInstance(instance) then
+        if isRelevant(instance) and instance.Parent ~= Workspace and instance.Parent ~= ReplicatedStorage then
+            logRuntime("[" .. containerName .. " -] " .. instance.Name .. " (" .. instance.ClassName .. ")")
+        end
+        task.defer(function()
+            if not State.alive then return end
+            for _, model in ipairs(affectedModels) do
+                updateHumanoidModel(model)
+            end
+            queueLiveUiRefresh()
+        end)
+    end
+end
+
+track(Workspace.DescendantAdded:Connect(function(instance)
+    onDescendantAdded(instance, "Workspace")
+end))
+track(Workspace.DescendantRemoving:Connect(function(instance)
+    onDescendantRemoving(instance, "Workspace")
+end))
+track(ReplicatedStorage.DescendantAdded:Connect(function(instance)
+    onDescendantAdded(instance, "ReplicatedStorage")
+end))
+track(ReplicatedStorage.DescendantRemoving:Connect(function(instance)
+    onDescendantRemoving(instance, "ReplicatedStorage")
+end))
+
+-- Keep concise top-level lifecycle messages for continuity with prior behavior.
 track(Workspace.ChildAdded:Connect(function(child)
-    logRuntime("[Workspace +] " .. child.Name)
+    logRuntime("[Workspace root +] " .. child.Name)
 end))
 track(Workspace.ChildRemoved:Connect(function(child)
-    logRuntime("[Workspace -] " .. child.Name)
+    logRuntime("[Workspace root -] " .. child.Name)
 end))
 track(ReplicatedStorage.ChildAdded:Connect(function(child)
-    logRuntime("[ReplicatedStorage +] " .. child.Name)
+    logRuntime("[ReplicatedStorage root +] " .. child.Name)
 end))
 track(ReplicatedStorage.ChildRemoved:Connect(function(child)
-    logRuntime("[ReplicatedStorage -] " .. child.Name)
+    logRuntime("[ReplicatedStorage root -] " .. child.Name)
 end))
 
 -- Dragging supports mouse and touch. Global input connection is tracked for cleanup.
