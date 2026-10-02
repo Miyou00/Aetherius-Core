@@ -1,5 +1,6 @@
 --[[
     Client Game Intelligence Analyzer
+    Step 25: Live Data Change Detection
     ---------------------------------
     Phase 1
 
@@ -9,6 +10,7 @@
     • Compact buttons and tabs
     • Incremental instance scanning
     • Attribute scanning
+    • Live attribute and ValueBase change detection
     • CollectionService tag scanning
     • ValueBase scanning
     • Relevant property scanning
@@ -398,6 +400,7 @@ local StructuralRefreshPending = false
 local StructuralRefreshLastStart = 0
 local ScheduleStructuralAnalysisRefresh
 local NameWatchConnections = {}
+local DataWatchConnections = {}
 -- Coalesce duplicate deferred add events for the same instance.
 local PendingDescendantAdded = {}
 local ScanTruncated = false
@@ -2101,6 +2104,60 @@ local function WatchInstanceName(instance)
 end
 
 --------------------------------------------------
+-- LIVE ATTRIBUTE / VALUE CHANGE WATCHER
+--------------------------------------------------
+
+-- Data changes reuse the existing queued structural refresh, which updates
+-- the record and rebuilds dependent classification/relationship summaries.
+local function WatchInstanceData(instance)
+	if not instance or DataWatchConnections[instance] then
+		return
+	end
+
+	local connections = {}
+	local function queueDataRefresh()
+		if not instance.Parent or not instance:IsDescendantOf(workspace)
+			or not ScannedInstances[instance] then
+			return
+		end
+
+		IntelligenceSummary.QueueStructuralChange(instance)
+		StructuralChangeDetected = true
+		if ScheduleStructuralAnalysisRefresh then
+			ScheduleStructuralAnalysisRefresh()
+		end
+	end
+
+	local success, attributeConnection = pcall(function()
+		return instance.AttributeChanged:Connect(queueDataRefresh)
+	end)
+	if success and attributeConnection then
+		table.insert(connections, attributeConnection)
+	end
+
+	if instance:IsA("ValueBase") then
+		local valueSuccess, valueConnection = pcall(function()
+			return instance.Changed:Connect(queueDataRefresh)
+		end)
+		if valueSuccess and valueConnection then
+			table.insert(connections, valueConnection)
+		end
+	end
+
+	DataWatchConnections[instance] = connections
+end
+
+local function DisconnectInstanceData(instance)
+	local connections = DataWatchConnections[instance]
+	if connections then
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		DataWatchConnections[instance] = nil
+	end
+end
+
+--------------------------------------------------
 -- SCAN ONE INSTANCE
 --------------------------------------------------
 
@@ -2116,6 +2173,7 @@ local function ScanInstance(instance)
 
 	if ScannedInstances[instance] then
 		WatchInstanceName(instance)
+		WatchInstanceData(instance)
 		return ScannedInstances[instance]
 	end
 
@@ -2223,6 +2281,7 @@ local function ScanInstance(instance)
 
 	ScannedInstances[instance] = record
 	WatchInstanceName(instance)
+	WatchInstanceData(instance)
 	return record
 end
 
@@ -4141,6 +4200,9 @@ RescanButton.MouseButton1Click:Connect(function()
 		connection:Disconnect()
 		NameWatchConnections[instance] = nil
 	end
+	for instance in pairs(DataWatchConnections) do
+		DisconnectInstanceData(instance)
+	end
 
 	PauseButton.Text = "Pause"
 	UpdateOverallStatus("ANALYZING", 0)
@@ -4309,6 +4371,7 @@ local function RemoveScannedSubtree(root)
 	-- removed subtree, including descendants that have no current scan record.
 	-- This avoids retaining stale references while a hierarchy is detached.
 	for removedInstance in pairs(removalSet) do
+		DisconnectInstanceData(removedInstance)
 		local nameConnection = NameWatchConnections[removedInstance]
 		if nameConnection then
 			nameConnection:Disconnect()
@@ -4589,6 +4652,7 @@ GlobalConnections.DescendantRemoving = workspace.DescendantRemoving:Connect(func
 		humanoidModel = instance:FindFirstAncestorOfClass("Model")
 	end
 
+	DisconnectInstanceData(instance)
 	local nameConnection = NameWatchConnections[instance]
 	if nameConnection then
 		nameConnection:Disconnect()
@@ -4710,6 +4774,9 @@ Gui.Destroying:Connect(function()
 	for instance, connection in pairs(NameWatchConnections) do
 		connection:Disconnect()
 		NameWatchConnections[instance] = nil
+	end
+	for instance in pairs(DataWatchConnections) do
+		DisconnectInstanceData(instance)
 	end
 end)
 
