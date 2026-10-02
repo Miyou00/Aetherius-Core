@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.6 Data Integrity and Relationship Validation)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.7 Ancestor Listener Cleanup and Transactional Model Updates)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.6"
+local SCRIPT_VERSION = "0.12.7"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -549,6 +549,9 @@ local humanoidModelCounted = setmetatable({}, {__mode = "k"})
 local nameChangeConnections = setmetatable({}, {__mode = "k"})
 local valueChangeConnections = setmetatable({}, {__mode = "k"})
 local ancestorNameConnections = setmetatable({}, {__mode = "k"})
+local ancestorNameWatchRefs = setmetatable({}, {__mode = "k"})
+local ancestorWatchByInstance = setmetatable({}, {__mode = "k"})
+local ancestryChangeConnections = setmetatable({}, {__mode = "k"})
 local refreshTrackedPaths
 local scheduleRelationshipRefresh
 local queueLiveUiRefresh
@@ -680,20 +683,50 @@ refreshTrackedPaths = function()
     queueLiveUiRefresh()
 end
 
+local function releaseAncestorNameWatch(instance)
+    local watched = ancestorWatchByInstance[instance]
+    if not watched then return end
+    ancestorWatchByInstance[instance] = nil
+    for _, ancestor in ipairs(watched) do
+        local refs = math.max(0, (ancestorNameWatchRefs[ancestor] or 1) - 1)
+        if refs == 0 then
+            ancestorNameWatchRefs[ancestor] = nil
+            local connection = ancestorNameConnections[ancestor]
+            if connection then pcall(function() connection:Disconnect() end) end
+            ancestorNameConnections[ancestor] = nil
+        else
+            ancestorNameWatchRefs[ancestor] = refs
+        end
+    end
+end
+
 local function registerAncestorNameWatch(instance)
+    -- Rebuild this record's ancestor set so reparenting releases detached
+    -- ancestor listeners and acquires listeners for the new hierarchy.
+    releaseAncestorNameWatch(instance)
+    local watched = {}
     local cursor = instance.Parent
     while cursor and cursor ~= Workspace and cursor ~= ReplicatedStorage do
-        if not ancestorNameConnections[cursor] then
+        local refs = ancestorNameWatchRefs[cursor] or 0
+        if refs > 0 and ancestorNameConnections[cursor] then
+            ancestorNameWatchRefs[cursor] = refs + 1
+            table.insert(watched, cursor)
+        elseif refs == 0 then
             local ancestor = cursor
             local ok, connection = pcall(function()
                 return ancestor:GetPropertyChangedSignal("Name"):Connect(function()
                     refreshTrackedPaths()
                 end)
             end)
-            if ok and connection then ancestorNameConnections[ancestor] = connection end
+            if ok and connection then
+                ancestorNameConnections[ancestor] = connection
+                ancestorNameWatchRefs[ancestor] = 1
+                table.insert(watched, ancestor)
+            end
         end
         cursor = cursor.Parent
     end
+    ancestorWatchByInstance[instance] = watched
 end
 
 local function inScanScope(instance)
@@ -809,6 +842,17 @@ local function processInstanceUnsafe(instance)
             nameChangeConnections[instance] = instance:GetPropertyChangedSignal("Name"):Connect(refreshTrackedPaths)
         end
         registerAncestorNameWatch(instance)
+        if not ancestryChangeConnections[instance] then
+            ancestryChangeConnections[instance] = instance.AncestryChanged:Connect(function()
+                if not State.alive then return end
+                if inScanScope(instance) and entryByInstance[instance] then
+                    registerAncestorNameWatch(instance)
+                    refreshTrackedPath(instance)
+                else
+                    releaseAncestorNameWatch(instance)
+                end
+            end)
+        end
         if isValue and not valueChangeConnections[instance] then
             valueChangeConnections[instance] = instance:GetPropertyChangedSignal("Value"):Connect(function()
                 if not State.alive then return end
@@ -863,7 +907,8 @@ local function processInstance(instance)
         end
     end
     pcall(removeExplorerEntry, instance)
-    for _, connectionMap in ipairs({nameChangeConnections, valueChangeConnections}) do
+    releaseAncestorNameWatch(instance)
+    for _, connectionMap in ipairs({nameChangeConnections, valueChangeConnections, ancestryChangeConnections}) do
         local connection = connectionMap[instance]
         if connection then pcall(function() connection:Disconnect() end) end
         connectionMap[instance] = nil
@@ -873,7 +918,7 @@ local function processInstance(instance)
 end
 
 local function updateHumanoidModel(model)
-    if not seenInstances[model] or not model:IsA("Model") then return end
+    if not seenInstances[model] or not model:IsA("Model") or not inScanScope(model) then return end
     local ok, hasHumanoid = pcall(function()
         return model:FindFirstChildWhichIsA("Humanoid", true) ~= nil
     end)
@@ -881,36 +926,69 @@ local function updateHumanoidModel(model)
 
     local wasCounted = humanoidModelCounted[model] == true
     if hasHumanoid and not wasCounted then
+        -- Build the record/UI first. Commit the count only after all fallible
+        -- operations complete, and undo partial state if any step errors.
+        if not entryByInstance[model] then
+            local record
+            local success, err = pcall(function()
+                record = {
+                    Class = model.ClassName,
+                    Name = model.Name,
+                    Path = fullPath(model),
+                    Category = "Humanoid Model",
+                    Family = familyName(model),
+                    RelevanceScore = calculateRelevance(model, "Humanoid Model"),
+                    Relevance = "Medium",
+                    ParentPath = model.Parent and fullPath(model.Parent) or "",
+                    NearestRelevantAncestor = "",
+                    ChildCount = 0,
+                }
+                record.Relevance = relevanceLabel(record.RelevanceScore)
+                State.analysisRecords[model] = record
+                entryByInstance[model] = record
+                instanceByRecord[record] = model
+                table.insert(State.scanEntries, record)
+                addExplorerRow(model, #State.scanEntries, record.Category)
+                if not nameChangeConnections[model] then
+                    nameChangeConnections[model] = model:GetPropertyChangedSignal("Name"):Connect(refreshTrackedPaths)
+                end
+                registerAncestorNameWatch(model)
+                if not ancestryChangeConnections[model] then
+                    ancestryChangeConnections[model] = model.AncestryChanged:Connect(function()
+                        if not State.alive then return end
+                        if inScanScope(model) and entryByInstance[model] then
+                            registerAncestorNameWatch(model)
+                            refreshTrackedPath(model)
+                        else
+                            releaseAncestorNameWatch(model)
+                        end
+                    end)
+                end
+            end)
+            if not success then
+                releaseAncestorNameWatch(model)
+                removeExplorerEntry(model)
+                for _, connectionMap in ipairs({nameChangeConnections, ancestryChangeConnections}) do
+                    local connection = connectionMap[model]
+                    if connection then pcall(function() connection:Disconnect() end) end
+                    connectionMap[model] = nil
+                end
+                logRuntime("Humanoid model update rolled back: " .. tostring(err))
+                return
+            end
+        end
         humanoidModelCounted[model] = true
         stats.models += 1
-        if not entryByInstance[model] then
-            local record = {
-                Class = model.ClassName,
-                Name = model.Name,
-                Path = fullPath(model),
-                Category = "Humanoid Model",
-                Family = familyName(model),
-                RelevanceScore = calculateRelevance(model, "Humanoid Model"),
-                Relevance = "Medium",
-                ParentPath = model.Parent and fullPath(model.Parent) or "",
-                NearestRelevantAncestor = "",
-                ChildCount = 0,
-            }
-            record.Relevance = relevanceLabel(record.RelevanceScore)
-            State.analysisRecords[model] = record
-            entryByInstance[model] = record
-            instanceByRecord[record] = model
-            table.insert(State.scanEntries, record)
-            addExplorerRow(model, #State.scanEntries, record.Category)
-            if not nameChangeConnections[model] then
-                nameChangeConnections[model] = model:GetPropertyChangedSignal("Name"):Connect(refreshTrackedPaths)
-            end
-            registerAncestorNameWatch(model)
-        end
     elseif not hasHumanoid and wasCounted then
         humanoidModelCounted[model] = nil
         stats.models = math.max(0, stats.models - 1)
         removeExplorerEntry(model)
+        releaseAncestorNameWatch(model)
+        for _, connectionMap in ipairs({nameChangeConnections, ancestryChangeConnections}) do
+            local connection = connectionMap[model]
+            if connection then pcall(function() connection:Disconnect() end) end
+            connectionMap[model] = nil
+        end
     end
 end
 
@@ -956,6 +1034,12 @@ local function unprocessInstance(instance)
         pcall(function() valueConnection:Disconnect() end)
         valueChangeConnections[instance] = nil
     end
+    local ancestryConnection = ancestryChangeConnections[instance]
+    if ancestryConnection then
+        pcall(function() ancestryConnection:Disconnect() end)
+        ancestryChangeConnections[instance] = nil
+    end
+    releaseAncestorNameWatch(instance)
     removeExplorerEntry(instance)
     return true
 end
@@ -1172,6 +1256,12 @@ local function scan()
         pcall(function() connection:Disconnect() end)
         valueChangeConnections[instance] = nil
     end
+    for instance, connection in pairs(ancestryChangeConnections) do
+        pcall(function() connection:Disconnect() end)
+        ancestryChangeConnections[instance] = nil
+    end
+    table.clear(ancestorWatchByInstance)
+    table.clear(ancestorNameWatchRefs)
     for instance, connection in pairs(ancestorNameConnections) do
         pcall(function() connection:Disconnect() end)
         ancestorNameConnections[instance] = nil
@@ -1587,6 +1677,12 @@ track(CloseBtn.MouseButton1Click:Connect(function()
         pcall(function() connection:Disconnect() end)
         valueChangeConnections[instance] = nil
     end
+    for instance, connection in pairs(ancestryChangeConnections) do
+        pcall(function() connection:Disconnect() end)
+        ancestryChangeConnections[instance] = nil
+    end
+    table.clear(ancestorWatchByInstance)
+    table.clear(ancestorNameWatchRefs)
     for instance, connection in pairs(ancestorNameConnections) do
         pcall(function() connection:Disconnect() end)
         ancestorNameConnections[instance] = nil
