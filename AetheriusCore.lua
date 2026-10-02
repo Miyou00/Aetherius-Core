@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.12.1 Stability Testing and Diagnostic Review)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.12.3 Relationship Progress Stability)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.12.1"
+local SCRIPT_VERSION = "0.12.3"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -492,7 +492,7 @@ local function logRuntime(message)
     while #State.runtimeHistory > MAX_HISTORY do
         table.remove(State.runtimeHistory)
     end
-    if runtimePanel.Visible then renderRuntime() end
+    renderRuntime() -- Keep the Runtime tab populated even when it is not active.
 end
 
 track(pauseBtn.MouseButton1Click:Connect(function()
@@ -965,7 +965,7 @@ end
 -- Build a capped, deduplicated hierarchy map after the instance scan. Each
 -- relevant object links only to its nearest relevant ancestor, preventing the
 -- all-pairs relationship explosion that caused duplicate-heavy output.
-local function analyzeRelationships(generation)
+local function analyzeRelationships(generation, progressLabel)
     -- Build a temporary result and commit only if this generation finishes.
     -- Initialize counts separately so each parent's count is independent of
     -- iteration order and a failed refresh cannot publish partial edges.
@@ -1006,7 +1006,7 @@ local function analyzeRelationships(generation)
         end
         processed += 1
         if processed % ANALYSIS_BATCH_SIZE == 0 then
-            updateStatus("Analyzing relationships " .. tostring(processed) .. "/" .. tostring(#entries), "Analysis")
+            updateStatus((progressLabel or "Analyzing relationships") .. " " .. tostring(processed) .. "/" .. tostring(#entries), "Analysis")
             task.wait(SCAN_YIELD_SECONDS)
         end
     end
@@ -1017,6 +1017,7 @@ local function analyzeRelationships(generation)
         record.ChildCount = values.ChildCount
     end
     State.relationshipEdges = nextEdges
+    updateStatus((progressLabel or "Analyzing relationships") .. " complete " .. tostring(processed) .. "/" .. tostring(#entries), "Analysis")
     return true
 end
 
@@ -1052,20 +1053,23 @@ local function validateAnalysisSnapshot()
     return warnings
 end
 
--- Coalesce bursts of live changes into one asynchronous relationship refresh.
--- A pending request is remembered if changes arrive while a refresh is running.
+-- Coalesce live-change bursts and prevent immediate full relationship rebuilds
+-- from restarting the progress display repeatedly during active experiences.
 local relationshipRefreshRunning = false
 local relationshipRefreshRequested = false
+local RELATIONSHIP_REFRESH_COOLDOWN = 1.5
 scheduleRelationshipRefresh = function()
     if not State.alive or not State.scanComplete then return end
     relationshipRefreshRequested = true
     if relationshipRefreshRunning then return end
     relationshipRefreshRunning = true
     task.spawn(function()
+        -- Short debounce merges multiple events from one hierarchy update burst.
+        task.wait(0.35)
         while State.alive and relationshipRefreshRequested do
             relationshipRefreshRequested = false
             local generation = State.scanGeneration
-            local ok, result = pcall(analyzeRelationships, generation)
+            local ok, result = pcall(analyzeRelationships, generation, "Refreshing relationships")
             if not ok then
                 relationshipRefreshRequested = false
                 logRuntime("Relationship refresh failed: " .. tostring(result))
@@ -1079,6 +1083,12 @@ scheduleRelationshipRefresh = function()
                     #State.scanEntries, #State.relationshipEdges, MAX_RELATIONSHIPS
                 )
                 exportText.Text = "Live analysis refreshed; export to save current data."
+                logRuntime("Relationship refresh complete: " .. tostring(#State.relationshipEdges) .. " edges")
+            end
+            -- If changes arrived during this pass, allow a visible completion gap
+            -- before rebuilding again. This avoids back-to-back progress resets.
+            if relationshipRefreshRequested then
+                task.wait(RELATIONSHIP_REFRESH_COOLDOWN)
             end
         end
         relationshipRefreshRunning = false
@@ -1227,6 +1237,7 @@ local function scan()
             State.scanMetrics.visited, State.scanMetrics.workspaceSeconds + State.scanMetrics.replicatedSeconds,
             State.scanMetrics.analysisSeconds, State.scanErrors, comparisonLine
         )
+        logRuntime("Scan diagnostics: " .. comparisonLine)
         if #State.scanEntries > MAX_EXPLORER_ROWS then
             exportText.Text = string.format("Explorer capped at %d rows; export includes %d records.", MAX_EXPLORER_ROWS, #State.scanEntries)
         else
@@ -1478,8 +1489,9 @@ installPassiveRemoteLogger()
 scan()
 print("[AetheriusCore] v" .. SCRIPT_VERSION .. " initialized")
 
--- v0.12.1 notes: adds a compact comparison against the previous completed scan.
--- Aggregate count deltas are informational, not errors, because live instance
--- changes are expected. Scan batch sizes, yielding, cleanup, generation checks,
--- relationship validation, UI workflow, and passive remote forwarding are unchanged.
--- This diagnostic supports manual stability review; it does not perform runtime tests.
+-- v0.12.3 notes: live relationship refreshes are briefly debounced and repeated
+-- passes are separated by a cooldown when changes arrive during analysis. Progress
+-- now labels initial analysis separately from live refresh and explicitly displays
+-- completion. This reduces repeated progress resets under frequent live changes;
+-- scan limits, batch sizes, yielding, relationship rules, cleanup, and passive
+-- remote forwarding remain unchanged. Manual runtime testing is still required.
