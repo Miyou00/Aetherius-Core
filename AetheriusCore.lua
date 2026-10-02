@@ -1,5 +1,5 @@
 -- ==============================================================================
--- AetheriusCore: Client Game Intelligence Analyzer (v0.11.5 Relevance + Relationships)
+-- AetheriusCore: Client Game Intelligence Analyzer (v0.11.6 Button UI Refinement)
 -- Passive inspection/logging for development and testing in experiences you own.
 -- Executor APIs are optional and executor-specific. Remote calls are never
 -- modified, blocked, replayed, or supplied with altered arguments.
@@ -13,7 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
-local SCRIPT_VERSION = "0.11.5"
+local SCRIPT_VERSION = "0.11.6"
 local GUI_NAME = "AetheriusCoreUI"
 local MAX_HISTORY = 30
 local MAX_EXPLORER_ROWS = 250
@@ -59,6 +59,29 @@ local function safeDisconnectAll()
         pcall(function() connection:Disconnect() end)
     end
     table.clear(State.connections)
+end
+
+-- Consistent, lightweight hover/press feedback for interactive controls.
+local function styleButton(button, getBaseColor, hoverColor, pressedColor)
+    button.AutoButtonColor = false
+    button.Selectable = true
+    local function setColor(color)
+        if button and button.Parent and color then
+            button.BackgroundColor3 = color
+        end
+    end
+    button.MouseEnter:Connect(function()
+        setColor(hoverColor)
+    end)
+    button.MouseLeave:Connect(function()
+        setColor(getBaseColor())
+    end)
+    button.MouseButton1Down:Connect(function()
+        setColor(pressedColor or hoverColor)
+    end)
+    button.MouseButton1Up:Connect(function()
+        setColor(hoverColor)
+    end)
 end
 
 local function safeCall(fn, ...)
@@ -144,12 +167,15 @@ local StatusExpand = Instance.new("TextButton")
 StatusExpand.Name = "StatusExpand"
 StatusExpand.Size = UDim2.fromOffset(20, 20)
 StatusExpand.Position = UDim2.new(1, -26, 0.5, -10)
-StatusExpand.BackgroundTransparency = 1
+StatusExpand.BackgroundTransparency = 0
+StatusExpand.BackgroundColor3 = Color3.fromRGB(43, 46, 58)
 StatusExpand.Text = "▼"
 StatusExpand.TextColor3 = Color3.fromRGB(155, 162, 178)
 StatusExpand.TextSize = 9
 StatusExpand.Font = Enum.Font.GothamBold
 StatusExpand.Parent = StatusHeader
+Instance.new("UICorner", StatusExpand).CornerRadius = UDim.new(0, 5)
+styleButton(StatusExpand, function() return Color3.fromRGB(43, 46, 58) end, Color3.fromRGB(58, 64, 82), Color3.fromRGB(38, 43, 57))
 
 local StatusDetails = Instance.new("Frame")
 StatusDetails.Name = "StatusDetails"
@@ -197,6 +223,7 @@ local function makeTitleButton(text, xOffset, color)
     button.TextColor3 = color
     button.TextSize = 13
     button.Font = Enum.Font.GothamBold
+    button.ZIndex = 3
     button.Parent = TitleBar
     return button
 end
@@ -206,12 +233,17 @@ MinimizeBtn.Size = UDim2.fromOffset(20, 20)
 MinimizeBtn.Position = UDim2.new(1, -55, 0, 6)
 MinimizeBtn.BackgroundTransparency = 0
 MinimizeBtn.BackgroundColor3 = Color3.fromRGB(43, 44, 48)
-MinimizeBtn.AutoButtonColor = true
+MinimizeBtn.AutoButtonColor = false
 Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 5)
+styleButton(MinimizeBtn, function() return Color3.fromRGB(43, 44, 48) end, Color3.fromRGB(65, 67, 75), Color3.fromRGB(34, 36, 42))
 
 local CloseBtn = makeTitleButton("×", -25, Color3.fromRGB(235, 115, 115))
 CloseBtn.Size = UDim2.fromOffset(24, 24)
 CloseBtn.Position = UDim2.new(1, -29, 0, 4)
+CloseBtn.BackgroundTransparency = 0
+CloseBtn.BackgroundColor3 = Color3.fromRGB(53, 37, 43)
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
+styleButton(CloseBtn, function() return Color3.fromRGB(53, 37, 43) end, Color3.fromRGB(100, 48, 57), Color3.fromRGB(72, 35, 43))
 
 local TabBar = Instance.new("Frame")
 TabBar.Position = UDim2.fromOffset(8, 65)
@@ -250,10 +282,14 @@ for i, tabName in ipairs(tabs) do
     btn.AutoButtonColor = false
     btn.TextColor3 = Color3.fromRGB(155, 162, 178)
     btn.Text = tabName
-    btn.TextSize = 11
+    btn.TextSize = 10
     btn.Font = Enum.Font.GothamSemibold
     btn.Parent = TabBar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
     tabButtons[tabName] = btn
+    styleButton(btn, function()
+        return tabName == activeTab and Color3.fromRGB(38, 42, 54) or Color3.fromRGB(32, 35, 46)
+    end, Color3.fromRGB(47, 53, 69), Color3.fromRGB(34, 39, 52))
 
     local indicator = Instance.new("Frame")
     indicator.Name = "ActiveIndicator"
@@ -429,6 +465,7 @@ pauseBtn.LayoutOrder = 0
 pauseBtn.Parent = runtimePanel
 pauseBtn.AutoButtonColor = false
 Instance.new("UICorner", pauseBtn).CornerRadius = UDim.new(0, 7)
+styleButton(pauseBtn, function() return Color3.fromRGB(38, 42, 54) end, Color3.fromRGB(49, 55, 71), Color3.fromRGB(31, 35, 46))
 local pauseStroke = Instance.new("UIStroke")
 pauseStroke.Color = Color3.fromRGB(55, 59, 73)
 pauseStroke.Transparency = 0.35
@@ -474,6 +511,7 @@ rescanBtn.Font = Enum.Font.GothamBold
 rescanBtn.Parent = dataPanel
 rescanBtn.AutoButtonColor = false
 Instance.new("UICorner", rescanBtn).CornerRadius = UDim.new(0, 7)
+styleButton(rescanBtn, function() return Color3.fromRGB(52, 103, 210) end, Color3.fromRGB(67, 123, 235), Color3.fromRGB(40, 83, 174))
 local rescanStroke = Instance.new("UIStroke")
 rescanStroke.Color = Color3.fromRGB(70, 130, 255)
 rescanStroke.Transparency = 0.35
@@ -489,6 +527,7 @@ clearBtn.Font = Enum.Font.GothamBold
 clearBtn.Parent = dataPanel
 clearBtn.AutoButtonColor = false
 Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 7)
+styleButton(clearBtn, function() return Color3.fromRGB(65, 39, 45) end, Color3.fromRGB(91, 48, 57), Color3.fromRGB(51, 31, 37))
 local clearStroke = Instance.new("UIStroke")
 clearStroke.Color = Color3.fromRGB(117, 66, 75)
 clearStroke.Transparency = 0.4
@@ -557,6 +596,8 @@ local function addExplorerRow(instance, order, category)
     rowStroke.Parent = row
     row.LayoutOrder = order
     row.Parent = explorerPanel
+    styleButton(row, function() return Color3.fromRGB(32, 35, 46) end,
+        Color3.fromRGB(43, 49, 64), Color3.fromRGB(36, 42, 56))
     table.insert(explorerRows, row)
     rowByInstance[instance] = row
     track(row.MouseButton1Click:Connect(function()
